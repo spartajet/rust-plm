@@ -1,4 +1,5 @@
-//! e2e（计划 Task4）：oneshot 打真 router + 真 PG18 库。覆盖 spec DoD#2 全链与 Review Focus #2/#3/#5。
+//! e2e（计划 Task4）：oneshot 打真 router + 真 PG18 库。
+//! 覆盖 spec DoD#2 全链、骨架 Review Focus #2/#3/#5、鉴权钉子（本增量 Review Focus #1/#5）。
 
 mod common;
 
@@ -16,6 +17,41 @@ fn get(uri: &str) -> axum::http::Request<axum::body::Body> {
         .unwrap()
 }
 
+fn get_authed(uri: &str, token: &str) -> axum::http::Request<axum::body::Body> {
+    axum::http::Request::builder()
+        .method("GET")
+        .uri(uri)
+        .header("authorization", format!("Bearer {token}"))
+        .body(axum::body::Body::empty())
+        .unwrap()
+}
+
+fn post_docs_multipart(
+    token: Option<&str>,
+    obj_no: &str,
+    attrs: &str,
+    filename: Option<&str>,
+    bytes: Vec<u8>,
+) -> axum::http::Request<axum::body::Body> {
+    let (ct, body) = multipart_body(
+        "XyZ123",
+        &[
+            ("obj_no", None, obj_no.as_bytes().to_vec()),
+            ("attrs", None, attrs.as_bytes().to_vec()),
+            ("file", filename, bytes),
+        ],
+    );
+    let mut b = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/v1/docs")
+        .header("content-type", ct)
+        .header("content-length", body.len());
+    if let Some(t) = token {
+        b = b.header("authorization", format!("Bearer {t}"));
+    }
+    b.body(axum::body::Body::from(body)).unwrap()
+}
+
 #[tokio::test]
 async fn healthz_ok() {
     let ctx = TestCtx::setup("health", 1024 * 1024).await;
@@ -27,63 +63,123 @@ async fn healthz_ok() {
 }
 
 #[tokio::test]
+async fn docs_require_bearer() {
+    // 鉴权钉子（Review Focus #1/#5）：无 token / 非 Bearer / refresh 冒充 access → 401
+    let ctx = TestCtx::setup("authz", 1024 * 1024).await;
+
+    // 无 token
+    let (status, body, _) = send(&ctx.app, get("/api/v1/docs")).await;
+    assert_eq!(status, 401);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["code"], "MDL-SEC-UNAUTHORIZED");
+
+    // 非 Bearer 前缀
+    let req = axum::http::Request::builder()
+        .method("GET")
+        .uri("/api/v1/docs")
+        .header("authorization", "abc123")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let (status, _, _) = send(&ctx.app, req).await;
+    assert_eq!(status, 401);
+
+    // login 拿两个 token
+    let login_req = |pw: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/login")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(format!(
+                r#"{{"username":"admin","password":"{pw}"}}"#
+            )))
+            .unwrap()
+    };
+    let (status, body, _) = send(&ctx.app, login_req("wrong-pw")).await;
+    assert_eq!(status, 401);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["code"], "MDL-SEC-BAD-CREDENTIALS");
+
+    let (status, body, _) = send(&ctx.app, login_req(common::TEST_ADMIN_PASSWORD)).await;
+    assert_eq!(status, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let access = v["access_token"].as_str().unwrap().to_string();
+    let refresh = v["refresh_token"].as_str().unwrap().to_string();
+
+    // refresh 冒充 access → 401
+    let (status, _, _) = send(&ctx.app, get_authed("/api/v1/docs", &refresh)).await;
+    assert_eq!(status, 401);
+
+    // 正确 access → 200；refresh 接口轮换出新 access
+    let (status, _, _) = send(&ctx.app, get_authed("/api/v1/docs", &access)).await;
+    assert_eq!(status, 200);
+    let rr = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/refresh")
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(format!(
+            r#"{{"refresh_token":"{refresh}"}}"#
+        )))
+        .unwrap();
+    let (status, body, _) = send(&ctx.app, rr).await;
+    assert_eq!(status, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(!v["access_token"].as_str().unwrap().is_empty());
+
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
 async fn full_flow_upload_list_detail_download() {
     let ctx = TestCtx::setup("flow", 1024 * 1024).await;
-    let boundary = "XyZ123";
+    let token = ctx.login().await;
 
     // POST：中文名文件（Review Focus #2）
-    let (ct, body) = multipart_body(
-        boundary,
-        &[
-            ("obj_no", None, b"DWG-E2E-1".to_vec()),
-            (
-                "attrs",
-                None,
-                br#"{"name":"Bracket","material":"Q235"}"#.to_vec(),
-            ),
-            ("file", Some("零件.dwg"), FILE.to_vec()),
-        ],
-    );
-    let req = axum::http::Request::builder()
-        .method("POST")
-        .uri("/api/v1/docs")
-        .header("content-type", ct)
-        .header("content-length", body.len())
-        .body(axum::body::Body::from(body))
-        .unwrap();
-    let (status, body, trace) = send(&ctx.app, req).await;
+    let (status, body, trace) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&token),
+            "DWG-E2E-1",
+            r#"{"name":"Bracket","material":"Q235"}"#,
+            Some("零件.dwg"),
+            FILE.to_vec(),
+        ),
+    )
+    .await;
     assert_eq!(status, 201, "body={}", String::from_utf8_lossy(&body));
     assert!(trace.is_some(), "必须有 X-Trace-Id");
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(v["object"]["obj_no"], "DWG-E2E-1");
     assert_eq!(v["file"]["name"], "零件.dwg");
-    let hash = v["file"]["hash"].as_str().unwrap().to_string();
-    assert_eq!(hash.len(), 64);
+    assert_eq!(v["file"]["hash"].as_str().unwrap().len(), 64);
 
     // LIST：GIN 路径（material 非提升列）
-    let (status, body, _) = send(&ctx.app, get("/api/v1/docs?filter[material]=Q235")).await;
+    let (status, body) = ctx
+        .get_authed("/api/v1/docs?filter[material]=Q235", &token)
+        .await;
     assert_eq!(status, 200);
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(v["total"], 1);
     assert_eq!(v["items"][0]["obj_no"], "DWG-E2E-1");
 
     // DETAIL
-    let (status, body, _) = send(&ctx.app, get("/api/v1/docs/DWG-E2E-1")).await;
+    let (status, body) = ctx.get_authed("/api/v1/docs/DWG-E2E-1", &token).await;
     assert_eq!(status, 200);
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(v["object"]["attrs"]["name"], "Bracket");
 
     // DOWNLOAD：字节相等 + Content-Disposition 原名（UTF-8 编码）
-    let (status, body, headers_trace) = send(&ctx.app, get("/api/v1/docs/DWG-E2E-1/file")).await;
+    let (status, body) = ctx.get_authed("/api/v1/docs/DWG-E2E-1/file", &token).await;
     assert_eq!(status, 200);
     assert_eq!(&body[..], FILE);
-    let _ = headers_trace;
     let _ = Cursor::new(&body[..]);
 
-    // 下载响应头在 send 里被丢弃，补一次带头的请求验证 disposition
-    let req = get("/api/v1/docs/DWG-E2E-1/file");
     use tower::ServiceExt;
-    let res = ctx.app.clone().oneshot(req).await.unwrap();
+    let res = ctx
+        .app
+        .clone()
+        .oneshot(get_authed("/api/v1/docs/DWG-E2E-1/file", &token))
+        .await
+        .unwrap();
     let cd = res
         .headers()
         .get("content-disposition")
@@ -91,7 +187,6 @@ async fn full_flow_upload_list_detail_download() {
         .to_str()
         .unwrap();
     assert!(cd.contains("filename*"), "必须含 RFC5987 filename*：{cd}");
-    let _ = hash;
 
     ctx.cleanup().await;
 }
@@ -99,27 +194,30 @@ async fn full_flow_upload_list_detail_download() {
 #[tokio::test]
 async fn duplicate_conflict_with_trace() {
     let ctx = TestCtx::setup("dup", 1024 * 1024).await;
-    let boundary = "XyZ123";
-    let mk = || {
-        let (ct, body) = multipart_body(
-            boundary,
-            &[
-                ("obj_no", None, b"DWG-DUP-9".to_vec()),
-                ("attrs", None, br#"{"name":"N"}"#.to_vec()),
-                ("file", Some("a.dwg"), FILE.to_vec()),
-            ],
-        );
-        axum::http::Request::builder()
-            .method("POST")
-            .uri("/api/v1/docs")
-            .header("content-type", ct)
-            .header("content-length", body.len())
-            .body(axum::body::Body::from(body))
-            .unwrap()
-    };
-    let (s1, _, _) = send(&ctx.app, mk()).await;
+    let token = ctx.login().await;
+    let (s1, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&token),
+            "DWG-DUP-9",
+            r#"{"name":"N"}"#,
+            Some("a.dwg"),
+            FILE.to_vec(),
+        ),
+    )
+    .await;
     assert_eq!(s1, 201);
-    let (s2, body, trace) = send(&ctx.app, mk()).await;
+    let (s2, body, trace) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&token),
+            "DWG-DUP-9",
+            r#"{"name":"N"}"#,
+            Some("a.dwg"),
+            FILE.to_vec(),
+        ),
+    )
+    .await;
     assert_eq!(s2, 409);
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(v["code"], "MDL-OBJ-NO-DUPLICATE");
@@ -131,23 +229,19 @@ async fn duplicate_conflict_with_trace() {
 #[tokio::test]
 async fn oversize_rejected_no_201() {
     let ctx = TestCtx::setup("big", 1024).await; // 限额 1KB
+    let token = ctx.login().await;
     let big = vec![b'x'; 4096];
-    let (ct, body) = multipart_body(
-        "XyZ123",
-        &[
-            ("obj_no", None, b"DWG-BIG-1".to_vec()),
-            ("attrs", None, br#"{"name":"N"}"#.to_vec()),
-            ("file", Some("big.dwg"), big),
-        ],
-    );
-    let req = axum::http::Request::builder()
-        .method("POST")
-        .uri("/api/v1/docs")
-        .header("content-type", ct)
-        .header("content-length", body.len())
-        .body(axum::body::Body::from(body))
-        .unwrap();
-    let (status, _, _) = send(&ctx.app, req).await;
+    let (status, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&token),
+            "DWG-BIG-1",
+            r#"{"name":"N"}"#,
+            Some("big.dwg"),
+            big,
+        ),
+    )
+    .await;
     assert!(
         status == 400 || status == 413,
         "超限必须 400/413（Review Focus #5），得到 {status}"
@@ -158,7 +252,6 @@ async fn oversize_rejected_no_201() {
 #[tokio::test]
 async fn healthz_degraded_when_db_unreachable() {
     // 终审 I1：DB ping 失败必须 503/degraded，而非恒 200。
-    // registry 从真迁移库加载（缓存热），业务/ping 池换成坏库——模拟"DB 宕机但进程活着"
     use common::migrated;
     let (_good_pool, registry, _root, db, admin_url) = migrated("degraded").await;
     let bad: PgPool = sqlx::postgres::PgPoolOptions::new()

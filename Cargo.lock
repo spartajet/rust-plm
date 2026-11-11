@@ -1357,6 +1357,7 @@ dependencies = [
  "bytes",
  "core-files",
  "core-model",
+ "core-sec",
  "figment",
  "http-body-util",
  "mod-doc",

@@ -65,6 +65,10 @@ pub async fn refresh(
     Extension(tid): Extension<crate::error::TraceId>,
     Json(req): Json<RefreshReq>,
 ) -> Result<Json<TokenPairDto>, ApiError> {
-    let p = st.sec.refresh(&req.refresh_token).await.map_err(|e| ApiError::new(e, &tid.0))?;
+    let p = st
+        .sec
+        .refresh(&req.refresh_token)
+        .await
+        .map_err(|e| ApiError::new(e, &tid.0))?;
     Ok(Json(dto(p)))
 }

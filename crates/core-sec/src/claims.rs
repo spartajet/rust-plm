@@ -17,10 +17,20 @@ pub struct Claims {
 
 impl Claims {
     pub fn access(sub: Uuid, username: &str, now: i64) -> Self {
-        Self { sub, username: username.into(), typ: "access".into(), exp: now + ACCESS_TTL_SECS }
+        Self {
+            sub,
+            username: username.into(),
+            typ: "access".into(),
+            exp: now + ACCESS_TTL_SECS,
+        }
     }
 
     pub fn refresh(sub: Uuid, username: &str, now: i64) -> Self {
-        Self { sub, username: username.into(), typ: "refresh".into(), exp: now + REFRESH_TTL_SECS }
+        Self {
+            sub,
+            username: username.into(),
+            typ: "refresh".into(),
+            exp: now + REFRESH_TTL_SECS,
+        }
     }
 }

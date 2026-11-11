@@ -17,6 +17,10 @@ struct Config {
     data_dir: PathBuf,
     http_port: u16,
     max_upload: u64,
+    /// 缺省：随机生成并打印一次
+    admin_password: Option<String>,
+    /// 缺省：data_dir/jwt.key 文件复用
+    jwt_secret: Option<String>,
 }
 
 impl Config {
@@ -26,6 +30,8 @@ impl Config {
             data_dir: PathBuf::from("data"),
             http_port: 8080,
             max_upload: 200 * 1024 * 1024,
+            admin_password: None,
+            jwt_secret: None,
         };
         let cfg: Config = Figment::from(Serialized::defaults(defaults))
             .merge(Env::raw().map(|k| k.as_str().to_lowercase().into()))
@@ -65,6 +71,22 @@ async fn main() -> Result<()> {
         .run(&pool)
         .await
         .context("mod-doc 迁移失败")?;
+    core_sec::migrator()
+        .run(&pool)
+        .await
+        .context("core-sec 迁移失败")?;
+
+    // JWT 密钥策略（env → data_dir/jwt.key → 随机）+ admin 引导（仅缺省时创建）
+    let jwt_secret = core_sec::resolve_secret(cfg.jwt_secret.as_deref(), &cfg.data_dir)
+        .context("解析 JWT 密钥失败")?;
+    let sec = Arc::new(core_sec::SecService::new(pool.clone(), jwt_secret));
+    let boot = sec
+        .ensure_admin(cfg.admin_password.clone())
+        .await
+        .context("admin 引导失败")?;
+    if let Some(pw) = &boot.printed_password {
+        tracing::warn!("已创建内置 admin 账号，初始密码（仅此一次打印，请立即修改）：{pw}");
+    }
 
     let registry = core_model::TypeRegistry::load(pool.clone()).await?;
     let watcher = registry.spawn_watcher(5).await;
@@ -88,6 +110,7 @@ async fn main() -> Result<()> {
         service,
         pool,
         max_upload: cfg.max_upload,
+        sec,
     };
     let app = api_gateway::router(state);
 

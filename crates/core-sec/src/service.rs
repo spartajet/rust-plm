@@ -2,7 +2,9 @@
 //! `PLM_JWT_SECRET` 优先 → `<data_dir>/jwt.key` 读/建 → 兜底随机（WARN，重启失效）。
 
 use crate::claims::{Claims, ACCESS_TTL_SECS, REFRESH_TTL_SECS};
-use argon2::password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use argon2::password_hash::{
+    rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
+};
 use argon2::Argon2;
 use core_model::{DomainError, Result};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation};
@@ -23,8 +25,6 @@ pub struct AdminBootInfo {
     /// 仅首建且密码随机生成时返回（调用方打印一次到日志）
     pub printed_password: Option<String>,
 }
-
-
 
 /// 已认证用户（中间件注入 Extension）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,7 +68,10 @@ fn random_password() -> String {
     // 24 位无歧义字符集
     const CHARS: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
     let bytes = rand_bytes();
-    bytes.iter().map(|b| CHARS[(*b as usize) % CHARS.len()] as char).collect()
+    bytes
+        .iter()
+        .map(|b| CHARS[(*b as usize) % CHARS.len()] as char)
+        .collect()
 }
 
 pub struct SecService {
@@ -86,7 +89,10 @@ impl SecService {
     /// 密钥策略单测入口：显式 key_dir
     pub fn new_with_key_dir(env_secret: Option<&str>, key_dir: &Path) -> Self {
         let secret = resolve_secret(env_secret, key_dir).expect("jwt.key 读写失败");
-        Self::build(PgPool::connect_lazy("postgres://invalid").expect("lazy pool"), secret)
+        Self::build(
+            PgPool::connect_lazy("postgres://invalid").expect("lazy pool"),
+            secret,
+        )
     }
 
     fn build(pool: PgPool, secret: String) -> Self {
@@ -99,8 +105,8 @@ impl SecService {
 
     /// 签发任意 claims（内部 + 测试 + 后续密码重置令牌）
     pub fn sign_claims(&self, c: &Claims) -> Result<String> {
-        Ok(jsonwebtoken::encode(&Header::default(), c, &self.enc)
-            .map_err(|e| DomainError::Internal(format!("jwt encode: {e}")))?)
+        jsonwebtoken::encode(&Header::default(), c, &self.enc)
+            .map_err(|e| DomainError::Internal(format!("jwt encode: {e}")))
     }
 
     fn decode(&self, token: &str) -> Result<Claims> {
@@ -132,13 +138,15 @@ impl SecService {
 
     /// 首启引导：仅当无 admin 时创建；已存在则不改密码（Review Focus #4）
     pub async fn ensure_admin(&self, password: Option<String>) -> Result<AdminBootInfo> {
-        let exists: Option<uuid::Uuid> = sqlx::query_scalar(
-            "SELECT id FROM sec_user WHERE lower(username) = 'admin' LIMIT 1",
-        )
-        .fetch_optional(&self.pool)
-        .await?;
+        let exists: Option<uuid::Uuid> =
+            sqlx::query_scalar("SELECT id FROM sec_user WHERE lower(username) = 'admin' LIMIT 1")
+                .fetch_optional(&self.pool)
+                .await?;
         if exists.is_some() {
-            return Ok(AdminBootInfo { created: false, printed_password: None });
+            return Ok(AdminBootInfo {
+                created: false,
+                printed_password: None,
+            });
         }
         let (plain, printed) = match password.filter(|p| !p.trim().is_empty()) {
             Some(p) => (p, None),
@@ -152,7 +160,10 @@ impl SecService {
             .bind(hash)
             .execute(&self.pool)
             .await?;
-        Ok(AdminBootInfo { created: true, printed_password: printed })
+        Ok(AdminBootInfo {
+            created: true,
+            printed_password: printed,
+        })
     }
 
     pub async fn login(&self, username: &str, password: &str) -> Result<TokenPair> {
