@@ -264,12 +264,14 @@ impl ObjectStore for PgObjectStore {
         let td = self.registry.type_def(&q.type_code)?;
         let cq: CompiledQuery = QueryBuilder::compile(td.clone(), q)?;
 
-        // 绑定执行（值按 JSON 传递 + cast，与编译占位一一对应）
+        // 绑定执行（值按 JSON 文本传递 + 占位处 PG 端 cast，与编译占位一一对应）。
+        // type_id 为服务端生成的 UUID 字面量（非用户输入，无注入面），内联以保持编译占位
+        // $1..$n 与 binds 一一对应（Task2 Ruling：占位冲突 bug 由集成测试捕获）。
         let mut base = sqlx::QueryBuilder::<sqlx::Postgres>::new(
             "SELECT id, type_id, obj_no, major_ver, minor_ver, iteration, state, \
                     secret_level, owner, attrs, attrs_rev, created_at, updated_at, created_by, updated_by \
              FROM cm_object WHERE type_id = ");
-        base.push_bind(td.id);
+        base.push(format!("'{}'", td.id));
         base.push(" AND (").push(cq.where_sql.as_str()).push(") ORDER BY ").push(cq.order_sql.as_str());
         base.push(" LIMIT ").push(cq.limit as i64).push(" OFFSET ").push(cq.offset as i64);
 
@@ -281,7 +283,7 @@ impl ObjectStore for PgObjectStore {
 
         let mut cnt = sqlx::QueryBuilder::<sqlx::Postgres>::new(
             "SELECT count(*) FROM cm_object WHERE type_id = ");
-        cnt.push_bind(td.id);
+        cnt.push(format!("'{}'", td.id));
         cnt.push(" AND (").push(cq.where_sql.as_str()).push(")");
         let mut qcnt = cnt.build_query_scalar::<i64>();
         for b in &cq.binds {
