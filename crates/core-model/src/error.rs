@@ -58,6 +58,8 @@ pub enum DomainError {
     FileEmpty,
     #[error("文件过大（上限 {0} 字节）")]
     FileTooLarge(u64),
+    #[error("请求不合法: {0}")]
+    BadRequest(String),
 }
 
 impl DomainError {
@@ -86,6 +88,7 @@ impl DomainError {
             Self::FileMulti => "MDL-FILE-MULTI",
             Self::FileEmpty => "MDL-FILE-EMPTY",
             Self::FileTooLarge(_) => "MDL-FILE-TOO-LARGE",
+            Self::BadRequest(_) => "MDL-BAD-REQUEST",
         }
     }
 
@@ -93,13 +96,19 @@ impl DomainError {
     pub fn http_status(&self) -> u16 {
         match self {
             Self::TypeNotFound(_) | Self::AttrNotFound(_, _) | Self::ObjNotFound(_) => 404,
-            Self::ObjVersionConflict(_) | Self::ObjNoDuplicate(_) | Self::AttrUniqueViolation(..) => 409,
+            Self::ObjVersionConflict(_)
+            | Self::ObjNoDuplicate(_)
+            | Self::AttrUniqueViolation(..) => 409,
             Self::ObjStateForbidden(_) => 423,
-            Self::QryPromoteRequired(..) | Self::QryInTooMany(_) | Self::QryPageTooLarge(_)
-            | Self::AttrRequired(_) | Self::AttrTypeMismatch(..) | Self::AttrEnumInvalid(_) => 400,
+            Self::QryPromoteRequired(..)
+            | Self::QryInTooMany(_)
+            | Self::QryPageTooLarge(_)
+            | Self::AttrRequired(_)
+            | Self::AttrTypeMismatch(..)
+            | Self::AttrEnumInvalid(_) => 400,
             Self::HookRejected(_) => 422,
             Self::HookTimeout(_) => 504,
-            Self::FieldRequired(_) | Self::FileMulti | Self::FileEmpty => 400,
+            Self::FieldRequired(_) | Self::FileMulti | Self::FileEmpty | Self::BadRequest(_) => 400,
             Self::FileTooLarge(_) => 413,
             _ => 500,
         }

@@ -1,0 +1,17 @@
+[package]
+name = "mod-doc"
+version = "0.1.0"
+edition = "2021"
+description = "RustPLM 图文档模块（MVP 最小集）：上传/列表/详情/下载"
+
+[dependencies]
+tokio = { workspace = true }
+sqlx = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+core-model = { path = "../core-model" }
+core-files = { path = "../core-files" }

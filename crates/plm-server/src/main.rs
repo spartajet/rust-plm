@@ -1,0 +1,112 @@
+//! RustPLM 服务端装配（概设 §2.1 R-D4：bin 不持 handler，只组装）。
+//! 序：tracing → Config(figment) → pool → 双 MIGRATOR → TypeRegistry(+watcher) →
+//!     HookRegistry/PgObjectStore/LocalFileStore/DocService → router → serve(优雅停机)。
+
+use anyhow::{bail, Context, Result};
+use figment::{
+    providers::{Env, Serialized},
+    Figment,
+};
+use serde::Deserialize;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+#[derive(Debug, Deserialize, serde::Serialize)]
+struct Config {
+    database_url: String,
+    data_dir: PathBuf,
+    http_port: u16,
+    max_upload: u64,
+}
+
+impl Config {
+    fn load() -> Result<Self> {
+        let defaults = Self {
+            database_url: String::new(),
+            data_dir: PathBuf::from("data"),
+            http_port: 8080,
+            max_upload: 200 * 1024 * 1024,
+        };
+        let cfg: Config = Figment::from(Serialized::defaults(defaults))
+            .merge(Env::raw().map(|k| k.as_str().to_lowercase().into()))
+            .merge(Env::prefixed("PLM_"))
+            .extract()?;
+        if cfg.database_url.is_empty() {
+            bail!("DATABASE_URL 未设置（示例：postgres://plm:plmdev@localhost:5432/plm）");
+        }
+        Ok(cfg)
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
+    let cfg = Config::load().context("读取配置失败")?;
+    tracing::info!(port = cfg.http_port, data_dir = %cfg.data_dir.display(), "RustPLM 启动中");
+
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(8)
+        .connect(&cfg.database_url)
+        .await
+        .context("连接 PostgreSQL 失败")?;
+
+    // 迁移链：core-model(0001) → mod-doc(0002/0003)（共享 _sqlx_migrations，各 Migrator 忽略他者版本）
+    core_model::migrator()
+        .run(&pool)
+        .await
+        .context("core-model 迁移失败")?;
+    mod_doc::migrator()
+        .run(&pool)
+        .await
+        .context("mod-doc 迁移失败")?;
+
+    let registry = core_model::TypeRegistry::load(pool.clone()).await?;
+    let watcher = registry.spawn_watcher(5).await;
+
+    let hooks = Arc::new(core_model::HookRegistry::new());
+    let objects = Arc::new(core_model::PgObjectStore::new(
+        pool.clone(),
+        registry.clone(),
+        hooks,
+    ));
+    let files = Arc::new(core_files::LocalFileStore::new(cfg.data_dir.clone()));
+    let service = Arc::new(mod_doc::DocService::new(
+        pool.clone(),
+        registry.clone(),
+        objects,
+        files,
+    ));
+
+    let state = api_gateway::AppState {
+        registry: registry.clone(),
+        service,
+        pool,
+        max_upload: cfg.max_upload,
+    };
+    let app = api_gateway::router(state);
+
+    let addr = format!("0.0.0.0:{}", cfg.http_port);
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .with_context(|| format!("绑定 {addr} 失败"))?;
+    tracing::info!(%addr, "RustPLM 就绪");
+
+    let result = axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await;
+    watcher.abort();
+    result.context("HTTP 服务异常退出")?;
+    tracing::info!("RustPLM 已优雅停机");
+    Ok(())
+}
+
+async fn shutdown_signal() {
+    let _ = tokio::signal::ctrl_c().await;
+    tracing::info!("收到停机信号，排空在途请求…");
+}

@@ -1,0 +1,42 @@
+# RustPLM 一键部署（spec DoD#1：docker compose up -d 即用）
+services:
+  plm:
+    build: .
+    image: rustplm/plm-server:${PLM_VERSION:-dev}
+    ports:
+      - "${HTTP_PORT:-8080}:8080"
+    environment:
+      DATABASE_URL: postgres://plm:${POSTGRES_PASSWORD:-plmdev}@postgres:5432/plm
+      PLM_DATA_DIR: /data
+      RUST_LOG: info
+    volumes:
+      - plm-files:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: plm
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-plmdev}
+      POSTGRES_DB: plm
+    volumes:
+      - plm-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U plm -d plm"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    restart: unless-stopped
+
+volumes:
+  plm-pgdata: {}
+  plm-files: {}

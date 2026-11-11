@@ -12,6 +12,7 @@ use crate::registry::TypeRegistry;
 use crate::types::{AttrMap, BizObject, TypeDef};
 use crate::{DomainError, HookOutcome, HookPoint, HookRegistry, Result};
 use async_trait::async_trait;
+use serde_json::Value;
 use sqlx::postgres::PgPool;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -26,11 +27,21 @@ pub struct CreateCmd {
 }
 
 #[async_trait]
+#[allow(clippy::too_many_arguments)]
 pub trait ObjectStore: Send + Sync {
     async fn create(&self, cmd: CreateCmd) -> Result<BizObject>;
-    async fn get(&self, type_code: &str, obj_no: &str, major: i32, minor: i32) -> Result<BizObject>;
-    async fn update(&self, type_code: &str, obj_no: &str, major: i32, minor: i32,
-                    patch: &AttrMap, expect_rev: i32, actor: Uuid) -> Result<BizObject>;
+    async fn get(&self, type_code: &str, obj_no: &str, major: i32, minor: i32)
+        -> Result<BizObject>;
+    async fn update(
+        &self,
+        type_code: &str,
+        obj_no: &str,
+        major: i32,
+        minor: i32,
+        patch: &AttrMap,
+        expect_rev: i32,
+        actor: Uuid,
+    ) -> Result<BizObject>;
     async fn relate(&self, rel_code: &str, from: Uuid, to: Uuid) -> Result<()>;
     async fn unrelate(&self, rel_code: &str, from: Uuid, to: Uuid) -> Result<()>;
     async fn query(&self, q: &ObjectQuery) -> Result<(Vec<BizObject>, u64)>;
@@ -48,7 +59,11 @@ const OBJ_COLS: &str = "id, type_id, obj_no, major_ver, minor_ver, iteration, st
 
 impl PgObjectStore {
     pub fn new(pool: PgPool, registry: Arc<TypeRegistry>, hooks: Arc<HookRegistry>) -> Self {
-        Self { pool, registry, hooks }
+        Self {
+            pool,
+            registry,
+            hooks,
+        }
     }
 
     /// 属性校验与默认值填充（类型/必填；枚举深校验由 dict 钩子扩展）
@@ -64,7 +79,9 @@ impl PgObjectStore {
                 }
                 Some(v) => {
                     let ok = match a.data_type {
-                        crate::DataType::Text | crate::DataType::Enum | crate::DataType::Ref => v.is_string(),
+                        crate::DataType::Text | crate::DataType::Enum | crate::DataType::Ref => {
+                            v.is_string()
+                        }
                         crate::DataType::Int => v.is_i64(),
                         crate::DataType::Decimal | crate::DataType::Unit => v.is_number(),
                         crate::DataType::Bool => v.is_boolean(),
@@ -133,13 +150,17 @@ impl ObjectStore for PgObjectStore {
         // 编号唯一性预检（返回语义化错误；并发兜底靠唯一索引）
         let dup: Option<i32> = sqlx::query_scalar(
             "SELECT 1 FROM cm_object WHERE type_id=$1 AND obj_no=$2 \
-             AND major_ver=1 AND minor_ver=0 AND deleted_at IS NULL LIMIT 1")
-            .bind(td.id)
-            .bind(&cmd.obj_no)
-            .fetch_optional(&self.pool)
-            .await?;
+             AND major_ver=1 AND minor_ver=0 AND deleted_at IS NULL LIMIT 1",
+        )
+        .bind(td.id)
+        .bind(&cmd.obj_no)
+        .fetch_optional(&self.pool)
+        .await?;
         if dup.is_some() {
-            return Err(DomainError::ObjNoDuplicate(format!("{}:{}", cmd.type_code, cmd.obj_no)));
+            return Err(DomainError::ObjNoDuplicate(format!(
+                "{}:{}",
+                cmd.type_code, cmd.obj_no
+            )));
         }
 
         Self::validate_and_fill(&td, &mut attrs)?;
@@ -172,7 +193,13 @@ impl ObjectStore for PgObjectStore {
         self.row_to_obj(&td, row).await
     }
 
-    async fn get(&self, type_code: &str, obj_no: &str, major: i32, minor: i32) -> Result<BizObject> {
+    async fn get(
+        &self,
+        type_code: &str,
+        obj_no: &str,
+        major: i32,
+        minor: i32,
+    ) -> Result<BizObject> {
         let td = self.registry.type_def(type_code)?;
         let row: Option<ObjRow> = sqlx::query_as(&format!(
             "SELECT {OBJ_COLS} FROM cm_object \
@@ -186,17 +213,28 @@ impl ObjectStore for PgObjectStore {
         .await?;
         match row {
             Some(r) => self.row_to_obj(&td, r).await,
-            None => Err(DomainError::ObjNotFound(format!("{type_code}:{obj_no}:{major}.{minor}"))),
+            None => Err(DomainError::ObjNotFound(format!(
+                "{type_code}:{obj_no}:{major}.{minor}"
+            ))),
         }
     }
 
-    async fn update(&self, type_code: &str, obj_no: &str, major: i32, minor: i32,
-                    patch: &AttrMap, expect_rev: i32, actor: Uuid) -> Result<BizObject> {
+    async fn update(
+        &self,
+        type_code: &str,
+        obj_no: &str,
+        major: i32,
+        minor: i32,
+        patch: &AttrMap,
+        expect_rev: i32,
+        actor: Uuid,
+    ) -> Result<BizObject> {
         let td = self.registry.type_def(type_code)?;
         let cur = self.get(type_code, obj_no, major, minor).await?;
         if cur.state != "working" {
             return Err(DomainError::ObjStateForbidden(format!(
-                "{type_code}:{obj_no} state={}", cur.state
+                "{type_code}:{obj_no} state={}",
+                cur.state
             )));
         }
 
@@ -213,7 +251,9 @@ impl ObjectStore for PgObjectStore {
             attrs: merged.clone(),
             actor,
         };
-        if let HookOutcome::Denied(by, reason) = self.hooks.run(&HookPoint::SaveBefore, &ctx).await? {
+        if let HookOutcome::Denied(by, reason) =
+            self.hooks.run(&HookPoint::SaveBefore, &ctx).await?
+        {
             return Err(DomainError::HookRejected(format!("[{by}] {reason}")));
         }
 
@@ -231,7 +271,9 @@ impl ObjectStore for PgObjectStore {
         .await?;
         match row {
             Some(r) => self.row_to_obj(&td, r).await,
-            None => Err(DomainError::ObjVersionConflict(format!("{type_code}:{obj_no}:{major}.{minor}"))),
+            None => Err(DomainError::ObjVersionConflict(format!(
+                "{type_code}:{obj_no}:{major}.{minor}"
+            ))),
         }
     }
 
@@ -239,13 +281,14 @@ impl ObjectStore for PgObjectStore {
         self.registry.rel_def(rel_code)?; // 关系定义必须存在
         let n = sqlx::query(
             "INSERT INTO cm_rel_inst(rel_code, from_id, to_id) VALUES ($1,$2,$3) \
-             ON CONFLICT (rel_code, from_id, to_id) DO NOTHING")
-            .bind(rel_code)
-            .bind(from)
-            .bind(to)
-            .execute(&self.pool)
-            .await?
-            .rows_affected();
+             ON CONFLICT (rel_code, from_id, to_id) DO NOTHING",
+        )
+        .bind(rel_code)
+        .bind(from)
+        .bind(to)
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
         let _ = n;
         Ok(())
     }
@@ -264,28 +307,37 @@ impl ObjectStore for PgObjectStore {
         let td = self.registry.type_def(&q.type_code)?;
         let cq: CompiledQuery = QueryBuilder::compile(td.clone(), q)?;
 
-        // 绑定执行（值按 JSON 传递 + cast，与编译占位一一对应）
+        // 绑定执行（值按 JSON 文本传递 + 占位处 PG 端 cast，与编译占位一一对应）。
+        // type_id 为服务端生成的 UUID 字面量（非用户输入，无注入面），内联以保持编译占位
+        // $1..$n 与 binds 一一对应（Task2 Ruling：占位冲突 bug 由集成测试捕获）。
         let mut base = sqlx::QueryBuilder::<sqlx::Postgres>::new(
             "SELECT id, type_id, obj_no, major_ver, minor_ver, iteration, state, \
                     secret_level, owner, attrs, attrs_rev, created_at, updated_at, created_by, updated_by \
              FROM cm_object WHERE type_id = ");
-        base.push_bind(td.id);
-        base.push(" AND (").push(cq.where_sql.as_str()).push(") ORDER BY ").push(cq.order_sql.as_str());
-        base.push(" LIMIT ").push(cq.limit as i64).push(" OFFSET ").push(cq.offset as i64);
+        base.push(format!("'{}'", td.id));
+        base.push(" AND (")
+            .push(cq.where_sql.as_str())
+            .push(") ORDER BY ")
+            .push(cq.order_sql.as_str());
+        base.push(" LIMIT ")
+            .push(cq.limit as i64)
+            .push(" OFFSET ")
+            .push(cq.offset as i64);
 
         let mut sel = base.build_query_as::<ObjRow>();
         for b in &cq.binds {
-            sel = sel.bind(b.value.to_string());
+            sel = sel.bind(bind_scalar(b));
         }
         let rows: Vec<ObjRow> = sel.fetch_all(&self.pool).await?;
 
         let mut cnt = sqlx::QueryBuilder::<sqlx::Postgres>::new(
-            "SELECT count(*) FROM cm_object WHERE type_id = ");
-        cnt.push_bind(td.id);
+            "SELECT count(*) FROM cm_object WHERE type_id = ",
+        );
+        cnt.push(format!("'{}'", td.id));
         cnt.push(" AND (").push(cq.where_sql.as_str()).push(")");
         let mut qcnt = cnt.build_query_scalar::<i64>();
         for b in &cq.binds {
-            qcnt = qcnt.bind(b.value.to_string());
+            qcnt = qcnt.bind(bind_scalar(b));
         }
         let total: i64 = qcnt.fetch_one(&self.pool).await?;
 
@@ -300,13 +352,14 @@ impl ObjectStore for PgObjectStore {
         let td = self.registry.type_def(type_code)?;
         let n = sqlx::query(
             "UPDATE cm_object SET deleted_at = now(), updated_by = $3 \
-             WHERE type_id=$1 AND obj_no=$2 AND deleted_at IS NULL AND state = 'working'")
-            .bind(td.id)
-            .bind(obj_no)
-            .bind(actor)
-            .execute(&self.pool)
-            .await?
-            .rows_affected();
+             WHERE type_id=$1 AND obj_no=$2 AND deleted_at IS NULL AND state = 'working'",
+        )
+        .bind(td.id)
+        .bind(obj_no)
+        .bind(actor)
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
         if n == 0 {
             return Err(DomainError::ObjNotFound(format!("{type_code}:{obj_no}")));
         }
@@ -314,8 +367,15 @@ impl ObjectStore for PgObjectStore {
     }
 }
 
-/// 兼容保留：绑定以 JSON 文本传递，由占位处 PG 端 cast 落列（jsonb/numeric/uuid/timestamptz 均安全）
-#[allow(dead_code)]
-fn bind_json_text(v: &serde_json::Value) -> String {
-    v.to_string()
+/// 绑定值分流（终审 I3）：jsonb 占位（@> / ANY(jsonb_array_elements_text)）传 JSON 文本；
+/// 物理列占位（=、>=、LIKE 等）按值类型裸传——text/uuid/date 系不得带 JSON 引号。
+fn bind_scalar(b: &crate::query::Bind) -> std::borrow::Cow<'_, str> {
+    let json_text = b.value.to_string();
+    match (b.cast, &b.value) {
+        (Some("jsonb"), _) => std::borrow::Cow::Owned(json_text),
+        (_, Value::String(v)) => std::borrow::Cow::Borrowed(v.as_str()),
+        (_, Value::Number(n)) => std::borrow::Cow::Owned(n.to_string()),
+        (_, Value::Bool(v)) => std::borrow::Cow::Owned(v.to_string()),
+        _ => std::borrow::Cow::Owned(json_text),
+    }
 }

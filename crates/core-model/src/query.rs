@@ -131,7 +131,10 @@ const SYSTEM_COLS: &[(&str, &str)] = &[
 ];
 
 fn system_col(name: &str) -> Option<&'static str> {
-    SYSTEM_COLS.iter().find(|(c, _)| *c == name).map(|(_, t)| *t)
+    SYSTEM_COLS
+        .iter()
+        .find(|(c, _)| *c == name)
+        .map(|(_, t)| *t)
 }
 
 pub struct QueryBuilder;
@@ -154,12 +157,16 @@ impl QueryBuilder {
         // 排序：系统列或提升列，否则拒绝
         let mut orders: Vec<String> = Vec::new();
         for s in &q.sorts {
-            if let Some(_) = system_col(&s.attr) {
-                orders.push(format!("{} {}", s.attr, if s.desc { "DESC" } else { "ASC" }));
+            if system_col(&s.attr).is_some() {
+                orders.push(format!(
+                    "{} {}",
+                    s.attr,
+                    if s.desc { "DESC" } else { "ASC" }
+                ));
             } else {
-                let col = td
-                    .promoted_col(&s.attr)
-                    .ok_or_else(|| DomainError::QryPromoteRequired("sort".into(), s.attr.clone()))?;
+                let col = td.promoted_col(&s.attr).ok_or_else(|| {
+                    DomainError::QryPromoteRequired("sort".into(), s.attr.clone())
+                })?;
                 orders.push(format!("{col} {}", if s.desc { "DESC" } else { "ASC" }));
             }
         }
@@ -195,7 +202,10 @@ impl QueryBuilder {
                 let i = binds.len() as i32 + 1;
                 let mut m = serde_json::Map::new();
                 m.insert(c.attr.clone(), c.value.clone());
-                binds.push(Bind { value: Value::Object(m), cast: Some("jsonb") });
+                binds.push(Bind {
+                    value: Value::Object(m),
+                    cast: Some("jsonb"),
+                });
                 Ok(format!("attrs @> ${i}::jsonb"))
             }
             Op::In => {
@@ -213,14 +223,20 @@ impl QueryBuilder {
                         let i = binds.len() as i32 + 1;
                         let mut m = serde_json::Map::new();
                         m.insert(c.attr.clone(), v.clone());
-                        binds.push(Bind { value: Value::Object(m), cast: Some("jsonb") });
+                        binds.push(Bind {
+                            value: Value::Object(m),
+                            cast: Some("jsonb"),
+                        });
                         format!("attrs @> ${i}::jsonb")
                     })
                     .collect();
                 Ok(format!("({})", parts.join(" OR ")))
             }
             Op::IsNull => Ok(format!("NOT (attrs ? '{}')", c.attr.replace('\'', "''"))),
-            op => Err(DomainError::QryPromoteRequired(op.as_str().into(), c.attr.clone())),
+            op => Err(DomainError::QryPromoteRequired(
+                op.as_str().into(),
+                c.attr.clone(),
+            )),
         }
     }
 
@@ -240,31 +256,52 @@ impl QueryBuilder {
         let suffix = cast.map(|t| format!("::{}", t)).unwrap_or_default();
         Ok(match c.op {
             Op::Eq => {
-                binds.push(Bind { value: c.value.clone(), cast });
+                binds.push(Bind {
+                    value: c.value.clone(),
+                    cast,
+                });
                 format!("{col} = ${i}{suffix}")
             }
             Op::Ne => {
-                binds.push(Bind { value: c.value.clone(), cast });
+                binds.push(Bind {
+                    value: c.value.clone(),
+                    cast,
+                });
                 format!("{col} <> ${i}{suffix}")
             }
             Op::Gt => {
-                binds.push(Bind { value: c.value.clone(), cast });
+                binds.push(Bind {
+                    value: c.value.clone(),
+                    cast,
+                });
                 format!("{col} > ${i}{suffix}")
             }
             Op::Ge => {
-                binds.push(Bind { value: c.value.clone(), cast });
+                binds.push(Bind {
+                    value: c.value.clone(),
+                    cast,
+                });
                 format!("{col} >= ${i}{suffix}")
             }
             Op::Lt => {
-                binds.push(Bind { value: c.value.clone(), cast });
+                binds.push(Bind {
+                    value: c.value.clone(),
+                    cast,
+                });
                 format!("{col} < ${i}{suffix}")
             }
             Op::Le => {
-                binds.push(Bind { value: c.value.clone(), cast });
+                binds.push(Bind {
+                    value: c.value.clone(),
+                    cast,
+                });
                 format!("{col} <= ${i}{suffix}")
             }
             Op::Like => {
-                binds.push(Bind { value: c.value.clone(), cast: Some("text") });
+                binds.push(Bind {
+                    value: c.value.clone(),
+                    cast: Some("text"),
+                });
                 format!("{col} LIKE ${i}::text")
             }
             Op::In => {
@@ -272,7 +309,10 @@ impl QueryBuilder {
                     .value
                     .as_array()
                     .ok_or_else(|| DomainError::AttrTypeMismatch(c.attr.clone(), "array".into()))?;
-                binds.push(Bind { value: Value::Array(values.clone()), cast: Some("jsonb") });
+                binds.push(Bind {
+                    value: Value::Array(values.clone()),
+                    cast: Some("jsonb"),
+                });
                 format!("{col}::text = ANY(SELECT jsonb_array_elements_text(${i}::jsonb))")
             }
             Op::IsNull => format!("{col} IS NULL"),

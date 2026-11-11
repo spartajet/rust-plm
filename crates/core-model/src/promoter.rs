@@ -31,7 +31,10 @@ pub struct PromoteOpts {
 
 impl Default for PromoteOpts {
     fn default() -> Self {
-        Self { batch: 100_000, throttle: std::time::Duration::from_millis(200) }
+        Self {
+            batch: 100_000,
+            throttle: std::time::Duration::from_millis(200),
+        }
     }
 }
 
@@ -50,7 +53,9 @@ impl Promoter {
         let td = self.registry.type_def(type_code)?;
         let a: &AttrDef = td.attr_or_err(attr_code)?;
         if a.promoted {
-            return Err(DomainError::Internal(format!("属性已提升: {type_code}.{attr_code}")));
+            return Err(DomainError::Internal(format!(
+                "属性已提升: {type_code}.{attr_code}"
+            )));
         }
         Ok(PromotePlan {
             type_code: type_code.to_string(),
@@ -63,28 +68,31 @@ impl Promoter {
     /// 执行提升（幂等：重复执行按列存在性跳过对应阶段）
     pub async fn execute(&self, plan: &PromotePlan, opts: &PromoteOpts) -> Result<()> {
         let td = self.registry.type_def(&plan.type_code)?;
-        let attr_id: Uuid = sqlx::query_scalar("SELECT id FROM cm_attr WHERE type_id=$1 AND code=$2")
-            .bind(td.id)
-            .bind(&plan.attr_code)
-            .fetch_one(&self.pool)
-            .await?;
+        let attr_id: Uuid =
+            sqlx::query_scalar("SELECT id FROM cm_attr WHERE type_id=$1 AND code=$2")
+                .bind(td.id)
+                .bind(&plan.attr_code)
+                .fetch_one(&self.pool)
+                .await?;
 
         let log_id: Uuid = sqlx::query_scalar(
             "INSERT INTO cm_ddl_log(type_id, attr_id, action, col_name, status) \
-             VALUES ($1,$2,'promote',$3,'adding') RETURNING id")
-            .bind(td.id)
-            .bind(attr_id)
-            .bind(&plan.col_name)
-            .fetch_one(&self.pool)
-            .await?;
+             VALUES ($1,$2,'promote',$3,'adding') RETURNING id",
+        )
+        .bind(td.id)
+        .bind(attr_id)
+        .bind(&plan.col_name)
+        .fetch_one(&self.pool)
+        .await?;
 
         // 1) Adding：在线加列（PG 元数据操作，毫秒级，不阻塞并发写——Spike V-1 实测）
         let exists: Option<String> = sqlx::query_scalar(
             "SELECT column_name FROM information_schema.columns \
-             WHERE table_name='cm_object' AND column_name=$1")
-            .bind(&plan.col_name)
-            .fetch_optional(&self.pool)
-            .await?;
+             WHERE table_name='cm_object' AND column_name=$1",
+        )
+        .bind(&plan.col_name)
+        .fetch_optional(&self.pool)
+        .await?;
         if exists.is_none() {
             // 提取表达式与列类型对齐（text 系直接 ->>，数值/日期 cast，jsonb 原样）
             let expr = extract_expr(&plan.col_name, data_type_of(&td, &plan.attr_code)?);
@@ -129,30 +137,36 @@ impl Promoter {
         // 3) Indexing
         let idx = format!("idx_{}", plan.col_name);
         let idx_exists: Option<String> = sqlx::query_scalar(
-            "SELECT indexname FROM pg_indexes WHERE tablename='cm_object' AND indexname=$1")
-            .bind(&idx)
-            .fetch_optional(&self.pool)
-            .await?;
+            "SELECT indexname FROM pg_indexes WHERE tablename='cm_object' AND indexname=$1",
+        )
+        .bind(&idx)
+        .fetch_optional(&self.pool)
+        .await?;
         if idx_exists.is_none() {
-            sqlx::query(&format!("UPDATE cm_ddl_log SET status='indexing' WHERE id=$1"))
+            sqlx::query("UPDATE cm_ddl_log SET status='indexing' WHERE id=$1")
                 .bind(log_id)
                 .execute(&self.pool)
                 .await?;
-            sqlx::raw_sql(&format!("CREATE INDEX {idx} ON cm_object({col})", idx = idx, col = plan.col_name))
-                .execute(&self.pool)
-                .await?;
+            sqlx::raw_sql(&format!(
+                "CREATE INDEX {idx} ON cm_object({col})",
+                idx = idx,
+                col = plan.col_name
+            ))
+            .execute(&self.pool)
+            .await?;
         }
 
         // 4) Done：标记 + 元数据版本失效（触发器自动 NOTIFY → TypeRegistry 热刷新）
         sqlx::query(
             "UPDATE cm_attr SET promoted=true, promoted_col=$3, updated_at=now() WHERE id=$1; \
-             UPDATE cm_ddl_log SET status='done', batches=$2, finished_at=now() WHERE id=$4")
-            .bind(attr_id)
-            .bind(batches)
-            .bind(&plan.col_name)
-            .bind(log_id)
-            .execute(&self.pool)
-            .await?;
+             UPDATE cm_ddl_log SET status='done', batches=$2, finished_at=now() WHERE id=$4",
+        )
+        .bind(attr_id)
+        .bind(batches)
+        .bind(&plan.col_name)
+        .bind(log_id)
+        .execute(&self.pool)
+        .await?;
         let _ = self.registry.reload_if_changed().await;
         info!(col = %plan.col_name, batches, "属性提升完成");
         Ok(())
@@ -163,21 +177,27 @@ impl Promoter {
         let td = self.registry.type_def(&plan.type_code)?;
         warn!(col = %plan.col_name, "回滚提升列");
         let mut tx = self.pool.begin().await?;
-        sqlx::raw_sql(&format!("ALTER TABLE cm_object DROP COLUMN IF EXISTS {}", plan.col_name))
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("UPDATE cm_attr SET promoted=false, promoted_col=NULL WHERE type_id=$1 AND code=$2")
-            .bind(td.id)
-            .bind(&plan.attr_code)
-            .execute(&mut *tx)
-            .await?;
+        sqlx::raw_sql(&format!(
+            "ALTER TABLE cm_object DROP COLUMN IF EXISTS {}",
+            plan.col_name
+        ))
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "UPDATE cm_attr SET promoted=false, promoted_col=NULL WHERE type_id=$1 AND code=$2",
+        )
+        .bind(td.id)
+        .bind(&plan.attr_code)
+        .execute(&mut *tx)
+        .await?;
         sqlx::query(
             "UPDATE cm_ddl_log SET rolled_back=true, status='rolled_back', finished_at=now() \
-             WHERE type_id=$1 AND col_name=$2 AND action='promote' AND NOT rolled_back")
-            .bind(td.id)
-            .bind(&plan.col_name)
-            .execute(&mut *tx)
-            .await?;
+             WHERE type_id=$1 AND col_name=$2 AND action='promote' AND NOT rolled_back",
+        )
+        .bind(td.id)
+        .bind(&plan.col_name)
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         let _ = self.registry.reload_if_changed().await;
         Ok(())

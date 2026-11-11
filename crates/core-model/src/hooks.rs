@@ -66,7 +66,10 @@ pub enum HookOutcome {
 
 impl HookRegistry {
     pub fn new() -> Self {
-        Self { hooks: Vec::new(), timeout: Duration::from_millis(50) }
+        Self {
+            hooks: Vec::new(),
+            timeout: Duration::from_millis(50),
+        }
     }
 
     pub fn register(&mut self, hook: Arc<dyn Hook>) {
@@ -81,7 +84,11 @@ impl HookRegistry {
             let r = match tokio::time::timeout(self.timeout, fut).await {
                 Ok(r) => r?,
                 Err(_) => {
-                    return Err(DomainError::HookTimeout(format!("{}:{}", point_name(point), h.name())))
+                    return Err(DomainError::HookTimeout(format!(
+                        "{}:{}",
+                        point_name(point),
+                        h.name()
+                    )))
                 }
             };
             match r {

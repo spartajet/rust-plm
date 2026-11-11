@@ -14,7 +14,10 @@ pub struct LocalFileStore {
 
 impl LocalFileStore {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into(), tmp_seq: AtomicU64::new(0) }
+        Self {
+            root: root.into(),
+            tmp_seq: AtomicU64::new(0),
+        }
     }
 
     fn tmp_dir(&self) -> PathBuf {

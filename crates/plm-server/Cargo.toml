@@ -1,0 +1,30 @@
+[package]
+name = "plm-server"
+version = "0.1.0"
+edition = "2021"
+description = "RustPLM 服务端装配：配置/迁移链/优雅停机"
+
+[[bin]]
+name = "plm-server"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+sqlx = { workspace = true }
+serde = { workspace = true }
+axum = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+figment = { workspace = true }
+anyhow = "1"
+core-model = { path = "../core-model" }
+core-files = { path = "../core-files" }
+mod-doc = { path = "../mod-doc" }
+api-gateway = { path = "../api-gateway" }
+
+[dev-dependencies]
+axum = { workspace = true }
+bytes = "1"
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
