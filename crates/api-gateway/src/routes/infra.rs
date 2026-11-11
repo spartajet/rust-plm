@@ -13,15 +13,32 @@ pub struct Healthz {
     pub meta_version: u64,
 }
 
-/// GET /healthz — D-AC 健康检查（DB ping + 元数据版本）
-#[utoipa::path(get, path = "/healthz", responses((status = 200, body = Healthz)))]
-pub async fn healthz(State(st): State<AppState>) -> Json<Healthz> {
-    // DB 可达性即健康定义的一部分；失败时 axum 返回 500（连接错误冒泡）
-    let _ = sqlx::query("SELECT 1").execute(&st.pool).await;
-    Json(Healthz {
-        status: "ok".into(),
-        meta_version: st.registry.version(),
-    })
+/// GET /healthz — D-AC 健康检查（DB ping + 元数据版本；ping 失败 → 503 degraded，终审 I1）
+#[utoipa::path(
+    get,
+    path = "/healthz",
+    responses((status = 200, body = Healthz), (status = 503, body = Healthz))
+)]
+pub async fn healthz(State(st): State<AppState>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    match sqlx::query("SELECT 1").execute(&st.pool).await {
+        Ok(_) => (
+            axum::http::StatusCode::OK,
+            Json(Healthz {
+                status: "ok".into(),
+                meta_version: st.registry.version(),
+            }),
+        )
+            .into_response(),
+        Err(_) => (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            Json(Healthz {
+                status: "degraded".into(),
+                meta_version: st.registry.version(),
+            }),
+        )
+            .into_response(),
+    }
 }
 
 /// GET /api/docs/openapi.json

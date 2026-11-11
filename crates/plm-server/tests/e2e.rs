@@ -3,6 +3,7 @@
 mod common;
 
 use common::{multipart_body, send, TestCtx};
+use sqlx::PgPool;
 use std::io::Cursor;
 
 const FILE: &[u8] = b"%DWG-e2e-content-9876543210";
@@ -148,8 +149,32 @@ async fn oversize_rejected_no_201() {
         .unwrap();
     let (status, _, _) = send(&ctx.app, req).await;
     assert!(
-        status >= 400 && status != 201,
-        "超限必须 4xx，得到 {status}"
+        status == 400 || status == 413,
+        "超限必须 400/413（Review Focus #5），得到 {status}"
     );
     ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn healthz_degraded_when_db_unreachable() {
+    // 终审 I1：DB ping 失败必须 503/degraded，而非恒 200。
+    // registry 从真迁移库加载（缓存热），业务/ping 池换成坏库——模拟"DB 宕机但进程活着"
+    use common::migrated;
+    let (_good_pool, registry, _root, db, admin_url) = migrated("degraded").await;
+    let bad: PgPool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect_lazy("postgres://postgres:root@localhost:5432/no_such_db_e2e")
+        .expect("lazy pool 创建不应失败");
+    let app = common::degraded_app(registry, bad, 1024 * 1024);
+    let (status, body, _) = send(&app, get("/healthz")).await;
+    assert_eq!(status, 503, "DB 不可达时 healthz 必须 503");
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["status"], "degraded");
+
+    let admin = PgPool::connect(&admin_url).await.unwrap();
+    sqlx::query(&format!("DROP DATABASE IF EXISTS \"{db}\" WITH (FORCE)"))
+        .execute(&admin)
+        .await
+        .unwrap();
+    admin.close().await;
 }

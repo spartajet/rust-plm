@@ -45,37 +45,40 @@ fn swap_db(url: &str, db: &str) -> String {
     }
 }
 
+/// 建唯一迁移库 → (好池, registry, files_root, db, admin_url)。两种 setup 共用。
+pub async fn migrated(hint: &str) -> (PgPool, Arc<TypeRegistry>, PathBuf, String, String) {
+    let admin_url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
+        panic!("TEST_DATABASE_URL 未设置（例：postgres://postgres:root@localhost:5432/postgres）")
+    });
+    let db = unique_db(hint);
+
+    let admin = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&admin_url)
+        .await
+        .unwrap();
+    sqlx::query(&format!("CREATE DATABASE \"{db}\""))
+        .execute(&admin)
+        .await
+        .unwrap();
+    admin.close().await;
+
+    let pool = PgPoolOptions::new()
+        .max_connections(4)
+        .connect(&swap_db(&admin_url, &db))
+        .await
+        .unwrap();
+    core_model::migrator().run(&pool).await.unwrap();
+    mod_doc::migrator().run(&pool).await.unwrap();
+    let registry = TypeRegistry::load(pool.clone()).await.unwrap();
+    let files_root = std::env::temp_dir().join(format!("plmsrv-{db}"));
+    (pool, registry, files_root, db, admin_url)
+}
+
 impl TestCtx {
     /// max_upload 字节上限（oversize 用例传小值）
     pub async fn setup(hint: &str, max_upload: u64) -> Self {
-        let admin_url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-            panic!(
-                "TEST_DATABASE_URL 未设置（例：postgres://postgres:root@localhost:5432/postgres）"
-            )
-        });
-        let db = unique_db(hint);
-
-        let admin = PgPoolOptions::new()
-            .max_connections(1)
-            .connect(&admin_url)
-            .await
-            .unwrap();
-        sqlx::query(&format!("CREATE DATABASE \"{db}\""))
-            .execute(&admin)
-            .await
-            .unwrap();
-        admin.close().await;
-
-        let pool = PgPoolOptions::new()
-            .max_connections(4)
-            .connect(&swap_db(&admin_url, &db))
-            .await
-            .unwrap();
-        core_model::migrator().run(&pool).await.unwrap();
-        mod_doc::migrator().run(&pool).await.unwrap();
-
-        let registry = TypeRegistry::load(pool.clone()).await.unwrap();
-        let files_root = std::env::temp_dir().join(format!("plmsrv-{db}"));
+        let (pool, registry, files_root, db, admin_url) = migrated(hint).await;
         let files = Arc::new(LocalFileStore::new(&files_root));
         let hooks = Arc::new(HookRegistry::new());
         let objects = Arc::new(PgObjectStore::new(pool.clone(), registry.clone(), hooks));
@@ -160,4 +163,33 @@ pub async fn send(
         .unwrap()
         .to_bytes();
     (status, body, trace)
+}
+
+/// 终审 I1 专用：真迁移库出 registry（缓存热，Arc 共享）+ 坏池做业务/ping。
+pub fn degraded_app(
+    registry: Arc<TypeRegistry>,
+    bad_pool: PgPool,
+    max_upload: u64,
+) -> axum::Router {
+    let files = Arc::new(LocalFileStore::new(
+        std::env::temp_dir().join("plmsrv-degraded"),
+    ));
+    let hooks = Arc::new(HookRegistry::new());
+    let objects = Arc::new(PgObjectStore::new(
+        bad_pool.clone(),
+        registry.clone(),
+        hooks,
+    ));
+    let service = Arc::new(DocService::new(
+        bad_pool.clone(),
+        registry.clone(),
+        objects,
+        files,
+    ));
+    api_gateway::router(AppState {
+        registry,
+        service,
+        pool: bad_pool,
+        max_upload,
+    })
 }

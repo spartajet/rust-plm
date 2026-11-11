@@ -164,3 +164,34 @@ async fn detail_missing_404() {
     assert_eq!(err.code(), "MDL-OBJ-NOT-FOUND");
     ctx.cleanup().await;
 }
+
+#[tokio::test]
+async fn list_filter_by_system_column_obj_no() {
+    // 终审 I3：物理列绑定曾带 JSON 引号 → 静默空结果
+    let ctx = TestCtx::setup("syscol").await;
+    let mut r = Cursor::new(BYTES);
+    ctx.service
+        .upload(
+            "DWG-SYS-7".into(),
+            json!({"name":"N"}).as_object().unwrap().clone(),
+            "f.dwg".into(),
+            None,
+            &mut r,
+        )
+        .await
+        .unwrap();
+    let q = ObjectQuery {
+        type_code: "drawing".into(),
+        conds: vec![Cond {
+            attr: "obj_no".into(),
+            op: Op::Eq,
+            value: json!("DWG-SYS-7"),
+        }],
+        sorts: vec![],
+        page: Some(Page::default()),
+    };
+    let (items, total) = ctx.service.list(&q).await.unwrap();
+    assert_eq!(total, 1, "系统列等值过滤必须命中");
+    assert_eq!(items[0].obj_no, "DWG-SYS-7");
+    ctx.cleanup().await;
+}

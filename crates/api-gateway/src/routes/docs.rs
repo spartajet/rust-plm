@@ -55,8 +55,9 @@ pub async fn upload_doc(
     let mut attrs: Option<AttrMap> = None;
     // staged: (name, mime, hash, size) —— file 字段在循环内即时流式落盘（Field 不能跨迭代持有）
     let mut staged: Option<(Option<String>, Option<String>, String, i64)> = None;
-    let map_mp_err =
-        |e: axum::extract::multipart::MultipartError| core_model::DomainError::File(e.to_string());
+    let map_mp_err = |e: axum::extract::multipart::MultipartError| {
+        core_model::DomainError::BadRequest(format!("multipart 解析失败: {e}"))
+    };
 
     while let Some(field) = mp
         .next_field()

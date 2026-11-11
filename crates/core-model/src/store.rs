@@ -12,6 +12,7 @@ use crate::registry::TypeRegistry;
 use crate::types::{AttrMap, BizObject, TypeDef};
 use crate::{DomainError, HookOutcome, HookPoint, HookRegistry, Result};
 use async_trait::async_trait;
+use serde_json::Value;
 use sqlx::postgres::PgPool;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -325,7 +326,7 @@ impl ObjectStore for PgObjectStore {
 
         let mut sel = base.build_query_as::<ObjRow>();
         for b in &cq.binds {
-            sel = sel.bind(b.value.to_string());
+            sel = sel.bind(bind_scalar(b));
         }
         let rows: Vec<ObjRow> = sel.fetch_all(&self.pool).await?;
 
@@ -336,7 +337,7 @@ impl ObjectStore for PgObjectStore {
         cnt.push(" AND (").push(cq.where_sql.as_str()).push(")");
         let mut qcnt = cnt.build_query_scalar::<i64>();
         for b in &cq.binds {
-            qcnt = qcnt.bind(b.value.to_string());
+            qcnt = qcnt.bind(bind_scalar(b));
         }
         let total: i64 = qcnt.fetch_one(&self.pool).await?;
 
@@ -366,8 +367,15 @@ impl ObjectStore for PgObjectStore {
     }
 }
 
-/// 兼容保留：绑定以 JSON 文本传递，由占位处 PG 端 cast 落列（jsonb/numeric/uuid/timestamptz 均安全）
-#[allow(dead_code)]
-fn bind_json_text(v: &serde_json::Value) -> String {
-    v.to_string()
+/// 绑定值分流（终审 I3）：jsonb 占位（@> / ANY(jsonb_array_elements_text)）传 JSON 文本；
+/// 物理列占位（=、>=、LIKE 等）按值类型裸传——text/uuid/date 系不得带 JSON 引号。
+fn bind_scalar(b: &crate::query::Bind) -> std::borrow::Cow<'_, str> {
+    let json_text = b.value.to_string();
+    match (b.cast, &b.value) {
+        (Some("jsonb"), _) => std::borrow::Cow::Owned(json_text),
+        (_, Value::String(v)) => std::borrow::Cow::Borrowed(v.as_str()),
+        (_, Value::Number(n)) => std::borrow::Cow::Owned(n.to_string()),
+        (_, Value::Bool(v)) => std::borrow::Cow::Owned(v.to_string()),
+        _ => std::borrow::Cow::Owned(json_text),
+    }
 }

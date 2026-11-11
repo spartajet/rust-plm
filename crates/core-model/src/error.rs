@@ -58,6 +58,8 @@ pub enum DomainError {
     FileEmpty,
     #[error("文件过大（上限 {0} 字节）")]
     FileTooLarge(u64),
+    #[error("请求不合法: {0}")]
+    BadRequest(String),
 }
 
 impl DomainError {
@@ -86,6 +88,7 @@ impl DomainError {
             Self::FileMulti => "MDL-FILE-MULTI",
             Self::FileEmpty => "MDL-FILE-EMPTY",
             Self::FileTooLarge(_) => "MDL-FILE-TOO-LARGE",
+            Self::BadRequest(_) => "MDL-BAD-REQUEST",
         }
     }
 
@@ -105,7 +108,7 @@ impl DomainError {
             | Self::AttrEnumInvalid(_) => 400,
             Self::HookRejected(_) => 422,
             Self::HookTimeout(_) => 504,
-            Self::FieldRequired(_) | Self::FileMulti | Self::FileEmpty => 400,
+            Self::FieldRequired(_) | Self::FileMulti | Self::FileEmpty | Self::BadRequest(_) => 400,
             Self::FileTooLarge(_) => 413,
             _ => 500,
         }
