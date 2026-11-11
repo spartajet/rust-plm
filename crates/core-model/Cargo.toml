@@ -1,0 +1,17 @@
+[package]
+name = "core-model"
+version = "0.1.0"
+edition = "2021"
+description = "RustPLM 元数据引擎：类型/属性/关系运行期建模、业务对象统一存取、动态查询、在线提升列"
+
+[dependencies]
+tokio = { workspace = true }
+sqlx = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+arc-swap = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
