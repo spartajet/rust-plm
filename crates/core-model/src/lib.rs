@@ -18,7 +18,7 @@ pub mod types;
 pub use error::{DomainError, Result};
 
 /// 本 crate 的迁移集（由 plm-server 启动时按序执行：core-model → mod-doc → …）
-pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("migrations");
+pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 pub use hooks::{Hook, HookContext, HookOutcome, HookPoint, HookRegistry, HookResult};
 pub use promoter::{PromotePlan, Promoter};
 pub use query::{ObjectQuery, Op, Page, Sort, CompiledQuery, QueryBuilder};
