@@ -1,0 +1,19 @@
+[package]
+name = "core-files"
+version = "0.1.0"
+edition = "2021"
+description = "RustPLM 文件库：SHA-256 内容寻址存储（本地卷实现）"
+
+[dependencies]
+tokio = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+sha2 = { workspace = true }
+hex = { workspace = true }

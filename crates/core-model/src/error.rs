@@ -46,6 +46,18 @@ pub enum DomainError {
     Db(String),
     #[error("内部错误: {0}")]
     Internal(String),
+
+    // ---- 文件/请求字段（mod-doc 骨架期） ----
+    #[error("请求字段缺失: {0}")]
+    FieldRequired(String),
+    #[error("文件错误: {0}")]
+    File(String),
+    #[error("上传包含多个文件（当前单文件契约）")]
+    FileMulti,
+    #[error("文件内容为空")]
+    FileEmpty,
+    #[error("文件过大（上限 {0} 字节）")]
+    FileTooLarge(u64),
 }
 
 impl DomainError {
@@ -69,6 +81,11 @@ impl DomainError {
             Self::HookTimeout(_) => "MDL-HOOK-TIMEOUT",
             Self::Db(_) => "MDL-DB",
             Self::Internal(_) => "MDL-INTERNAL",
+            Self::FieldRequired(_) => "MDL-FIELD-REQUIRED",
+            Self::File(_) => "MDL-FILE",
+            Self::FileMulti => "MDL-FILE-MULTI",
+            Self::FileEmpty => "MDL-FILE-EMPTY",
+            Self::FileTooLarge(_) => "MDL-FILE-TOO-LARGE",
         }
     }
 
@@ -82,6 +99,8 @@ impl DomainError {
             | Self::AttrRequired(_) | Self::AttrTypeMismatch(..) | Self::AttrEnumInvalid(_) => 400,
             Self::HookRejected(_) => 422,
             Self::HookTimeout(_) => 504,
+            Self::FieldRequired(_) | Self::FileMulti | Self::FileEmpty => 400,
+            Self::FileTooLarge(_) => 413,
             _ => 500,
         }
     }
