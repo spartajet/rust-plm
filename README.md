@@ -13,19 +13,27 @@
 docker compose up -d
 curl http://localhost:8080/healthz
 
-# 上传
+# 登录（首启若未设 PLM_ADMIN_PASSWORD，初始密码打印在服务日志里，仅一次）
+curl -X POST http://localhost:8080/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"你的密码"}'
+# → {"access_token":"…","refresh_token":"…","expires_in":900}
+
+# 上传（需 Bearer；access 15 分钟，POST /api/v1/auth/refresh 轮换）
 curl -X POST http://localhost:8080/api/v1/docs \
+  -H "Authorization: Bearer $TOKEN" \
   -F 'obj_no=DWG-001' \
   -F 'attrs={"name":"支架","material":"Q235"}' \
   -F 'file=@支架.dwg'
 
 # 列表（filter 等值过滤 / sort 排序 / page+size 分页）
-curl -g 'http://localhost:8080/api/v1/docs?filter[material]=Q235&sort=-updated_at'
+curl -g -H "Authorization: Bearer $TOKEN" \
+  'http://localhost:8080/api/v1/docs?filter[material]=Q235&sort=-updated_at'
 
-# 详情 / 下载 / API 文档
-curl http://localhost:8080/api/v1/docs/DWG-001
-curl -o 支架.dwg http://localhost:8080/api/v1/docs/DWG-001/file
-# openapi.json: /api/docs/openapi.json   Scalar UI: /api/docs
+# 详情 / 下载 / API 文档（docs 与文件下载同样需要 Bearer）
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001
+curl -o 支架.dwg -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001/file
+# openapi.json: /api/docs/openapi.json   Scalar UI: /api/docs（豁免鉴权）
 ```
 
 ## 本地开发（无 Docker）
@@ -40,7 +48,7 @@ PLM_DATA_DIR=./data HTTP_PORT=8080 cargo run -p plm-server
 TEST_DATABASE_URL=postgres://postgres:root@localhost:5432/postgres cargo test --workspace
 ```
 
-配置项（环境变量，见 [.env.example](.env.example)）：`DATABASE_URL`（必填）、`PLM_DATA_DIR`（默认 `data`）、`HTTP_PORT`（默认 8080）、`PLM_MAX_UPLOAD`（默认 200MB）。
+配置项（环境变量，见 [.env.example](.env.example)）：`DATABASE_URL`（必填）、`PLM_DATA_DIR`（默认 `data`）、`HTTP_PORT`（默认 8080）、`PLM_MAX_UPLOAD`（默认 200MB）、`PLM_ADMIN_PASSWORD`（首启 admin 密码，缺省随机生成并打印一次）、`PLM_JWT_SECRET`（JWT 密钥，缺省 `data_dir/jwt.key` 文件复用；多实例必须相同）。
 
 ## 工程结构
 
@@ -57,7 +65,7 @@ docs/adr/        架构决策记录
 
 ## Roadmap（版本规划见需求文档 §8）
 
-骨架 → 鉴权（core-sec）→ 版本/生命周期 + 事件（core-version/events）→ 三档流程 → BOM 引擎（闭包表已验证 10 万行展开 42ms）→ 前端工作台（Vue3+EP）→ 钉钉/企微/飞书卡片审批。
+骨架 ✓ → 认证 ✓（core-sec：登录/JWT/admin 引导）→ 授权(RBAC/ABAC) + 版本/生命周期 + 事件（core-version/events）→ 三档流程 → BOM 引擎（闭包表已验证 10 万行展开 42ms）→ 前端工作台（Vue3+EP）→ 钉钉/企微/飞书卡片审批。
 
 ## 许可
 
