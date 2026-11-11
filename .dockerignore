@@ -1,0 +1,7 @@
+target/
+.git/
+.superpowers/
+data/
+*.md
+.github/
+spikes/

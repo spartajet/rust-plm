@@ -1,6 +1,6 @@
 //! 统一错误体 {code, message, trace_id}（ADR-0015）+ trace 中间件。
 
-use axum::http::{header, HeaderValue, StatusCode};
+use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use core_model::DomainError;
@@ -11,10 +11,7 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct TraceId(pub String);
 
-pub async fn trace_mw(
-    mut req: axum::extract::Request,
-    next: axum::middleware::Next,
-) -> Response {
+pub async fn trace_mw(mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     let tid = TraceId(Uuid::new_v4().to_string());
     let mut res = {
         req.extensions_mut().insert(tid.clone());
@@ -34,14 +31,17 @@ pub struct ApiError {
 
 impl ApiError {
     pub fn new(err: DomainError, trace_id: &str) -> Self {
-        Self { err, trace_id: trace_id.to_string() }
+        Self {
+            err,
+            trace_id: trace_id.to_string(),
+        }
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let status =
-            StatusCode::from_u16(self.err.http_status()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        let status = StatusCode::from_u16(self.err.http_status())
+            .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
         let body = json!({
             "code": self.err.code(),
             "message": self.err.to_string(),
@@ -96,6 +96,6 @@ mod tests {
     fn trace_id_header_value_roundtrip() {
         let tid = TraceId(Uuid::new_v4().to_string());
         assert!(HeaderValue::from_str(&tid.0).is_ok());
-        let _ = header::HeaderName::from_static("x-trace-id");
+        let _ = axum::http::header::HeaderName::from_static("x-trace-id");
     }
 }

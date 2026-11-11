@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct TestCtx {
     pub service: Arc<DocService>,
+    #[allow(dead_code)]
     pub files: Arc<LocalFileStore>,
     pub pool: PgPool,
     files_root: PathBuf,
@@ -19,11 +20,17 @@ pub struct TestCtx {
 }
 
 fn unique_db(hint: &str) -> String {
-    let hint: String = hint.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+    let hint: String = hint
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
     format!(
         "mdt_{}_{}",
         hint,
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
     )
 }
 
@@ -42,16 +49,29 @@ fn swap_db(url: &str, db: &str) -> String {
 impl TestCtx {
     pub async fn setup(hint: &str) -> Self {
         let admin_url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-            panic!("TEST_DATABASE_URL 未设置（例：postgres://postgres:root@localhost:5432/postgres）")
+            panic!(
+                "TEST_DATABASE_URL 未设置（例：postgres://postgres:root@localhost:5432/postgres）"
+            )
         });
         let db = unique_db(hint);
 
-        let admin = PgPoolOptions::new().max_connections(1).connect(&admin_url).await.unwrap();
-        sqlx::query(&format!("CREATE DATABASE \"{db}\"")).execute(&admin).await.unwrap();
+        let admin = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&admin_url)
+            .await
+            .unwrap();
+        sqlx::query(&format!("CREATE DATABASE \"{db}\""))
+            .execute(&admin)
+            .await
+            .unwrap();
         admin.close().await;
 
         let url = swap_db(&admin_url, &db);
-        let pool = PgPoolOptions::new().max_connections(4).connect(&url).await.unwrap();
+        let pool = PgPoolOptions::new()
+            .max_connections(4)
+            .connect(&url)
+            .await
+            .unwrap();
 
         core_model::migrator().run(&pool).await.unwrap();
         mod_doc::migrator().run(&pool).await.unwrap();
@@ -61,18 +81,37 @@ impl TestCtx {
         let files = Arc::new(LocalFileStore::new(&files_root));
         let hooks = Arc::new(HookRegistry::new());
         let objects = Arc::new(PgObjectStore::new(pool.clone(), registry.clone(), hooks));
-        let service = Arc::new(DocService::new(pool.clone(), registry, objects, files.clone()));
+        let service = Arc::new(DocService::new(
+            pool.clone(),
+            registry,
+            objects,
+            files.clone(),
+        ));
 
-        Self { service, files, pool, files_root, db, admin_url }
+        Self {
+            service,
+            files,
+            pool,
+            files_root,
+            db,
+            admin_url,
+        }
     }
 
     pub async fn cleanup(self) {
         self.pool.close().await;
-        let admin = PgPoolOptions::new().max_connections(1).connect(&self.admin_url).await.unwrap();
-        sqlx::query(&format!("DROP DATABASE IF EXISTS \"{}\" WITH (FORCE)", self.db))
-            .execute(&admin)
+        let admin = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&self.admin_url)
             .await
             .unwrap();
+        sqlx::query(&format!(
+            "DROP DATABASE IF EXISTS \"{}\" WITH (FORCE)",
+            self.db
+        ))
+        .execute(&admin)
+        .await
+        .unwrap();
         admin.close().await;
         let _ = std::fs::remove_dir_all(&self.files_root);
     }

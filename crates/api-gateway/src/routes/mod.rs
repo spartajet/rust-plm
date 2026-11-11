@@ -16,6 +16,8 @@ pub fn build(state: AppState) -> Router {
         .route("/api/docs/openapi.json", get(infra::openapi_json))
         .route("/api/docs", get(infra::scalar_ui))
         .layer(axum::middleware::from_fn(crate::error::trace_mw))
-        .layer(axum::extract::DefaultBodyLimit::max(state.max_upload as usize))
+        .layer(axum::extract::DefaultBodyLimit::max(
+            state.max_upload as usize,
+        ))
         .with_state(state)
 }

@@ -9,7 +9,10 @@ use tokio::io::AsyncReadExt;
 fn unique_root(tag: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
         "corefiles-{tag}-{}",
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
     ))
 }
 
@@ -47,7 +50,12 @@ async fn dedup_same_content_same_hash() {
     let m2 = store.put(&mut cursor(data)).await.unwrap();
     assert_eq!(m1.hash, m2.hash);
     // 卷内只保留一份
-    assert_eq!(std::fs::read_dir(root.join("vol").join(&m1.hash[0..2])).unwrap().count(), 1);
+    assert_eq!(
+        std::fs::read_dir(root.join("vol").join(&m1.hash[0..2]))
+            .unwrap()
+            .count(),
+        1
+    );
     let _ = std::fs::remove_dir_all(&root);
 }
 

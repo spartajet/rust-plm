@@ -4,7 +4,6 @@ use crate::state::AppState;
 use axum::extract::State;
 use axum::response::Html;
 use axum::Json;
-use serde_json::json;
 use serde::Serialize;
 use utoipa::{OpenApi, ToSchema};
 
@@ -19,7 +18,10 @@ pub struct Healthz {
 pub async fn healthz(State(st): State<AppState>) -> Json<Healthz> {
     // DB 可达性即健康定义的一部分；失败时 axum 返回 500（连接错误冒泡）
     let _ = sqlx::query("SELECT 1").execute(&st.pool).await;
-    Json(Healthz { status: "ok".into(), meta_version: st.registry.version() })
+    Json(Healthz {
+        status: "ok".into(),
+        meta_version: st.registry.version(),
+    })
 }
 
 /// GET /api/docs/openapi.json

@@ -17,7 +17,11 @@ pub struct BizObjectId {
 
 impl fmt::Display for BizObjectId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}:{}.{}", self.type_code, self.obj_no, self.major, self.minor)
+        write!(
+            f,
+            "{}:{}:{}.{}",
+            self.type_code, self.obj_no, self.major, self.minor
+        )
     }
 }
 

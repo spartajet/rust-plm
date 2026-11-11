@@ -26,7 +26,7 @@ pub fn migrator() -> sqlx::migrate::Migrator {
 }
 pub use hooks::{Hook, HookContext, HookOutcome, HookPoint, HookRegistry, HookResult};
 pub use promoter::{PromotePlan, Promoter};
-pub use query::{ObjectQuery, Op, Page, Sort, CompiledQuery, QueryBuilder};
+pub use query::{CompiledQuery, ObjectQuery, Op, Page, QueryBuilder, Sort};
 pub use registry::{MetaSnapshot, TypeRegistry};
 pub use store::{CreateCmd, ObjectStore, PgObjectStore};
 pub use types::{AttrDef, AttrMap, BaseType, BizObject, BizObjectId, DataType, RelDef, TypeDef};

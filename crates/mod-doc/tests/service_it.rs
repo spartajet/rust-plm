@@ -17,7 +17,13 @@ async fn upload_detail_download_roundtrip() {
     let mut r = Cursor::new(BYTES);
     let d = ctx
         .service
-        .upload("DWG-RT-1".into(), attrs.as_object().unwrap().clone(), "part.dwg".into(), Some("application/octet-stream".into()), &mut r)
+        .upload(
+            "DWG-RT-1".into(),
+            attrs.as_object().unwrap().clone(),
+            "part.dwg".into(),
+            Some("application/octet-stream".into()),
+            &mut r,
+        )
         .await
         .unwrap();
     assert_eq!(d.object.obj_no, "DWG-RT-1");
@@ -45,7 +51,13 @@ async fn duplicate_obj_no_conflicts_and_no_orphan() {
     let attrs = json!({"name": "Bracket"});
     let mut r1 = Cursor::new(BYTES);
     ctx.service
-        .upload("DWG-DUP-1".into(), attrs.as_object().unwrap().clone(), "a.dwg".into(), None, &mut r1)
+        .upload(
+            "DWG-DUP-1".into(),
+            attrs.as_object().unwrap().clone(),
+            "a.dwg".into(),
+            None,
+            &mut r1,
+        )
         .await
         .unwrap();
     let before = ctx.vol_file_count().await;
@@ -53,11 +65,21 @@ async fn duplicate_obj_no_conflicts_and_no_orphan() {
     let mut r2 = Cursor::new(BYTES);
     let err = ctx
         .service
-        .upload("DWG-DUP-1".into(), attrs.as_object().unwrap().clone(), "a.dwg".into(), None, &mut r2)
+        .upload(
+            "DWG-DUP-1".into(),
+            attrs.as_object().unwrap().clone(),
+            "a.dwg".into(),
+            None,
+            &mut r2,
+        )
         .await
         .unwrap_err();
     assert_eq!(err.code(), "MDL-OBJ-NO-DUPLICATE");
-    assert_eq!(ctx.vol_file_count().await, before, "内容寻址去重：同内容不得新增卷文件");
+    assert_eq!(
+        ctx.vol_file_count().await,
+        before,
+        "内容寻址去重：同内容不得新增卷文件"
+    );
     ctx.cleanup().await;
 }
 
@@ -67,7 +89,13 @@ async fn empty_file_rejected() {
     let mut r = Cursor::new(&b""[..]);
     let err = ctx
         .service
-        .upload("DWG-E-1".into(), json!({"name":"X"}).as_object().unwrap().clone(), "e.dwg".into(), None, &mut r)
+        .upload(
+            "DWG-E-1".into(),
+            json!({"name":"X"}).as_object().unwrap().clone(),
+            "e.dwg".into(),
+            None,
+            &mut r,
+        )
         .await
         .unwrap_err();
     assert_eq!(err.code(), "MDL-FILE-EMPTY");
@@ -80,7 +108,13 @@ async fn missing_required_attr_rejected() {
     let mut r = Cursor::new(BYTES);
     let err = ctx
         .service
-        .upload("DWG-R-1".into(), serde_json::Map::new(), "x.dwg".into(), None, &mut r)
+        .upload(
+            "DWG-R-1".into(),
+            serde_json::Map::new(),
+            "x.dwg".into(),
+            None,
+            &mut r,
+        )
         .await
         .unwrap_err();
     assert_eq!(err.code(), "MDL-ATTR-REQUIRED");
@@ -93,13 +127,26 @@ async fn list_filters_by_material() {
     for (no, material) in [("DWG-L-1", "Q235"), ("DWG-L-2", "AL6061")] {
         let mut r = Cursor::new(BYTES);
         ctx.service
-            .upload(no.into(), json!({"name":"N","material":material}).as_object().unwrap().clone(), "f.dwg".into(), None, &mut r)
+            .upload(
+                no.into(),
+                json!({"name":"N","material":material})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+                "f.dwg".into(),
+                None,
+                &mut r,
+            )
             .await
             .unwrap();
     }
     let q = ObjectQuery {
         type_code: "drawing".into(),
-        conds: vec![Cond { attr: "material".into(), op: Op::Eq, value: json!("Q235") }],
+        conds: vec![Cond {
+            attr: "material".into(),
+            op: Op::Eq,
+            value: json!("Q235"),
+        }],
         sorts: vec![],
         page: Some(Page::default()),
     };

@@ -4,7 +4,7 @@
 //! - 变更感知：LISTEN `cm_meta_changed`（触发器即时通知）+ 周期兜底轮询 cm_meta_version；
 //!   权限/缓存失效目标 3s 内生效（PRD ORG 验收）。
 
-use crate::{DomainError, Result, RelDef, TypeDef};
+use crate::{DomainError, RelDef, Result, TypeDef};
 use arc_swap::ArcSwap;
 use sqlx::postgres::{PgListener, PgPool};
 use std::collections::HashMap;
@@ -20,7 +20,11 @@ pub struct MetaSnapshot {
 
 impl MetaSnapshot {
     pub fn empty() -> Self {
-        Self { version: 0, types: HashMap::new(), rels: HashMap::new() }
+        Self {
+            version: 0,
+            types: HashMap::new(),
+            rels: HashMap::new(),
+        }
     }
 }
 
@@ -32,7 +36,10 @@ pub struct TypeRegistry {
 impl TypeRegistry {
     /// 启动加载（执行迁移由 plm-server 启动器负责，这里只读）
     pub async fn load(pool: PgPool) -> Result<Arc<Self>> {
-        let reg = Arc::new(Self { inner: ArcSwap::from_pointee(MetaSnapshot::empty()), pool });
+        let reg = Arc::new(Self {
+            inner: ArcSwap::from_pointee(MetaSnapshot::empty()),
+            pool,
+        });
         let v = reg.reload().await?;
         info!(version = v, "TypeRegistry 初始加载完成");
         Ok(reg)
@@ -76,13 +83,20 @@ impl TypeRegistry {
         let rels = Self::load_rels(&mut tx).await?;
         tx.commit().await?;
 
-        self.inner.store(Arc::new(MetaSnapshot { version: version as u64, types, rels }));
+        self.inner.store(Arc::new(MetaSnapshot {
+            version: version as u64,
+            types,
+            rels,
+        }));
         Ok(version as u64)
     }
 
     /// 变更监听：LISTEN cm_meta_changed（即时）+ interval 兜底轮询（防漏通知）。
     /// 返回后台 JoinHandle，由调用方持有到进程生命周期。
-    pub async fn spawn_watcher(self: &Arc<Self>, fallback_secs: u64) -> tokio::task::JoinHandle<()> {
+    pub async fn spawn_watcher(
+        self: &Arc<Self>,
+        fallback_secs: u64,
+    ) -> tokio::task::JoinHandle<()> {
         let reg = Arc::clone(self);
         tokio::spawn(async move {
             let mut listener = match PgListener::connect_with(&reg.pool).await {
@@ -164,15 +178,17 @@ impl TypeRegistry {
 
         let rows: Vec<Row> = sqlx::query_as(
             "SELECT id, code, name, base_type, numbering_rule, title_attr, config, config_version \
-             FROM cm_type WHERE enabled ORDER BY code")
-            .fetch_all(&mut **tx)
-            .await?;
+             FROM cm_type WHERE enabled ORDER BY code",
+        )
+        .fetch_all(&mut **tx)
+        .await?;
         let attrs: Vec<AttrRow> = sqlx::query_as(
             "SELECT type_id, code, name, data_type, required, unique_flag, default_val, ref_type, \
                     formula, promoted, promoted_col, config, sort_no \
-             FROM cm_attr WHERE enabled ORDER BY type_id, sort_no, code")
-            .fetch_all(&mut **tx)
-            .await?;
+             FROM cm_attr WHERE enabled ORDER BY type_id, sort_no, code",
+        )
+        .fetch_all(&mut **tx)
+        .await?;
 
         // 按 type_id 分组属性
         let mut attrs_by_type: HashMap<uuid::Uuid, Vec<crate::AttrDef>> = HashMap::new();
@@ -180,19 +196,22 @@ impl TypeRegistry {
             let data_type = crate::DataType::parse(&a.data_type).ok_or_else(|| {
                 DomainError::Internal(format!("非法 data_type: {} {}", a.code, a.data_type))
             })?;
-            attrs_by_type.entry(a.type_id).or_default().push(crate::AttrDef {
-                code: a.code,
-                name: a.name,
-                data_type,
-                required: a.required,
-                unique_flag: a.unique_flag,
-                default_val: a.default_val,
-                ref_type: a.ref_type,
-                formula: a.formula,
-                promoted: a.promoted,
-                promoted_col: a.promoted_col,
-                config: a.config,
-            });
+            attrs_by_type
+                .entry(a.type_id)
+                .or_default()
+                .push(crate::AttrDef {
+                    code: a.code,
+                    name: a.name,
+                    data_type,
+                    required: a.required,
+                    unique_flag: a.unique_flag,
+                    default_val: a.default_val,
+                    ref_type: a.ref_type,
+                    formula: a.formula,
+                    promoted: a.promoted,
+                    promoted_col: a.promoted_col,
+                    config: a.config,
+                });
         }
 
         let mut map = HashMap::new();
@@ -201,8 +220,11 @@ impl TypeRegistry {
                 DomainError::Internal(format!("非法 base_type: {} {}", r.code, r.base_type))
             })?;
             let attrs = attrs_by_type.remove(&r.id).unwrap_or_default();
-            let attr_index =
-                attrs.iter().enumerate().map(|(i, a)| (a.code.clone(), i)).collect();
+            let attr_index = attrs
+                .iter()
+                .enumerate()
+                .map(|(i, a)| (a.code.clone(), i))
+                .collect();
             let td = TypeDef {
                 id: r.id,
                 code: r.code.clone(),
@@ -224,13 +246,23 @@ impl TypeRegistry {
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     ) -> Result<HashMap<String, Arc<RelDef>>> {
         let rows: Vec<(String, String, String, String, String)> = sqlx::query_as(
-            "SELECT code, name, src_type, dst_type, cardinality FROM cm_rel_def WHERE enabled")
-            .fetch_all(&mut **tx)
-            .await?;
+            "SELECT code, name, src_type, dst_type, cardinality FROM cm_rel_def WHERE enabled",
+        )
+        .fetch_all(&mut **tx)
+        .await?;
         Ok(rows
             .into_iter()
             .map(|(code, name, src_type, dst_type, cardinality)| {
-                (code.clone(), Arc::new(RelDef { code, name, src_type, dst_type, cardinality }))
+                (
+                    code.clone(),
+                    Arc::new(RelDef {
+                        code,
+                        name,
+                        src_type,
+                        dst_type,
+                        cardinality,
+                    }),
+                )
             })
             .collect())
     }

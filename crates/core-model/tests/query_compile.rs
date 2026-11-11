@@ -2,7 +2,7 @@
 //! 纯函数无 DB。规则来源：Spike V-1 结论（等值/IN 走 @> GIN；like/range/排序拒绝未提升列）。
 
 use core_model::query::{CompiledQuery, ObjectQuery, Op, Page, QueryBuilder};
-use core_model::{AttrDef, BaseType, DataType, DomainError, TypeDef};
+use core_model::{AttrDef, BaseType, DataType, TypeDef};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -29,7 +29,11 @@ fn td() -> Arc<TypeDef> {
         attr("remark", DataType::Text, false),
         attr("weight", DataType::Decimal, true),
     ];
-    let attr_index = attrs.iter().enumerate().map(|(i, a)| (a.code.clone(), i)).collect();
+    let attr_index = attrs
+        .iter()
+        .enumerate()
+        .map(|(i, a)| (a.code.clone(), i))
+        .collect();
     Arc::new(TypeDef {
         id: Uuid::nil(),
         code: "drawing".into(),
@@ -51,7 +55,11 @@ fn compile(q: &ObjectQuery) -> CompiledQuery {
 fn one(attr: &str, op: Op, value: Value) -> ObjectQuery {
     ObjectQuery {
         type_code: "drawing".into(),
-        conds: vec![core_model::query::Cond { attr: attr.into(), op, value }],
+        conds: vec![core_model::query::Cond {
+            attr: attr.into(),
+            op,
+            value,
+        }],
         sorts: vec![],
         page: None,
     }
@@ -60,15 +68,27 @@ fn one(attr: &str, op: Op, value: Value) -> ObjectQuery {
 #[test]
 fn eq_promoted_column_uses_physical_col() {
     let c = compile(&one("material", Op::Eq, json!("Q235")));
-    assert!(c.where_sql.contains("p_material = $1::text"), "got: {}", c.where_sql);
+    assert!(
+        c.where_sql.contains("p_material = $1::text"),
+        "got: {}",
+        c.where_sql
+    );
     assert_eq!(c.binds[0].value, json!("Q235"));
 }
 
 #[test]
 fn eq_unpromoted_forces_containment() {
     let c = compile(&one("remark", Op::Eq, json!("hello")));
-    assert!(c.where_sql.contains("attrs @> $1::jsonb"), "got: {}", c.where_sql);
-    assert_eq!(c.binds[0].value, json!({"remark": "hello"}), "bind 必须是 containment 对象");
+    assert!(
+        c.where_sql.contains("attrs @> $1::jsonb"),
+        "got: {}",
+        c.where_sql
+    );
+    assert_eq!(
+        c.binds[0].value,
+        json!({"remark": "hello"}),
+        "bind 必须是 containment 对象"
+    );
 }
 
 #[test]
@@ -95,19 +115,31 @@ fn like_unpromoted_rejected() {
 #[test]
 fn range_promoted_uses_physical_col_with_numeric_cast() {
     let c = compile(&one("weight", Op::Ge, json!(1.5)));
-    assert!(c.where_sql.contains("p_weight >= $1::numeric"), "got: {}", c.where_sql);
+    assert!(
+        c.where_sql.contains("p_weight >= $1::numeric"),
+        "got: {}",
+        c.where_sql
+    );
 }
 
 #[test]
 fn isnull_unpromoted_uses_jsonb_has_key_negation() {
     let c = compile(&one("remark", Op::IsNull, json!(null)));
-    assert!(c.where_sql.contains("NOT (attrs ? 'remark')"), "got: {}", c.where_sql);
+    assert!(
+        c.where_sql.contains("NOT (attrs ? 'remark')"),
+        "got: {}",
+        c.where_sql
+    );
 }
 
 #[test]
 fn system_column_eq_direct() {
     let c = compile(&one("state", Op::Eq, json!("working")));
-    assert!(c.where_sql.contains("state = $1::text"), "got: {}", c.where_sql);
+    assert!(
+        c.where_sql.contains("state = $1::text"),
+        "got: {}",
+        c.where_sql
+    );
 }
 
 #[test]
@@ -115,7 +147,10 @@ fn sort_promoted_ok_sort_unpromoted_rejected() {
     let q = ObjectQuery {
         type_code: "drawing".into(),
         conds: vec![],
-        sorts: vec![core_model::query::Sort { attr: "material".into(), desc: true }],
+        sorts: vec![core_model::query::Sort {
+            attr: "material".into(),
+            desc: true,
+        }],
         page: None,
     };
     let c = compile(&q);
@@ -124,7 +159,10 @@ fn sort_promoted_ok_sort_unpromoted_rejected() {
     let bad = ObjectQuery {
         type_code: "drawing".into(),
         conds: vec![],
-        sorts: vec![core_model::query::Sort { attr: "remark".into(), desc: false }],
+        sorts: vec![core_model::query::Sort {
+            attr: "remark".into(),
+            desc: false,
+        }],
         page: None,
     };
     let err = QueryBuilder::compile(td(), &bad).unwrap_err();

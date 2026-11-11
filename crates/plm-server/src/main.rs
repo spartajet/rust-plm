@@ -57,22 +57,44 @@ async fn main() -> Result<()> {
         .context("连接 PostgreSQL 失败")?;
 
     // 迁移链：core-model(0001) → mod-doc(0002/0003)（共享 _sqlx_migrations，各 Migrator 忽略他者版本）
-    core_model::migrator().run(&pool).await.context("core-model 迁移失败")?;
-    mod_doc::migrator().run(&pool).await.context("mod-doc 迁移失败")?;
+    core_model::migrator()
+        .run(&pool)
+        .await
+        .context("core-model 迁移失败")?;
+    mod_doc::migrator()
+        .run(&pool)
+        .await
+        .context("mod-doc 迁移失败")?;
 
     let registry = core_model::TypeRegistry::load(pool.clone()).await?;
     let watcher = registry.spawn_watcher(5).await;
 
     let hooks = Arc::new(core_model::HookRegistry::new());
-    let objects = Arc::new(core_model::PgObjectStore::new(pool.clone(), registry.clone(), hooks));
+    let objects = Arc::new(core_model::PgObjectStore::new(
+        pool.clone(),
+        registry.clone(),
+        hooks,
+    ));
     let files = Arc::new(core_files::LocalFileStore::new(cfg.data_dir.clone()));
-    let service = Arc::new(mod_doc::DocService::new(pool.clone(), registry.clone(), objects, files));
+    let service = Arc::new(mod_doc::DocService::new(
+        pool.clone(),
+        registry.clone(),
+        objects,
+        files,
+    ));
 
-    let state = api_gateway::AppState { registry: registry.clone(), service, pool, max_upload: cfg.max_upload };
+    let state = api_gateway::AppState {
+        registry: registry.clone(),
+        service,
+        pool,
+        max_upload: cfg.max_upload,
+    };
     let app = api_gateway::router(state);
 
     let addr = format!("0.0.0.0:{}", cfg.http_port);
-    let listener = tokio::net::TcpListener::bind(&addr).await.with_context(|| format!("绑定 {addr} 失败"))?;
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .with_context(|| format!("绑定 {addr} 失败"))?;
     tracing::info!(%addr, "RustPLM 就绪");
 
     let result = axum::serve(listener, app)

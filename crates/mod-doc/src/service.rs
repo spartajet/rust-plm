@@ -16,6 +16,8 @@ use tokio::io::AsyncRead;
 
 pub struct DocService {
     pool: PgPool,
+    /// 预留：钩子/查重门禁与提升列决策需要类型元数据（core-files 完整版接入）
+    #[allow(dead_code)]
     registry: Arc<TypeRegistry>,
     objects: Arc<PgObjectStore>,
     files: Arc<dyn FileStore>,
@@ -30,11 +32,23 @@ impl DocService {
         objects: Arc<PgObjectStore>,
         files: Arc<dyn FileStore>,
     ) -> Self {
-        Self { pool, registry, objects, files }
+        Self {
+            pool,
+            registry,
+            objects,
+            files,
+        }
     }
 
-    async fn put_stream(&self, reader: &mut (dyn AsyncRead + Send + Unpin)) -> Result<(String, u64)> {
-        let m = self.files.put(reader).await.map_err(|e| DomainError::File(e.to_string()))?;
+    async fn put_stream(
+        &self,
+        reader: &mut (dyn AsyncRead + Send + Unpin),
+    ) -> Result<(String, u64)> {
+        let m = self
+            .files
+            .put(reader)
+            .await
+            .map_err(|e| DomainError::File(e.to_string()))?;
         if m.size == 0 {
             return Err(DomainError::FileEmpty);
         }
@@ -51,12 +65,16 @@ impl DocService {
         reader: &mut (dyn AsyncRead + Send + Unpin),
     ) -> Result<DocDetail> {
         let (hash, size) = self.stage_file(reader).await?;
-        self.upload_staged(obj_no, attrs, file_name, mime, hash, size).await
+        self.upload_staged(obj_no, attrs, file_name, mime, hash, size)
+            .await
     }
 
     /// 第一步：流式落盘（内容寻址）。网关在 multipart 循环内消费 file 字段时调用，
     /// 避免 Field 借用跨 next_field 迭代（E0499）。
-    pub async fn stage_file(&self, reader: &mut (dyn AsyncRead + Send + Unpin)) -> Result<(String, i64)> {
+    pub async fn stage_file(
+        &self,
+        reader: &mut (dyn AsyncRead + Send + Unpin),
+    ) -> Result<(String, i64)> {
         let (hash, size) = self.put_stream(reader).await?;
         Ok((hash, size as i64))
     }
@@ -89,14 +107,24 @@ impl DocService {
             .bind(&mime)
             .execute(&self.pool)
             .await?;
-        sqlx::query("INSERT INTO file_ref(object_id, role, hash, name) VALUES ($1, 'original', $2, $3)")
-            .bind(obj.id)
-            .bind(&hash)
-            .bind(&file_name)
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "INSERT INTO file_ref(object_id, role, hash, name) VALUES ($1, 'original', $2, $3)",
+        )
+        .bind(obj.id)
+        .bind(&hash)
+        .bind(&file_name)
+        .execute(&self.pool)
+        .await?;
 
-        Ok(DocDetail { object: obj, file: Some(FileInfo { name: file_name, hash, size, mime }) })
+        Ok(DocDetail {
+            object: obj,
+            file: Some(FileInfo {
+                name: file_name,
+                hash,
+                size,
+                mime,
+            }),
+        })
     }
 
     pub async fn list(&self, q: &ObjectQuery) -> Result<(Vec<BizObject>, u64)> {
@@ -136,6 +164,11 @@ impl DocService {
         .bind(object_id)
         .fetch_optional(&self.pool)
         .await?;
-        Ok(row.map(|(name, hash, size, mime)| FileInfo { name, hash, size, mime }))
+        Ok(row.map(|(name, hash, size, mime)| FileInfo {
+            name,
+            hash,
+            size,
+            mime,
+        }))
     }
 }

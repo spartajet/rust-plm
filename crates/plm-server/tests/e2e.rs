@@ -8,7 +8,11 @@ use std::io::Cursor;
 const FILE: &[u8] = b"%DWG-e2e-content-9876543210";
 
 fn get(uri: &str) -> axum::http::Request<axum::body::Body> {
-    axum::http::Request::builder().method("GET").uri(uri).body(axum::body::Body::empty()).unwrap()
+    axum::http::Request::builder()
+        .method("GET")
+        .uri(uri)
+        .body(axum::body::Body::empty())
+        .unwrap()
 }
 
 #[tokio::test]
@@ -31,7 +35,11 @@ async fn full_flow_upload_list_detail_download() {
         boundary,
         &[
             ("obj_no", None, b"DWG-E2E-1".to_vec()),
-            ("attrs", None, br#"{"name":"Bracket","material":"Q235"}"#.to_vec()),
+            (
+                "attrs",
+                None,
+                br#"{"name":"Bracket","material":"Q235"}"#.to_vec(),
+            ),
             ("file", Some("零件.dwg"), FILE.to_vec()),
         ],
     );
@@ -75,7 +83,12 @@ async fn full_flow_upload_list_detail_download() {
     let req = get("/api/v1/docs/DWG-E2E-1/file");
     use tower::ServiceExt;
     let res = ctx.app.clone().oneshot(req).await.unwrap();
-    let cd = res.headers().get("content-disposition").unwrap().to_str().unwrap();
+    let cd = res
+        .headers()
+        .get("content-disposition")
+        .unwrap()
+        .to_str()
+        .unwrap();
     assert!(cd.contains("filename*"), "必须含 RFC5987 filename*：{cd}");
     let _ = hash;
 
@@ -86,7 +99,7 @@ async fn full_flow_upload_list_detail_download() {
 async fn duplicate_conflict_with_trace() {
     let ctx = TestCtx::setup("dup", 1024 * 1024).await;
     let boundary = "XyZ123";
-    let mk = |n: &str| {
+    let mk = || {
         let (ct, body) = multipart_body(
             boundary,
             &[
@@ -103,9 +116,9 @@ async fn duplicate_conflict_with_trace() {
             .body(axum::body::Body::from(body))
             .unwrap()
     };
-    let (s1, _, _) = send(&ctx.app, mk("1")).await;
+    let (s1, _, _) = send(&ctx.app, mk()).await;
     assert_eq!(s1, 201);
-    let (s2, body, trace) = send(&ctx.app, mk("2")).await;
+    let (s2, body, trace) = send(&ctx.app, mk()).await;
     assert_eq!(s2, 409);
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(v["code"], "MDL-OBJ-NO-DUPLICATE");
@@ -134,6 +147,9 @@ async fn oversize_rejected_no_201() {
         .body(axum::body::Body::from(body))
         .unwrap();
     let (status, _, _) = send(&ctx.app, req).await;
-    assert!(status >= 400 && status != 201, "超限必须 4xx，得到 {status}");
+    assert!(
+        status >= 400 && status != 201,
+        "超限必须 4xx，得到 {status}"
+    );
     ctx.cleanup().await;
 }
