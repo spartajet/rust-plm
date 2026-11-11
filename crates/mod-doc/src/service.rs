@@ -41,6 +41,7 @@ impl DocService {
         Ok((m.hash, m.size))
     }
 
+    /// 单体路径：staged 文件 + 建对象两步合一（测试/CLI 便捷入口）
     pub async fn upload(
         &self,
         obj_no: String,
@@ -49,11 +50,30 @@ impl DocService {
         mime: Option<String>,
         reader: &mut (dyn AsyncRead + Send + Unpin),
     ) -> Result<DocDetail> {
+        let (hash, size) = self.stage_file(reader).await?;
+        self.upload_staged(obj_no, attrs, file_name, mime, hash, size).await
+    }
+
+    /// 第一步：流式落盘（内容寻址）。网关在 multipart 循环内消费 file 字段时调用，
+    /// 避免 Field 借用跨 next_field 迭代（E0499）。
+    pub async fn stage_file(&self, reader: &mut (dyn AsyncRead + Send + Unpin)) -> Result<(String, i64)> {
+        let (hash, size) = self.put_stream(reader).await?;
+        Ok((hash, size as i64))
+    }
+
+    /// 第二步：建对象 + 文件两行落库。调用前提：stage_file 已完成（或已有 hash）。
+    pub async fn upload_staged(
+        &self,
+        obj_no: String,
+        attrs: AttrMap,
+        file_name: String,
+        mime: Option<String>,
+        hash: String,
+        size: i64,
+    ) -> Result<DocDetail> {
         if file_name.trim().is_empty() {
             return Err(DomainError::FieldRequired("file.filename".into()));
         }
-        let (hash, size) = self.put_stream(reader).await?;
-
         let cmd = core_model::CreateCmd {
             type_code: Self::TYPE.into(),
             obj_no,
@@ -65,7 +85,7 @@ impl DocService {
 
         sqlx::query("INSERT INTO file_object(hash, size, mime) VALUES ($1, $2, $3) ON CONFLICT (hash) DO NOTHING")
             .bind(&hash)
-            .bind(size as i64)
+            .bind(size)
             .bind(&mime)
             .execute(&self.pool)
             .await?;
@@ -76,7 +96,7 @@ impl DocService {
             .execute(&self.pool)
             .await?;
 
-        Ok(DocDetail { object: obj, file: Some(FileInfo { name: file_name, hash, size: size as i64, mime }) })
+        Ok(DocDetail { object: obj, file: Some(FileInfo { name: file_name, hash, size, mime }) })
     }
 
     pub async fn list(&self, q: &ObjectQuery) -> Result<(Vec<BizObject>, u64)> {
