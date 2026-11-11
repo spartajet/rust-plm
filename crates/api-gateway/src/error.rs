@@ -27,6 +27,7 @@ pub async fn trace_mw(mut req: axum::extract::Request, next: axum::middleware::N
 pub struct ApiError {
     err: DomainError,
     trace_id: String,
+    message_override: Option<String>,
 }
 
 impl ApiError {
@@ -34,7 +35,14 @@ impl ApiError {
         Self {
             err,
             trace_id: trace_id.to_string(),
+            message_override: None,
         }
+    }
+
+    /// 覆盖错误体 message（语义细化时使用；code/status 不变）
+    pub fn with_message(mut self, msg: &str) -> Self {
+        self.message_override = Some(msg.to_string());
+        self
     }
 }
 
@@ -42,9 +50,12 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = StatusCode::from_u16(self.err.http_status())
             .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        let message = self
+            .message_override
+            .unwrap_or_else(|| self.err.to_string());
         let body = json!({
             "code": self.err.code(),
-            "message": self.err.to_string(),
+            "message": message,
             "trace_id": self.trace_id,
         });
         (status, Json(body)).into_response()

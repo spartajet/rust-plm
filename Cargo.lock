@@ -39,6 +39,7 @@ dependencies = [
  "axum",
  "core-files",
  "core-model",
+ "core-sec",
  "futures-util",
  "mod-doc",
  "serde",

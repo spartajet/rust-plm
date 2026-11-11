@@ -5,7 +5,7 @@ pub mod claims;
 pub mod service;
 
 pub use claims::Claims;
-pub use service::{AdminBootInfo, SecService, TokenPair};
+pub use service::{strip_bearer, AdminBootInfo, AuthUser, SecService, TokenPair};
 
 /// 多 crate 迁移链（ignore_missing，同 core-model/mod-doc 模式）
 pub fn migrator() -> sqlx::migrate::Migrator {

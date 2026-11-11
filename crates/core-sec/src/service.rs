@@ -24,6 +24,9 @@ pub struct AdminBootInfo {
     pub printed_password: Option<String>,
 }
 
+
+
+/// 已认证用户（中间件注入 Extension）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthUser {
     pub id: uuid::Uuid,

@@ -18,3 +18,4 @@ sqlx = { workspace = true }
 core-model = { path = "../core-model" }
 core-files = { path = "../core-files" }
 mod-doc = { path = "../mod-doc" }
+core-sec = { path = "../core-sec" }

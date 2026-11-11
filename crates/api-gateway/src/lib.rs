@@ -2,6 +2,7 @@
 //! 错误体 {code,message,trace_id}（ADR-0015）；mod-doc 保持传输无关。
 
 pub mod error;
+pub mod middleware;
 pub mod routes;
 pub mod state;
 
