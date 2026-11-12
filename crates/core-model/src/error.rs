@@ -72,6 +72,8 @@ pub enum DomainError {
     SecRoleNotFound(String),
     #[error("非法生命周期迁移: {0} 不允许 {1}")]
     IllegalTransition(String, String),
+    #[error("会签校验失败：第二级审批须由不同人执行")]
+    MakerCheckerViolation,
 }
 
 impl DomainError {
@@ -107,6 +109,7 @@ impl DomainError {
             Self::SecUserExists => "MDL-SEC-USER-EXISTS",
             Self::SecRoleNotFound(_) => "MDL-SEC-ROLE-NOT-FOUND",
             Self::IllegalTransition(_, _) => "MDL-LCS-TRANSITION",
+            Self::MakerCheckerViolation => "MDL-LCS-MAKER-CHECKER",
         }
     }
 
@@ -131,6 +134,7 @@ impl DomainError {
             Self::SecForbidden => 403,
             Self::SecRoleNotFound(_) => 400,
             Self::IllegalTransition(_, _) => 409,
+            Self::MakerCheckerViolation => 409,
             Self::SecUserExists => 409,
             Self::FileTooLarge(_) => 413,
             _ => 500,

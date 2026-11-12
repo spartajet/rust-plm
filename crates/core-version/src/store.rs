@@ -63,9 +63,28 @@ impl LifecycleStore {
             other => DomainError::Db(other.to_string()),
         })?;
 
-        let new_state = machine::allowed(&row.state, ev).ok_or_else(|| {
+        // 档位读取（cm_type.config.flow_tier，缺省 standard；每迁移一次点查——档位热生效优先）
+        let tier_str: Option<String> =
+            sqlx::query_scalar("SELECT config->>'flow_tier' FROM cm_type WHERE id = $1")
+                .bind(row.type_id)
+                .fetch_optional(&self.pool)
+                .await?
+                .flatten();
+        let tier = crate::FlowTier::parse(tier_str.as_deref().unwrap_or("standard"))
+            .unwrap_or(crate::FlowTier::Standard);
+
+        let new_state = machine::allowed_for(tier, &row.state, ev).ok_or_else(|| {
             DomainError::IllegalTransition(row.state.clone(), ev.as_str().to_string())
         })?;
+
+        // 会签校验（strict checked→released）：第二级审批须异于推进到 checked 的人
+        if row.state == "checked" && ev == LifecycleEvent::Approve {
+            if let (Some(a), Some(prev)) = (actor, row.updated_by) {
+                if a == prev {
+                    return Err(DomainError::MakerCheckerViolation);
+                }
+            }
+        }
 
         let updated_by = actor;
         let obj = sqlx::query_as::<

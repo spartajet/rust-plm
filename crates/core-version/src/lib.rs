@@ -3,7 +3,7 @@
 pub mod machine;
 pub mod store;
 
-pub use machine::LifecycleEvent;
+pub use machine::{FlowTier, LifecycleEvent};
 pub use store::LifecycleStore;
 
 /// 多 crate 迁移链（ignore_missing，同前例）
