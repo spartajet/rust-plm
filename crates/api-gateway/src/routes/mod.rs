@@ -26,6 +26,21 @@ pub fn build(state: AppState) -> Router {
             state.clone(),
             require_perm("docs", "read"),
         ));
+    let docs_lc_write = Router::new()
+        .route("/api/v1/docs/{obj_no}/submit", post(docs::submit_doc))
+        .route("/api/v1/docs/{obj_no}/reject", post(docs::reject_doc))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            require_perm("docs", "write"),
+        ));
+    let docs_lc_approve = Router::new()
+        .route("/api/v1/docs/{obj_no}/approve", post(docs::approve_doc))
+        .route("/api/v1/docs/{obj_no}/obsolete", post(docs::obsolete_doc))
+        .route("/api/v1/docs/{obj_no}/release", post(docs::release_doc))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            require_perm("docs", "approve"),
+        ));
     let sec_mgmt = Router::new()
         .route("/api/v1/sec/users", post(sec_users::create_user))
         .route(
@@ -54,6 +69,8 @@ pub fn build(state: AppState) -> Router {
         .merge(auth)
         .merge(docs_rw)
         .merge(docs_r)
+        .merge(docs_lc_write)
+        .merge(docs_lc_approve)
         .merge(sec_mgmt)
         .layer(axum::middleware::from_fn(crate::error::trace_mw))
         .layer(axum::extract::DefaultBodyLimit::max(

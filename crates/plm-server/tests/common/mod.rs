@@ -4,6 +4,7 @@ use api_gateway::AppState;
 use core_files::LocalFileStore;
 use core_model::{HookRegistry, PgObjectStore, TypeRegistry};
 use core_sec::SecService;
+use core_version::LifecycleStore;
 
 pub const TEST_ADMIN_PASSWORD: &str = "test-admin-pw";
 use mod_doc::DocService;
@@ -96,12 +97,14 @@ impl TestCtx {
         sec.ensure_admin(Some(TEST_ADMIN_PASSWORD.into()))
             .await
             .unwrap();
+        let lifecycle = Arc::new(LifecycleStore::new(pool.clone()));
         let app = api_gateway::router(AppState {
             registry,
             service,
             pool: pool.clone(),
             max_upload,
             sec,
+            lifecycle,
         });
 
         Self {
@@ -269,11 +272,13 @@ pub fn degraded_app(
         files,
     ));
     let sec = Arc::new(SecService::new(bad_pool.clone(), "degraded-secret".into()));
+    let lifecycle = Arc::new(LifecycleStore::new(bad_pool.clone()));
     api_gateway::router(AppState {
         registry,
         service,
         pool: bad_pool,
         max_upload,
         sec,
+        lifecycle,
     })
 }

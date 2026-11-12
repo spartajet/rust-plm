@@ -334,3 +334,70 @@ fn pct_encode(s: &str) -> String {
     }
     out
 }
+
+// ==================== 生命周期端点（增量3） ====================
+
+async fn do_transition(
+    st: &AppState,
+    tid: &crate::error::TraceId,
+    user: &core_sec::AuthUser,
+    obj_no: &str,
+    ev: core_version::LifecycleEvent,
+) -> Result<axum::Json<serde_json::Value>, ApiError> {
+    let o = st
+        .service
+        .transition(&st.lifecycle, ev, obj_no, user.id)
+        .await
+        .map_err(|e| ApiError::new(e, &tid.0))?;
+    Ok(axum::Json(json!(o)))
+}
+
+macro_rules! lc_endpoint {
+    ($fn_name:ident, $ev:expr, $path_lit:literal, $doc_lit:literal) => {
+        #[utoipa::path(
+            post,
+            path = $path_lit,
+            params(("obj_no" = String, Path)),
+            responses((status = 200, description = $doc_lit), (status = 403), (status = 409))
+        )]
+        pub async fn $fn_name(
+            State(st): State<AppState>,
+            Extension(tid): Extension<crate::error::TraceId>,
+            Extension(user): Extension<core_sec::AuthUser>,
+            Path(obj_no): Path<String>,
+        ) -> Result<axum::Json<serde_json::Value>, ApiError> {
+            do_transition(&st, &tid, &user, &obj_no, $ev).await
+        }
+    };
+}
+
+lc_endpoint!(
+    submit_doc,
+    core_version::LifecycleEvent::Submit,
+    "/api/v1/docs/{obj_no}/submit",
+    "提交评审"
+);
+lc_endpoint!(
+    approve_doc,
+    core_version::LifecycleEvent::Approve,
+    "/api/v1/docs/{obj_no}/approve",
+    "批准发布"
+);
+lc_endpoint!(
+    reject_doc,
+    core_version::LifecycleEvent::Reject,
+    "/api/v1/docs/{obj_no}/reject",
+    "驳回修改"
+);
+lc_endpoint!(
+    release_doc,
+    core_version::LifecycleEvent::Release,
+    "/api/v1/docs/{obj_no}/release",
+    "直接发布(预留)"
+);
+lc_endpoint!(
+    obsolete_doc,
+    core_version::LifecycleEvent::Obsolete,
+    "/api/v1/docs/{obj_no}/obsolete",
+    "作废"
+);

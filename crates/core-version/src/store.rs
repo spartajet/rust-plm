@@ -26,6 +26,7 @@ impl LifecycleStore {
         let mut tx = self.pool.begin().await?;
 
         #[derive(sqlx::FromRow)]
+        #[allow(dead_code)]
         struct Row {
             id: Uuid,
             type_id: Uuid,

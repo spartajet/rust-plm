@@ -144,14 +144,15 @@ impl DocService {
             .await
     }
 
-    /// 生命周期转发（Task2：持 LifecycleStore 后实现；权限在网关把关）
+    /// 生命周期转发（网关 5 端点消费；权限在网关把关）
     pub async fn transition(
         &self,
         store: &core_version::LifecycleStore,
         ev: core_version::LifecycleEvent,
         obj_no: &str,
+        actor: uuid::Uuid,
     ) -> Result<BizObject> {
-        store.transition(Self::TYPE, obj_no, ev, None).await
+        store.transition(Self::TYPE, obj_no, ev, Some(actor)).await
     }
 
     pub async fn detail(&self, obj_no: &str) -> Result<DocDetail> {

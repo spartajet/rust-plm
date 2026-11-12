@@ -22,6 +22,7 @@ core-model = { path = "../core-model" }
 core-files = { path = "../core-files" }
 mod-doc = { path = "../mod-doc" }
 core-sec = { path = "../core-sec" }
+core-version = { path = "../core-version" }
 api-gateway = { path = "../api-gateway" }
 
 [dev-dependencies]

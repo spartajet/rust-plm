@@ -1,6 +1,5 @@
 //! core-version 生命周期集成测试（计划 Task1）：真 PG18 库 + core-model 全链。
 
-use core_model::types::AttrMap;
 use core_model::{HookRegistry, PgObjectStore, TypeRegistry};
 use core_version::{LifecycleEvent, LifecycleStore};
 use mod_doc::DocService;
