@@ -582,3 +582,41 @@ async fn line_no_must_be_positive() {
     assert_eq!(e.code(), "MDL-BAD-REQUEST");
     c.drop_it().await;
 }
+
+#[tokio::test]
+async fn set_lines_rejected_when_parent_not_working() {
+    // 增量8 Task3：released/review parent 的 BOM 不可静默污染（423 ObjStateForbidden）
+    let c = setup("sguard").await;
+    let parent = c.node_ids[ROOT];
+    let lines = || {
+        vec![LineInput {
+            line_no: 1,
+            child: c.node_ids[1],
+            qty: 2,
+        }]
+    };
+
+    for state in ["released", "review", "obsolete"] {
+        sqlx::query("UPDATE cm_object SET state=$2 WHERE id=$1")
+            .bind(parent)
+            .bind(state)
+            .execute(&c.pool)
+            .await
+            .unwrap();
+        let e = c.store.set_lines(parent, lines()).await.unwrap_err();
+        assert_eq!(e.code(), "MDL-OBJ-STATE-FORBIDDEN", "state={state}");
+        assert_eq!(e.http_status(), 423, "state={state}");
+    }
+
+    // working 正常（回归钉）
+    sqlx::query("UPDATE cm_object SET state='working' WHERE id=$1")
+        .bind(parent)
+        .execute(&c.pool)
+        .await
+        .unwrap();
+    c.store
+        .set_lines(parent, lines())
+        .await
+        .expect("working parent 必须可编辑");
+    c.drop_it().await;
+}
