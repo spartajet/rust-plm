@@ -23,6 +23,26 @@ pub struct AppState {
     pub bom: Arc<core_bom::BomStore>,
 }
 
+/// 发布冻结注入（增量9 BOM 版本链）：released 同事务快照 BOM 子树。
+/// 装配共用——plm-server main 与 e2e harness 同源，避免两处漂移。
+pub fn bom_release_hook(bom: Arc<core_bom::BomStore>) -> Arc<dyn core_version::ReleaseHook> {
+    struct Hook(Arc<core_bom::BomStore>);
+    #[async_trait::async_trait]
+    impl core_version::ReleaseHook for Hook {
+        async fn on_released(
+            &self,
+            tx: &mut sqlx::PgConnection,
+            _type_code: &str,
+            _obj_no: &str,
+            obj_id: uuid::Uuid,
+            major: i32,
+        ) -> core_model::Result<()> {
+            self.0.snapshot_live_edges_tx(tx, obj_id, major).await.map(|_| ())
+        }
+    }
+    Arc::new(Hook(bom))
+}
+
 /// OpenAPI 聚合文档（/api/docs/openapi.json）
 #[derive(OpenApi)]
 #[openapi(

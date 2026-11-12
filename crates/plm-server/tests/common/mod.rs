@@ -113,8 +113,12 @@ impl TestCtx {
         sec.ensure_admin(Some(TEST_ADMIN_PASSWORD.into()))
             .await
             .unwrap();
-        let lifecycle = Arc::new(LifecycleStore::new(pool.clone()));
         let bom = Arc::new(core_bom::BomStore::new(pool.clone()));
+        // 发布冻结注入（增量9，与 main 同源——api_gateway::bom_release_hook）
+        let lifecycle = Arc::new(LifecycleStore::new_with_hook(
+            pool.clone(),
+            Some(api_gateway::bom_release_hook(bom.clone())),
+        ));
         let app = api_gateway::router(AppState {
             registry: registry.clone(),
             service,
@@ -298,8 +302,8 @@ pub fn degraded_app(
         files,
     ));
     let sec = Arc::new(SecService::new(bad_pool.clone(), "degraded-secret".into()));
-    let lifecycle = Arc::new(LifecycleStore::new(bad_pool.clone()));
     let bom = Arc::new(core_bom::BomStore::new(bad_pool.clone()));
+    let lifecycle = Arc::new(LifecycleStore::new(bad_pool.clone()));
     api_gateway::router(AppState {
         registry,
         service,

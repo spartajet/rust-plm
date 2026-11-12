@@ -113,8 +113,12 @@ async fn main() -> Result<()> {
         files,
     ));
 
-    let lifecycle = Arc::new(core_version::LifecycleStore::new(pool.clone()));
     let bom = Arc::new(core_bom::BomStore::new(pool.clone()));
+    // 发布冻结注入（增量9 BOM 版本链）：released 同事务快照 BOM 子树（装配共用实现见 api-gateway::bom_release_hook）
+    let lifecycle = Arc::new(core_version::LifecycleStore::new_with_hook(
+        pool.clone(),
+        Some(api_gateway::bom_release_hook(bom.clone())),
+    ));
     // 事件外投循环（ADR-0007；1s 轮询 + 退避/死信）
     core_events::migrator()
         .run(&pool)

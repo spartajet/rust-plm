@@ -964,3 +964,149 @@ async fn revise_and_versions_via_api() {
     assert_eq!(s, 404, "越密级 revise 必须 404");
     ctx.cleanup().await;
 }
+
+// ==================== BOM 版本链（增量9 Review Focus #3/#4） ====================
+
+#[tokio::test]
+async fn bom_version_chain_freeze_isolate_asof() {
+    let ctx = TestCtx::setup("bvc", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "bved", "bved-pass-123", &["editor"], 0)
+        .await;
+    let ed = ctx.login_as("bved", "bved-pass-123").await;
+
+    // 三个对象：父 + 两子
+    for no in ["DWG-BV-P", "DWG-BV-C1", "DWG-BV-C2"] {
+        let (s, _, _) = send(
+            &ctx.app,
+            post_docs_multipart(Some(&ed), no, r#"{"name":"N"}"#, Some("b.dwg"), FILE.to_vec()),
+        )
+        .await;
+        assert_eq!(s, 201, "{no}");
+    }
+    // 查父/子对象 id
+    let mut ids: std::collections::HashMap<&str, String> = Default::default();
+    for no in ["DWG-BV-P", "DWG-BV-C1", "DWG-BV-C2"] {
+        let (s, body) = ctx.get_authed(&format!("/api/v1/docs/{no}"), &ed).await;
+        assert_eq!(s, 200);
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        ids.insert(no, v["object"]["id"].as_str().unwrap().to_string());
+    }
+    let (pid, c1, c2) = (
+        ids["DWG-BV-P"].clone(),
+        ids["DWG-BV-C1"].clone(),
+        ids["DWG-BV-C2"].clone(),
+    );
+
+    let set_lines = |t: &str, no: &str, body: String| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/boms/{no}/lines"))
+            .header("authorization", format!("Bearer {t}"))
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body))
+            .unwrap()
+    };
+    let expand = |t: &str, no: &str, q: &str| {
+        axum::http::Request::builder()
+            .method("GET")
+            .uri(format!("/api/v1/boms/{no}/expand{q}"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let parse_nd = |b: &[u8]| -> Vec<(String, i64)> {
+        String::from_utf8_lossy(b)
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| {
+                let v: serde_json::Value = serde_json::from_str(l).unwrap();
+                (v["child"].as_str().unwrap().to_string(), v["qty_total"].as_i64().unwrap())
+            })
+            .collect()
+    };
+
+    // v1 working：父 BOM = C1×2 + C2×1
+    let (s, body, _) = send(
+        &ctx.app,
+        set_lines(&ed, "DWG-BV-P", format!(r#"[{{"line_no":1,"child":"{c1}","qty":2}},{{"line_no":2,"child":"{c2}","qty":1}}]"#)),
+    )
+    .await;
+    assert_eq!(s, 204, "body={}", String::from_utf8_lossy(&body));
+
+    // as-of 未发布 → 400
+    let (s, body, _) = send(&ctx.app, expand(&ed, "DWG-BV-P", "?mode=full&major=1")).await;
+    assert_eq!(s, 400, "未发布 major 必须 400");
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["code"], "MDL-BAD-REQUEST");
+
+    // approve v1 → 冻结（hook 同事务快照）
+    let lc = |t: &str, no: &str, act: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/{act}"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let (s, _, _) = send(&ctx.app, lc(&ed, "DWG-BV-P", "submit")).await;
+    assert_eq!(s, 200);
+    let (s, _, _) = send(&ctx.app, lc(&admin, "DWG-BV-P", "approve")).await;
+    assert_eq!(s, 200);
+
+    // 快照表落行（Review Focus #4 前半）
+    let snaps: i64 = sqlx::query_scalar("SELECT count(*) FROM bom_edge_snapshot WHERE parent=$1")
+        .bind(uuid::Uuid::parse_str(&pid).unwrap())
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+    assert_eq!(snaps, 2, "v1 冻结 2 条边");
+    let rel: i64 = sqlx::query_scalar("SELECT count(*) FROM bom_release WHERE parent=$1 AND major=1")
+        .bind(uuid::Uuid::parse_str(&pid).unwrap())
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+    assert_eq!(rel, 1);
+
+    // expand 缺省（live）与 ?major=1 一致
+    let (s, body, _) = send(&ctx.app, expand(&ed, "DWG-BV-P", "?mode=full")).await;
+    assert_eq!(s, 200);
+    assert_eq!(parse_nd(&body).len(), 2);
+    let (s, body1, _) = send(&ctx.app, expand(&ed, "DWG-BV-P", "?mode=full&major=1")).await;
+    assert_eq!(s, 200);
+    assert_eq!(parse_nd(&body1), parse_nd(&body), "as-of(1)==live(v1 时点)");
+
+    // revise → working 2.0 → 改 live BOM = C2×5
+    let (s, _, _) = send(&ctx.app, lc(&ed, "DWG-BV-P", "revise")).await;
+    assert_eq!(s, 200);
+    let (s, _, _) = send(
+        &ctx.app,
+        set_lines(&ed, "DWG-BV-P", format!(r#"[{{"line_no":1,"child":"{c2}","qty":5}}]"#)),
+    )
+    .await;
+    assert_eq!(s, 204);
+
+    // 隔离钉：live=C2×5；major=1 仍=C1×2+C2×1（冻结未污染）
+    let (s, bodyv2, _) = send(&ctx.app, expand(&ed, "DWG-BV-P", "?mode=full")).await;
+    assert_eq!(s, 200);
+    let live = parse_nd(&bodyv2);
+    assert_eq!(live.len(), 1);
+    assert_eq!(live[0].0, c2);
+    assert_eq!(live[0].1, 5);
+    let (s, bodyv1, _) = send(&ctx.app, expand(&ed, "DWG-BV-P", "?mode=full&major=1")).await;
+    assert_eq!(s, 200);
+    let frozen = parse_nd(&bodyv1);
+    assert_eq!(frozen.len(), 2, "v1 冻结形态不被 v2 编辑污染");
+    assert!(frozen.contains(&(c1.clone(), 2)));
+    assert!(frozen.contains(&(c2.clone(), 1)));
+
+    // v2 发布 → major=2 as-of=新形态
+    let (s, _, _) = send(&ctx.app, lc(&ed, "DWG-BV-P", "submit")).await;
+    assert_eq!(s, 200);
+    let (s, _, _) = send(&ctx.app, lc(&admin, "DWG-BV-P", "approve")).await;
+    assert_eq!(s, 200);
+    let (s, body2, _) = send(&ctx.app, expand(&ed, "DWG-BV-P", "?mode=onelevel&major=2")).await;
+    assert_eq!(s, 200);
+    assert_eq!(parse_nd(&body2), vec![(c2, 5)]);
+    ctx.cleanup().await;
+}

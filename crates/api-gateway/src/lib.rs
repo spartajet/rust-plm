@@ -7,6 +7,7 @@ pub mod routes;
 pub mod state;
 
 pub use state::AppState;
+pub use state::bom_release_hook;
 
 use axum::Router;
 

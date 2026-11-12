@@ -50,6 +50,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 name = "api-gateway"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum",
  "core-bom",
  "core-events",
@@ -486,6 +487,7 @@ dependencies = [
 name = "core-version"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "core-files",
  "core-model",
@@ -1652,6 +1654,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "api-gateway",
+ "async-trait",
  "axum",
  "bytes",
  "core-bom",
@@ -1670,6 +1673,7 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

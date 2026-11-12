@@ -93,8 +93,16 @@ export interface BomRow {
   qty_total: number;
 }
 
-export async function bomExpand(http: AxiosInstance, objNo: string, mode: "full" | "leaf" | "onelevel" = "full"): Promise<BomRow[]> {
-  const res = await http.get(`/api/v1/boms/${objNo}/expand?mode=${mode}`);
+export async function bomExpand(
+  http: AxiosInstance,
+  objNo: string,
+  mode: "full" | "leaf" | "onelevel" = "full",
+  major?: number,
+): Promise<BomRow[]> {
+  // major=N → 发布快照 as-of 展开（增量9 BOM 版本链）；缺省=live
+  const res = await http.get(
+    `/api/v1/boms/${objNo}/expand?mode=${mode}${major !== undefined ? `&major=${major}` : ""}`,
+  );
   const text = String(res.data ?? "");
   if (!text.trim()) return [];
   return text
