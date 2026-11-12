@@ -3,22 +3,22 @@ import { flowUi, stateLabel } from "../src/utils/flowUi";
 import { guardTarget } from "../src/router/index";
 import { buildListQuery, parseNdjson } from "../src/api/docs";
 
-// Review Focus #2：flowUi 全状态穷举
+// Review Focus #2：flowUi 全状态穷举（增量8 +revise 维度）
 describe("flowUi", () => {
   it("working: submit+obsolete only", () => {
-    expect(flowUi("working")).toEqual({ submit: true, approve: false, reject: false, obsolete: true });
+    expect(flowUi("working")).toEqual({ submit: true, approve: false, reject: false, obsolete: true, revise: false });
   });
   it("review: approve+reject only", () => {
-    expect(flowUi("review")).toEqual({ submit: false, approve: true, reject: true, obsolete: false });
+    expect(flowUi("review")).toEqual({ submit: false, approve: true, reject: true, obsolete: false, revise: false });
   });
-  it("released: obsolete only", () => {
-    expect(flowUi("released")).toEqual({ submit: false, approve: false, reject: false, obsolete: true });
+  it("released: obsolete+revise only", () => {
+    expect(flowUi("released")).toEqual({ submit: false, approve: false, reject: false, obsolete: true, revise: true });
   });
   it("obsolete: all off", () => {
-    expect(flowUi("obsolete")).toEqual({ submit: false, approve: false, reject: false, obsolete: false });
+    expect(flowUi("obsolete")).toEqual({ submit: false, approve: false, reject: false, obsolete: false, revise: false });
   });
   it("unknown state: all off", () => {
-    expect(flowUi("nonsense")).toEqual({ submit: false, approve: false, reject: false, obsolete: false });
+    expect(flowUi("nonsense")).toEqual({ submit: false, approve: false, reject: false, obsolete: false, revise: false });
   });
   it("labels", () => {
     expect(stateLabel("working")).toBe("工作中");

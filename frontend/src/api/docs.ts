@@ -70,7 +70,7 @@ export async function uploadDoc(
   return res.data;
 }
 
-export type LifecycleAction = "submit" | "approve" | "reject" | "obsolete";
+export type LifecycleAction = "submit" | "approve" | "reject" | "obsolete" | "revise";
 
 export async function transition(
   http: AxiosInstance,
@@ -99,6 +99,23 @@ export async function bomExpand(http: AxiosInstance, objNo: string, mode: "full"
     .split("\n")
     .filter((l) => l.trim())
     .map((l) => JSON.parse(l) as BomRow);
+}
+
+/// 版本历史快照行（增量8）
+export interface VersionSnapshot {
+  major: number;
+  minor: number;
+  state: string;
+  file_hash?: string | null;
+  created_at?: string | null;
+}
+
+export async function listVersions(
+  http: AxiosInstance,
+  objNo: string,
+): Promise<{ current: BizObject; snapshots: VersionSnapshot[] }> {
+  const res = await http.get(`/api/v1/docs/${objNo}/versions`);
+  return res.data;
 }
 
 /// NDJSON 行解析（纯函数可单测）
