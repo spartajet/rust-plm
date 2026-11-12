@@ -132,32 +132,33 @@ async fn build_expand_matches_cte_three_modes() {
     let c = setup("expand").await;
     let ids = &c.node_ids;
     // 结构：root → [1..9]（数量 2..4），每个中层 → 2 个叶（10..39 交错）
-    let mut lines = Vec::new();
-    let mut line_no = 1;
-    for child in ids.iter().take(9).skip(1) {
-        lines.push(LineInput {
-            line_no,
+    let lines: Vec<LineInput> = ids
+        .iter()
+        .take(9)
+        .skip(1)
+        .enumerate()
+        .map(|(i, child)| LineInput {
+            line_no: (i + 1) as i32,
             child: *child,
             qty: 2,
-        });
-        line_no += 1;
-    }
+        })
+        .collect();
     c.store.set_lines(ids[ROOT], lines).await.unwrap();
 
-    for mid in ids.iter().take(9).skip(1) {
-        let mut ml = Vec::new();
-        ml.push(LineInput {
+    let mid_lines = [
+        LineInput {
             line_no: 1,
             child: ids[10],
             qty: 1,
-        });
-        ml.push(LineInput {
+        },
+        LineInput {
             line_no: 2,
             child: ids[11],
             qty: 2,
-        });
-        let _ = mid;
-        c.store.set_lines(*mid, ml).await.unwrap();
+        },
+    ];
+    for mid in ids.iter().take(9).skip(1) {
+        c.store.set_lines(*mid, mid_lines.to_vec()).await.unwrap();
     }
 
     // Full：闭包展开 == CTE 对拍（Review Focus #2 静态部分）
@@ -382,7 +383,7 @@ async fn dag_shared_child_quantity_summed() {
 
     let full = c.store.expand(ids[ROOT], ExpandMode::Full).await.unwrap();
     let ten = full.iter().find(|r| r.child == ids[10]).unwrap();
-    assert_eq!(ten.qty_total, 2 * 3 + 1 * 5, "共享子数量必须求和（6+5=11）");
+    assert_eq!(ten.qty_total, 11, "共享子数量必须求和（6+5=11）");
     c.drop_it().await;
 }
 

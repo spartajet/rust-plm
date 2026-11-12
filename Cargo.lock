@@ -51,6 +51,7 @@ name = "api-gateway"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "core-bom",
  "core-events",
  "core-files",
  "core-model",
@@ -1653,6 +1654,7 @@ dependencies = [
  "api-gateway",
  "axum",
  "bytes",
+ "core-bom",
  "core-events",
  "core-files",
  "core-model",

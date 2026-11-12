@@ -79,6 +79,10 @@ async fn main() -> Result<()> {
         .run(&pool)
         .await
         .context("core-version 迁移失败")?;
+    core_bom::migrator()
+        .run(&pool)
+        .await
+        .context("core-bom 迁移失败")?;
 
     // JWT 密钥策略（env → data_dir/jwt.key → 随机）+ admin 引导（仅缺省时创建）
     let jwt_secret = core_sec::resolve_secret(cfg.jwt_secret.as_deref(), &cfg.data_dir)
@@ -110,6 +114,7 @@ async fn main() -> Result<()> {
     ));
 
     let lifecycle = Arc::new(core_version::LifecycleStore::new(pool.clone()));
+    let bom = Arc::new(core_bom::BomStore::new(pool.clone()));
     // 事件外投循环（ADR-0007；1s 轮询 + 退避/死信）
     core_events::migrator()
         .run(&pool)
@@ -124,6 +129,7 @@ async fn main() -> Result<()> {
         max_upload: cfg.max_upload,
         sec,
         lifecycle,
+        bom,
     };
     let app = api_gateway::router(state);
 

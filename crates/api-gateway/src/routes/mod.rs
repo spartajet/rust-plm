@@ -1,6 +1,7 @@
 //! 路由装配：唯一 build 函数（R-D4）。
 
 pub mod auth;
+pub mod boms;
 pub mod docs;
 pub mod infra;
 pub mod meta;
@@ -43,6 +44,23 @@ pub fn build(state: AppState) -> Router {
             state.clone(),
             require_perm("docs", "approve"),
         ));
+    let boms_rw = Router::new()
+        .route(
+            "/api/v1/boms/{obj_no}/lines",
+            axum::routing::post(boms::set_lines),
+        )
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            require_perm("docs", "write"),
+        ));
+    let boms_r = Router::new()
+        .route("/api/v1/boms/{obj_no}/expand", get(boms::expand))
+        .route("/api/v1/boms/{obj_no}/where-used", get(boms::where_used))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            require_perm("docs", "read"),
+        ));
+
     let sec_mgmt = Router::new()
         .route("/api/v1/sec/users", post(sec_users::create_user))
         .route(
@@ -99,6 +117,8 @@ pub fn build(state: AppState) -> Router {
         .merge(auth)
         .merge(docs_rw)
         .merge(docs_r)
+        .merge(boms_rw)
+        .merge(boms_r)
         .merge(docs_lc_write)
         .merge(docs_lc_approve)
         .merge(sec_mgmt)

@@ -19,6 +19,8 @@ pub struct AppState {
     pub sec: Arc<SecService>,
     /// 生命周期存储（增量3）
     pub lifecycle: Arc<core_version::LifecycleStore>,
+    /// BOM 引擎（增量6）
+    pub bom: Arc<core_bom::BomStore>,
 }
 
 /// OpenAPI 聚合文档（/api/docs/openapi.json）
@@ -47,6 +49,7 @@ pub struct AppState {
         crate::routes::webhooks::WebhookDto,
         crate::routes::meta::TypeMeta,
         crate::routes::meta::SetFlowTierReq,
+        crate::routes::boms::LineInputDto,
     ))
 )]
 pub struct ApiDocHolder;
