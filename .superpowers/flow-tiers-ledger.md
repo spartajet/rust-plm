@@ -59,3 +59,4 @@ Final: fixed M1 fail-closed 对账——未配密钥实为 400(serde BadRequest)
 Final: fixed M3 pusher.spawn 移至 core_events 迁移后（冷库首启首 tick 不撞未建表）+spawn 补 MissedTickBehavior::Delay（镜像 dispatcher，tick 慢不突发补帧）。
 Final: minor (deferred): M2 HMAC 回调无重放防御（签名仅覆盖 body，无 timestamp/nonce——被截获的合法 approve 可在 revise→submit 新回合重放）——契约先行可接受，真实 IM 网关联调时按平台签名语义补时效性。
 Final: minor (deferred): M4 provider=none 时 NoopSender 把未发送卡记 status=1/sent 假账（纯记账语义；真实部署应配 provider 或后续引入 status=skipped）。
+Final: minor (deferred): 反连接每 1s tick 对 event_outbox 按 topic 过滤扫描（topic 无索引）——SMB 量级毫秒级无碍；outbox 长期增长后加部分索引 ON event_outbox(topic) WHERE topic IN (IM 主题) 或定期归档（终审复审建议入账）。
