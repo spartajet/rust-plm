@@ -43,6 +43,11 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/api/v
 curl -g -H "Authorization: Bearer $TOKEN" \
   'http://localhost:8080/api/v1/docs?filter[material]=Q235&sort=-updated_at'
 
+# BOM：结构写入 / 展开（NDJSON）/ 反查（循环引用 409 拒绝）
+curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json'   http://localhost:8080/api/v1/boms/DWG-001/lines   -d '[{"line_no":1,"child":"<子对象id>","qty":2}]'
+curl -g -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/v1/boms/DWG-001/expand?mode=full'
+curl -g -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/v1/boms/<子对象id>/where-used'
+
 # 详情 / 下载 / API 文档（docs 与文件下载同样需要 Bearer）
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001
 curl -o 支架.dwg -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001/file
@@ -78,7 +83,7 @@ docs/adr/        架构决策记录
 
 ## Roadmap（版本规划见需求文档 §8）
 
-骨架 ✓ → 认证 ✓ → 授权(RBAC+密级) ✓ → 生命周期 ✓ → Webhook 外投 ✓ → 三档流程 → BOM 引擎（闭包表已验证 10 万行展开 42ms）→ 前端工作台 → IM 卡片审批→ 三档流程 → BOM 引擎（闭包表已验证 10 万行展开 42ms）→ 前端工作台（Vue3+EP）→ 钉钉/企微/飞书卡片审批。
+骨架 ✓ → 认证 ✓ → 授权 ✓ → 生命周期 ✓ → Webhook 外投 ✓ → 三档流程 ✓ → BOM 引擎 ✓（闭包表 10 万行 42ms）→ 前端工作台 → IM 卡片审批→ 三档流程 → BOM 引擎（闭包表已验证 10 万行展开 42ms）→ 前端工作台（Vue3+EP）→ 钉钉/企微/飞书卡片审批。
 
 ## 许可
 
