@@ -261,3 +261,57 @@ async fn pusher_retries_then_dead_letters() {
     assert!(error.is_some());
     c.drop_it().await;
 }
+
+#[tokio::test]
+async fn subscription_survives_commit_order_inversion() {
+    // 终审 I1 回归钉：bigserial id 于 INSERT 分配、提交时可见——并发事务提交序倒挂下，
+    // 「id > max 水位线」会永久跳过后提交的低 id 行（审批卡静默丢失）。
+    // 反连接（NOT EXISTS）后：低 id 后提交仍被订阅。
+    let c = setup("inv").await;
+
+    // T1：插入 id=1 的事件，持有事务不提交
+    let mut t1 = c.pool.begin().await.unwrap();
+    sqlx::query(
+        "INSERT INTO event_outbox(topic, payload) \
+         VALUES ('doc.submitted', '{\"obj_no\":\"DWG-INV-1\",\"major\":1}')",
+    )
+    .execute(&mut *t1)
+    .await
+    .unwrap();
+
+    // T2：提交序先于 T1（id=2 先可见）
+    c.submit("DWG-INV-2").await;
+
+    let pusher = Arc::new(CardPusher::new(
+        c.pool.clone(),
+        Arc::new(core_im::NoopSender),
+        String::new(),
+    ));
+    pusher.tick().await.unwrap();
+
+    let low: i64 = sqlx::query_scalar("SELECT count(*) FROM im_card_log WHERE obj_no='DWG-INV-1'")
+        .fetch_one(&c.pool)
+        .await
+        .unwrap();
+    assert_eq!(low, 0, "未提交行不可见（正常）");
+    let high: i64 = sqlx::query_scalar("SELECT count(*) FROM im_card_log WHERE obj_no='DWG-INV-2'")
+        .fetch_one(&c.pool)
+        .await
+        .unwrap();
+    assert_eq!(high, 1, "先提交的高 id 行被消费");
+
+    // T1 提交：id=1 < 已消费 max(id=2)——水位线方案在此永久漏；反连接必须补上
+    t1.commit().await.unwrap();
+    pusher.tick().await.unwrap();
+    let low2: i64 = sqlx::query_scalar("SELECT count(*) FROM im_card_log WHERE obj_no='DWG-INV-1'")
+        .fetch_one(&c.pool)
+        .await
+        .unwrap();
+    assert_eq!(low2, 1, "后提交的低 id 事件不得被水位线永久跳过");
+    let total: i64 = sqlx::query_scalar("SELECT count(*) FROM im_card_log")
+        .fetch_one(&c.pool)
+        .await
+        .unwrap();
+    assert_eq!(total, 2, "两事件各订阅一次");
+    c.drop_it().await;
+}

@@ -156,7 +156,6 @@ async fn main() -> Result<()> {
         sender,
         cfg.im_doc_url_template.clone(),
     ));
-    pusher.spawn(1000);
     let im_user_map: std::collections::HashMap<String, String> =
         if cfg.im_user_map.trim().is_empty() {
             Default::default()
@@ -168,6 +167,8 @@ async fn main() -> Result<()> {
         .run(&pool)
         .await
         .context("core-events 迁移失败")?;
+    // pusher 启动于全部相关迁移之后（终审 M3：冷库首启首 tick 不撞未建表）
+    pusher.spawn(1000);
     let dispatcher = Arc::new(core_events::EventDispatcher::new(pool.clone()));
     let dispatcher_handle = dispatcher.spawn(1000);
     let state = api_gateway::AppState {

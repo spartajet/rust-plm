@@ -1262,3 +1262,25 @@ async fn im_actions_full_loop_and_guards() {
     assert_eq!(s, 404, "越密级 IM 动作必须 404");
     ctx.cleanup().await;
 }
+
+#[tokio::test]
+async fn im_actions_fail_closed_when_unconfigured() {
+    // 终审 M1：未配 PLM_IM_SECRET → 端点 503 fail-closed（degraded harness im_secret 为空）
+    use common::migrated;
+    let (_good_pool, registry, watcher, _root, db, admin_url) = migrated("imdead").await;
+    let bad: PgPool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect_lazy("postgres://postgres:root@localhost:5432/no_such_db_e2e")
+        .expect("lazy pool 创建不应失败");
+    let app = common::degraded_app(registry, bad, 1024 * 1024);
+    let body = r#"{"obj_no":"X","action":"approve","user":"u"}"#;
+    let (status, _, _) = send(&app, im_action(body, None)).await;
+    assert_eq!(status, 503, "未配置密钥必须 503 fail-closed");
+    watcher.abort();
+
+    let admin = PgPool::connect(&admin_url).await.unwrap();
+    sqlx::query(&format!("DROP DATABASE IF EXISTS \"{db}\" WITH (FORCE)"))
+        .execute(&admin)
+        .await
+        .unwrap();
+}

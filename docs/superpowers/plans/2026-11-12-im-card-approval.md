@@ -16,7 +16,8 @@
 
 - **事件**：`transition` 落 `doc.submitted`（→review）与 `doc.checked`（strict 二级，→checked）outbox 行，payload 含 type_code/obj_no/major/minor/actor/timestamp。
 - **出站**：`CardSender` trait 三实现（dingtalk=markdown+加签 timestamp&sign、wecom=markdown、feishu=text）；`none`=noop 缺省。卡片含 编号/版本/状态/提交人/[前往评审] 链接（`im_doc_url_template` 含 `{obj_no}` 占位）。
-- **消费**：CardPusher 1s 轮询：`INSERT INTO im_card_log(event_id,...) SELECT ... FROM event_outbox WHERE id > max(event_id) AND topic IN ('doc.submitted','doc.checked') ON CONFLICT DO NOTHING` → 认领（FOR UPDATE SKIP LOCKED）→ 发送 → status 1；失败 attempts+1 退避 [60,300,1800]，MAX_ATTEMPTS=4 死信（镜像 webhook dispatcher）。
+- **消费**：CardPusher 1s 轮询订阅 event_outbox → 发送 → status 1；失败 attempts+1 退避 [60,300,1800]，MAX_ATTEMPTS=4 死信（镜像 webhook dispatcher）。
+  - **订阅 SQL 终审 I1 裁定（原计划水位线方案作废）**：bigserial id 于 INSERT 分配、提交时可见，并发事务提交序倒挂下「id > max(event_id) 水位线」会永久跳过后提交的低 id 行（审批卡静默丢失，真库实证）——改用**反连接** `WHERE topic IN (...) AND NOT EXISTS (SELECT 1 FROM im_card_log l WHERE l.event_id = o.id) ON CONFLICT (event_id) DO NOTHING`（幂等仍锚定 event_id UNIQUE）。
 - **入站**：`POST /api/v1/im/actions`（免 Bearer，16KB 限）：`X-IM-Sign` = HMAC-SHA256(im_secret, body) hex，不匹配 401；body `{obj_no, action: approve|reject, user, comment?}`；`im_user_map`(JSON) 映射 IM id→PLM username，未映射 403；`SecService::enforce(username,"docs","approve")` 不过 403；密级 ABAC 越级 404（与 docs 路由同语义）；迁移 `LifecycleEvent::Approve/Reject` 返回新状态 JSON。
 - **配置**（figment PLM_ 前缀）：`im_provider`(none|dingtalk|wecom|feishu 缺省 none)、`im_webhook`、`im_secret`、`im_doc_url_template`、`im_user_map`。
 - **错误码**：不新增（复用 401/403/404/409 既有域错误）。

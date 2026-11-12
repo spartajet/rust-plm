@@ -38,7 +38,7 @@ pub async fn im_action(
     // 未配置密钥 → 端点关闭（503，fail-closed）
     if st.im_secret.is_empty() {
         return Err(ApiError::new(
-            core_model::DomainError::BadRequest("IM 回调未配置".into()),
+            core_model::DomainError::ServiceUnavailable("IM 回调未配置(PLM_IM_SECRET)".into()),
             &tid.0,
         ));
     }

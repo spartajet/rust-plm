@@ -30,6 +30,8 @@ impl CardPusher {
     pub fn spawn(self: Arc<Self>, interval_ms: u64) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(std::time::Duration::from_millis(interval_ms));
+            // tick 慢时按实际完成时间推进（不突发补帧——镜像 dispatcher spawn 语义）
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
                 tick.tick().await;
                 if let Err(e) = self.tick().await {
@@ -41,7 +43,9 @@ impl CardPusher {
 
     /// 单轮：订阅新事件 → 认领到期 pending → 发卡 → 更新状态
     pub async fn tick(&self) -> Result<()> {
-        // 1) 订阅：outbox 新事件进 log（幂等 by event_id UNIQUE）
+        // 1) 订阅：反连接（NOT EXISTS）——终审 I1：bigserial id 于 INSERT 分配、提交时可见，
+        //    并发事务提交序倒挂下「id > max 水位线」会永久跳过后提交的低 id 行（审批卡静默丢失）。
+        //    幂等仍以 im_card_log.event_id UNIQUE 锚定（ON CONFLICT 兜底并发 tick 重叠）。
         sqlx::query(
             "INSERT INTO im_card_log(event_id, topic, obj_no, major, minor, actor) \
              SELECT o.id, o.topic, o.payload->>'obj_no', \
@@ -49,8 +53,8 @@ impl CardPusher {
                     COALESCE((o.payload->>'minor')::int, 0), \
                     o.payload->>'actor' \
              FROM event_outbox o \
-             WHERE o.id > (SELECT COALESCE(MAX(event_id), 0) FROM im_card_log) \
-               AND o.topic IN ('doc.submitted', 'doc.checked') \
+             WHERE o.topic IN ('doc.submitted', 'doc.checked') \
+               AND NOT EXISTS (SELECT 1 FROM im_card_log l WHERE l.event_id = o.id) \
              ON CONFLICT (event_id) DO NOTHING",
         )
         .execute(&self.pool)
