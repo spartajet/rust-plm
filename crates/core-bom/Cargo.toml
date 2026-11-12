@@ -1,0 +1,13 @@
+[package]
+name = "core-bom"
+version = "0.1.0"
+edition = "2021"
+description = "RustPLM BOM 引擎：边表+闭包表双结构（V-2 已验证 10 万行展开 42ms）"
+
+[dependencies]
+tokio = { workspace = true }
+sqlx = { workspace = true }
+serde = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+core-model = { path = "../core-model" }

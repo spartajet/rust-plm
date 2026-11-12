@@ -386,6 +386,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "core-bom"
+version = "0.1.0"
+dependencies = [
+ "core-model",
+ "serde",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "core-events"
 version = "0.1.0"
 dependencies = [
