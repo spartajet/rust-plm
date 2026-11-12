@@ -11,15 +11,17 @@ COPY crates/core-sec/Cargo.toml crates/core-sec/Cargo.toml
 COPY crates/core-version/Cargo.toml crates/core-version/Cargo.toml
 COPY crates/core-events/Cargo.toml crates/core-events/Cargo.toml
 COPY crates/core-bom/Cargo.toml crates/core-bom/Cargo.toml
+COPY crates/core-im/Cargo.toml crates/core-im/Cargo.toml
 COPY crates/api-gateway/Cargo.toml crates/api-gateway/Cargo.toml
 COPY crates/plm-server/Cargo.toml crates/plm-server/Cargo.toml
 COPY spikes/metadata-spike/Cargo.toml spikes/metadata-spike/Cargo.toml
 COPY spikes/bom-spike/Cargo.toml spikes/bom-spike/Cargo.toml
 RUN mkdir -p crates/core-model/src crates/core-files/src crates/mod-doc/src \
             crates/core-sec/src crates/core-version/src crates/core-events/src crates/core-bom/src \
+            crates/core-im/src \
             crates/api-gateway/src crates/plm-server/src \
             spikes/metadata-spike/src spikes/bom-spike/src \
- && for d in core-model core-files mod-doc core-sec core-version core-events core-bom api-gateway; \
+ && for d in core-model core-files mod-doc core-sec core-version core-events core-bom core-im api-gateway; \
       do echo "" > crates/$d/src/lib.rs; done \
  && echo "fn main(){}" > crates/plm-server/src/main.rs \
  && echo "" > spikes/metadata-spike/src/main.rs && echo "" > spikes/bom-spike/src/main.rs \
