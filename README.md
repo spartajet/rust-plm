@@ -54,7 +54,15 @@ curl -o 支架.dwg -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v
 # openapi.json: /api/docs/openapi.json   Scalar UI: /api/docs（豁免鉴权）
 ```
 
-## 本地开发（无 Docker）
+## 前端工作台
+
+```bash
+cd frontend && npm install
+VITE_API_PROXY_TARGET=http://localhost:18095 npx vite --port 5173
+# 打开 http://localhost:5173 → 登录 admin → 图纸列表/上传/详情/生命周期/BOM
+```
+
+# 本地开发（无 Docker）
 
 ```bash
 # 1) 准备 PG18（本机已有服务亦可），创建空库
@@ -83,7 +91,7 @@ docs/adr/        架构决策记录
 
 ## Roadmap（版本规划见需求文档 §8）
 
-骨架 ✓ → 认证 ✓ → 授权 ✓ → 生命周期 ✓ → Webhook 外投 ✓ → 三档流程 ✓ → BOM 引擎 ✓（闭包表 10 万行 42ms）→ 前端工作台 → IM 卡片审批→ 三档流程 → BOM 引擎（闭包表已验证 10 万行展开 42ms）→ 前端工作台（Vue3+EP）→ 钉钉/企微/飞书卡片审批。
+骨架 ✓ → 认证 ✓ → 授权 ✓ → 生命周期 ✓ → Webhook 外投 ✓ → 三档流程 ✓ → BOM 引擎 ✓ → 前端工作台 ✓（登录/列表/上传/详情/生命周期/BOM）→ IM 卡片审批 → 前端工作台深化（看板/密级/用户管理 UI）→ 三档流程 → BOM 引擎（闭包表已验证 10 万行展开 42ms）→ 前端工作台（Vue3+EP）→ 钉钉/企微/飞书卡片审批。
 
 ## 许可
 
