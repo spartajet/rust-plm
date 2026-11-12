@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS bom_edge (
     line_no  integer NOT NULL,
     child    uuid NOT NULL REFERENCES cm_object(id),
     qty      bigint NOT NULL CHECK (qty > 0),
+    -- line_no ≥ 1 由应用校验（终审 M10）；DB CHECK 随下个迁移补
     PRIMARY KEY (parent, line_no)
 );
 CREATE INDEX IF NOT EXISTS bom_edge_child_idx ON bom_edge(child);

@@ -23,8 +23,7 @@ use utoipa::ToSchema;
 pub async fn set_lines(
     State(st): State<AppState>,
     Extension(tid): Extension<crate::error::TraceId>,
-    // user 已由 require_perm('docs','write') 验证；handler 只需 tid 与输入
-    Extension(_user): Extension<AuthUser>,
+    Extension(user): Extension<AuthUser>,
     Path(obj_no): Path<String>,
     Json(lines): Json<Vec<LineInputDto>>,
 ) -> Result<StatusCode, ApiError> {
@@ -33,6 +32,13 @@ pub async fn set_lines(
         .detail(&obj_no)
         .await
         .map_err(|e| ApiError::new(e, &tid.0))?;
+    // 终审 C2：密级 ABAC（越级 404 不泄露存在性；写侧同样拒绝）
+    if obj.object.secret_level > user.max_secret_level {
+        return Err(ApiError::new(
+            core_model::DomainError::ObjNotFound(format!("docs:{obj_no}")),
+            &tid.0,
+        ));
+    }
     let inputs: Vec<LineInput> = lines
         .into_iter()
         .map(|l| LineInput {
@@ -71,10 +77,26 @@ pub async fn expand(
         .detail(&obj_no)
         .await
         .map_err(|e| ApiError::new(e, &tid.0))?;
+    // 终审 C2：密级 ABAC
+    if obj.object.secret_level > user.max_secret_level {
+        return Err(ApiError::new(
+            core_model::DomainError::ObjNotFound(format!("docs:{obj_no}")),
+            &tid.0,
+        ));
+    }
+    // 终审 M2：未知 mode → 400（不再静默回退 Full）
     let mode = match q.mode.as_deref() {
+        None | Some("full") => ExpandMode::Full,
         Some("leaf") => ExpandMode::LeafOnly,
         Some("onelevel") => ExpandMode::OneLevel,
-        _ => ExpandMode::Full,
+        Some(other) => {
+            return Err(ApiError::new(
+                core_model::DomainError::BadRequest(format!(
+                    "mode 须为 full|leaf|onelevel，得到 {other}"
+                )),
+                &tid.0,
+            ));
+        }
     };
     let rows = st
         .bom
@@ -111,6 +133,13 @@ pub async fn where_used(
         .detail(&obj_no)
         .await
         .map_err(|e| ApiError::new(e, &tid.0))?;
+    // 终审 C2：密级 ABAC（反查同样不泄露越级对象存在性）
+    if obj.object.secret_level > user.max_secret_level {
+        return Err(ApiError::new(
+            core_model::DomainError::ObjNotFound(format!("docs:{obj_no}")),
+            &tid.0,
+        ));
+    }
     let rows = st
         .bom
         .where_used(obj.object.id)

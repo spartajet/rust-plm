@@ -55,38 +55,56 @@ impl BomStore {
             if l.qty <= 0 {
                 return Err(DomainError::BadRequest("qty 必须为正数".into()));
             }
-            if l.child == parent {
-                return Err(DomainError::BomCycle);
+            if l.line_no < 1 {
+                return Err(DomainError::BadRequest("line_no 须 ≥ 1".into())); // 终审 M10
             }
-            // 长链成环：child 已可达 parent
-            // 加边 parent→child 成环 ⟺ child 已可达 parent（经新边回连成环）；
-            // 替换既有直接边 qty 时 child⇝parent 不经此边，天然放行（V-2 delta 场景）
-            let reachable: i64 = sqlx::query_scalar(
-                "SELECT count(*) FROM bom_path WHERE ancestor = $1 AND descendant = $2",
-            )
-            .bind(l.child)
-            .bind(parent)
-            .fetch_one(&self.pool)
-            .await?;
-            if reachable > 0 {
+            if l.child == parent {
                 return Err(DomainError::BomCycle);
             }
         }
 
         let mut tx = self.pool.begin().await?;
 
-        // 1) 物化扣减集：旧边（parent→old_child）经 parent 祖先链 × old 子树 的全部贡献
-        //    （边尚在：join bom_edge 取 qty；先于 DELETE）
+        // 终审 I2：并发造环防护——锁 parent + 全部 child（按 id 排序防死锁），
+        // 锁定窗口内做 child⇝parent 校验（READ COMMITTED 下判定落在锁定集上）
+        let mut node_ids: Vec<Uuid> = std::iter::once(parent)
+            .chain(lines.iter().map(|l| l.child))
+            .collect();
+        node_ids.sort();
+        node_ids.dedup();
+        sqlx::query("SELECT id FROM cm_object WHERE id = ANY($1) ORDER BY id FOR UPDATE")
+            .bind(&node_ids)
+            .execute(&mut *tx)
+            .await?;
+        for l in &lines {
+            let reachable: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM bom_path WHERE ancestor = $1 AND descendant = $2",
+            )
+            .bind(l.child)
+            .bind(parent)
+            .fetch_one(&mut *tx)
+            .await?;
+            if reachable > 0 {
+                return Err(DomainError::BomCycle);
+            }
+        }
+
+        // 1) 物化扣减集：旧边贡献按 (a,d,dep) **先求和再扣**（终审 C1：UPDATE..FROM 未聚合静默腐蚀）
+        //    I1 同根因：累加侧同键多行也会触发 PG 21000，聚合一并消解
         sqlx::query(
             "UPDATE bom_path p \
              SET qty_path = p.qty_path - dd.q \
              FROM ( \
-               SELECT pa.ancestor AS a, po.descendant AS d, pa.depth + 1 + po.depth AS dep, \
-                      pa.qty_path * e.qty * po.qty_path AS q \
-               FROM bom_path pa \
-               JOIN bom_edge e ON e.parent = $1 \
-               JOIN bom_path po ON po.ancestor = e.child \
-               WHERE pa.descendant = $1 \
+               SELECT src.a, src.d, src.dep, SUM(src.q) AS q \
+               FROM ( \
+                 SELECT pa.ancestor AS a, po.descendant AS d, pa.depth + 1 + po.depth AS dep, \
+                        pa.qty_path * e.qty * po.qty_path AS q \
+                 FROM bom_path pa \
+                 JOIN bom_edge e ON e.parent = $1 \
+                 JOIN bom_path po ON po.ancestor = e.child \
+                 WHERE pa.descendant = $1 \
+               ) src \
+               GROUP BY src.a, src.d, src.dep \
              ) dd \
              WHERE p.ancestor = dd.a AND p.descendant = dd.d AND p.depth = dd.dep",
         )
@@ -102,7 +120,16 @@ impl BomStore {
             .bind(parent)
             .execute(&mut *tx)
             .await?;
+        // 终审 M1：child 存在性预校验（FK 23503 → 语义化 404）
         for l in &lines {
+            let exists: Option<i32> =
+                sqlx::query_scalar("SELECT 1 FROM cm_object WHERE id = $1 AND deleted_at IS NULL")
+                    .bind(l.child)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            if exists.is_none() {
+                return Err(DomainError::ObjNotFound(format!("child {}", l.child)));
+            }
             sqlx::query("INSERT INTO bom_edge(parent, line_no, child, qty) VALUES ($1,$2,$3,$4)")
                 .bind(parent)
                 .bind(l.line_no)
@@ -122,15 +149,19 @@ impl BomStore {
             .await?;
         }
 
-        // 4) 累加新边贡献（ON CONFLICT 累加；并发竞态兜底）
+        // 4) 累加新边贡献：语句内同键多行先 SUM（终审 I1：PG 21000 硬错消解）
         for l in &lines {
             sqlx::query(
                 "INSERT INTO bom_path(ancestor, descendant, depth, qty_path) \
-                 SELECT pa.ancestor, pn.descendant, pa.depth + 1 + pn.depth, \
-                        pa.qty_path * $3 * pn.qty_path \
-                 FROM bom_path pa \
-                 CROSS JOIN bom_path pn \
-                 WHERE pa.descendant = $1 AND pn.ancestor = $2 \
+                 SELECT agg.a, agg.d, agg.dep, SUM(agg.q) \
+                 FROM ( \
+                   SELECT pa.ancestor AS a, pn.descendant AS d, pa.depth + 1 + pn.depth AS dep, \
+                          pa.qty_path * $3 * pn.qty_path AS q \
+                   FROM bom_path pa \
+                   CROSS JOIN bom_path pn \
+                   WHERE pa.descendant = $1 AND pn.ancestor = $2 \
+                 ) agg \
+                 GROUP BY agg.a, agg.d, agg.dep \
                  ON CONFLICT (ancestor, descendant, depth) \
                  DO UPDATE SET qty_path = bom_path.qty_path + EXCLUDED.qty_path",
             )

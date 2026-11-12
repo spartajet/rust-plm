@@ -422,3 +422,163 @@ async fn where_used_reports_all_ancestors() {
     assert!(used.iter().any(|(a, _)| *a == ids[1]), "直接父反查命中");
     c.drop_it().await;
 }
+
+// ==================== 终审修复钉子（C1/I1 收敛子树 + M10） ====================
+
+#[tokio::test]
+async fn converging_subtrees_delta_matches_full() {
+    // 终审 C1/I1：DAG 收敛（同 parent 同 child 不同行号不同 qty；两条路径同深度收敛 D）
+    // 全量替换前（旧结构）：P→C(qty2)、P→C2(qty3)；C→D(qty1)、C2→D(qty1)
+    // → D 经两条路径同深度 depth=2 收敛于 P，qty = 2+3 = 5
+    // 全量替换 P→[C(qty1)] 后：旧 D 贡献须整扣（残留即 C1 腐蚀）
+    let c = setup("conv").await;
+    let ids = &c.node_ids;
+    let p = ids[0];
+    let cc = ids[1];
+    let c2 = ids[2];
+    let d = ids[3];
+
+    c.store
+        .set_lines(
+            p,
+            vec![
+                LineInput {
+                    line_no: 1,
+                    child: cc,
+                    qty: 2,
+                },
+                LineInput {
+                    line_no: 2,
+                    child: c2,
+                    qty: 3,
+                },
+            ],
+        )
+        .await
+        .unwrap();
+    c.store
+        .set_lines(
+            cc,
+            vec![LineInput {
+                line_no: 1,
+                child: d,
+                qty: 1,
+            }],
+        )
+        .await
+        .unwrap();
+    c.store
+        .set_lines(
+            c2,
+            vec![LineInput {
+                line_no: 1,
+                child: d,
+                qty: 1,
+            }],
+        )
+        .await
+        .unwrap();
+
+    let full = c.store.expand(p, ExpandMode::Full).await.unwrap();
+    let d_row = full.iter().find(|r| r.child == d).unwrap();
+    assert_eq!(d_row.qty_total, 5, "收敛前 D = 2*1 + 3*1 = 5");
+
+    // 全量替换：只留 C(qty1)——D 应变为 1（旧 C2/C 双路径扣净）
+    c.store
+        .set_lines(
+            p,
+            vec![LineInput {
+                line_no: 1,
+                child: cc,
+                qty: 1,
+            }],
+        )
+        .await
+        .unwrap();
+
+    let full = c.store.expand(p, ExpandMode::Full).await.unwrap();
+    let cte = c.cte_expand(p).await;
+    assert_eq!(full.len(), cte.len(), "替换后节点集一致");
+    for row in &full {
+        assert_eq!(
+            row.qty_total, cte[&row.child],
+            "替换后数量与 CTE 一致（终审 C1 钉）"
+        );
+    }
+    let d_row = full.iter().find(|r| r.child == d).unwrap();
+    assert_eq!(d_row.qty_total, 1);
+    assert!(
+        full.iter().find(|r| r.child == c2).is_none(),
+        "被移除子件不得残留"
+    );
+    c.drop_it().await;
+}
+
+#[tokio::test]
+async fn same_child_multi_lines_same_parent_delta() {
+    // 终审 C1 最简复现：同 parent 两行同 child 不同 qty，随后全量替换为不含该 child
+    let c = setup("samechild").await;
+    let ids = &c.node_ids;
+    let p = ids[0];
+    let leaf = ids[10];
+    c.store
+        .set_lines(
+            p,
+            vec![
+                LineInput {
+                    line_no: 1,
+                    child: leaf,
+                    qty: 2,
+                },
+                LineInput {
+                    line_no: 2,
+                    child: leaf,
+                    qty: 3,
+                },
+            ],
+        )
+        .await
+        .unwrap();
+    let full = c.store.expand(p, ExpandMode::Full).await.unwrap();
+    let l = full.iter().find(|r| r.child == leaf).unwrap();
+    assert_eq!(l.qty_total, 5, "多行同 child 先求和");
+
+    // 替换为不含 leaf 的行
+    c.store
+        .set_lines(
+            p,
+            vec![LineInput {
+                line_no: 1,
+                child: ids[20],
+                qty: 1,
+            }],
+        )
+        .await
+        .unwrap();
+    let full = c.store.expand(p, ExpandMode::Full).await.unwrap();
+    assert!(
+        full.iter().find(|r| r.child == leaf).is_none(),
+        "旧 child 必须被扣净（终审 C1）"
+    );
+    c.drop_it().await;
+}
+
+#[tokio::test]
+async fn line_no_must_be_positive() {
+    // 终审 M10
+    let c = setup("lineno").await;
+    let e = c
+        .store
+        .set_lines(
+            c.node_ids[0],
+            vec![LineInput {
+                line_no: 0,
+                child: c.node_ids[1],
+                qty: 1,
+            }],
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(e.code(), "MDL-BAD-REQUEST");
+    c.drop_it().await;
+}
