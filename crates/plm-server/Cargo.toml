@@ -21,6 +21,7 @@ anyhow = "1"
 core-model = { path = "../core-model" }
 core-files = { path = "../core-files" }
 mod-doc = { path = "../mod-doc" }
+core-sec = { path = "../core-sec" }
 api-gateway = { path = "../api-gateway" }
 
 [dev-dependencies]

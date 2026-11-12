@@ -1,5 +1,6 @@
 //! AppState：跨 handler 共享的装配句柄（Clone，Arc 内核）。
 
+use core_sec::SecService;
 use mod_doc::DocService;
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -14,6 +15,8 @@ pub struct AppState {
     pub pool: PgPool,
     /// 上传体积上限（字节），DefaultBodyLimit 使用
     pub max_upload: u64,
+    /// 认证服务（Task2 起 docs 路由要求 Bearer）
+    pub sec: Arc<SecService>,
 }
 
 /// OpenAPI 聚合文档（/api/docs/openapi.json）
@@ -25,12 +28,17 @@ pub struct AppState {
         crate::routes::docs::get_doc,
         crate::routes::docs::download_doc,
         crate::routes::infra::healthz,
+        crate::routes::auth::login,
+        crate::routes::auth::refresh,
     ),
     components(schemas(
         crate::routes::docs::FileInfoDto,
         crate::routes::docs::DocResponse,
         crate::routes::docs::ListResponse,
         crate::routes::infra::Healthz,
+        crate::routes::auth::LoginReq,
+        crate::routes::auth::RefreshReq,
+        crate::routes::auth::TokenPairDto,
     ))
 )]
 pub struct ApiDocHolder;

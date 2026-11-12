@@ -3,6 +3,9 @@
 use api_gateway::AppState;
 use core_files::LocalFileStore;
 use core_model::{HookRegistry, PgObjectStore, TypeRegistry};
+use core_sec::SecService;
+
+pub const TEST_ADMIN_PASSWORD: &str = "test-admin-pw";
 use mod_doc::DocService;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
@@ -70,13 +73,14 @@ pub async fn migrated(hint: &str) -> (PgPool, Arc<TypeRegistry>, PathBuf, String
         .unwrap();
     core_model::migrator().run(&pool).await.unwrap();
     mod_doc::migrator().run(&pool).await.unwrap();
+    core_sec::migrator().run(&pool).await.unwrap();
     let registry = TypeRegistry::load(pool.clone()).await.unwrap();
     let files_root = std::env::temp_dir().join(format!("plmsrv-{db}"));
     (pool, registry, files_root, db, admin_url)
 }
 
 impl TestCtx {
-    /// max_upload 字节上限（oversize 用例传小值）
+    /// max_upload 字节上限（oversize 用例传小值）。含 admin 引导（密码 test-admin-pw）。
     pub async fn setup(hint: &str, max_upload: u64) -> Self {
         let (pool, registry, files_root, db, admin_url) = migrated(hint).await;
         let files = Arc::new(LocalFileStore::new(&files_root));
@@ -88,11 +92,16 @@ impl TestCtx {
             objects,
             files,
         ));
+        let sec = Arc::new(SecService::new(pool.clone(), "test-jwt-secret".to_string()));
+        sec.ensure_admin(Some(TEST_ADMIN_PASSWORD.into()))
+            .await
+            .unwrap();
         let app = api_gateway::router(AppState {
             registry,
             service,
             pool: pool.clone(),
             max_upload,
+            sec,
         });
 
         Self {
@@ -102,6 +111,39 @@ impl TestCtx {
             admin_url,
             pool,
         }
+    }
+
+    /// 以 admin 登录并返回 access token（e2e 全链用）
+    pub async fn login(&self) -> String {
+        let req = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/login")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(format!(
+                r#"{{"username":"admin","password":"{TEST_ADMIN_PASSWORD}"}}"#
+            )))
+            .unwrap();
+        let (status, body, _) = send(&self.app, req).await;
+        assert_eq!(
+            status,
+            200,
+            "测试登录必须成功: {}",
+            String::from_utf8_lossy(&body)
+        );
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        v["access_token"].as_str().unwrap().to_string()
+    }
+
+    /// 带 Bearer 的 GET
+    pub async fn get_authed(&self, uri: &str, token: &str) -> (u16, bytes::Bytes) {
+        let req = axum::http::Request::builder()
+            .method("GET")
+            .uri(uri)
+            .header("authorization", format!("Bearer {token}"))
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let (s, b, _) = send(&self.app, req).await;
+        (s, b)
     }
 
     pub async fn cleanup(self) {
@@ -186,10 +228,12 @@ pub fn degraded_app(
         objects,
         files,
     ));
+    let sec = Arc::new(SecService::new(bad_pool.clone(), "degraded-secret".into()));
     api_gateway::router(AppState {
         registry,
         service,
         pool: bad_pool,
         max_upload,
+        sec,
     })
 }

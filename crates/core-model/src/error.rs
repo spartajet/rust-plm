@@ -60,6 +60,10 @@ pub enum DomainError {
     FileTooLarge(u64),
     #[error("请求不合法: {0}")]
     BadRequest(String),
+    #[error("未认证或凭证无效")]
+    SecUnauthorized,
+    #[error("用户名或密码错误")]
+    SecBadCredentials,
 }
 
 impl DomainError {
@@ -89,6 +93,8 @@ impl DomainError {
             Self::FileEmpty => "MDL-FILE-EMPTY",
             Self::FileTooLarge(_) => "MDL-FILE-TOO-LARGE",
             Self::BadRequest(_) => "MDL-BAD-REQUEST",
+            Self::SecUnauthorized => "MDL-SEC-UNAUTHORIZED",
+            Self::SecBadCredentials => "MDL-SEC-BAD-CREDENTIALS",
         }
     }
 
@@ -109,6 +115,7 @@ impl DomainError {
             Self::HookRejected(_) => 422,
             Self::HookTimeout(_) => 504,
             Self::FieldRequired(_) | Self::FileMulti | Self::FileEmpty | Self::BadRequest(_) => 400,
+            Self::SecUnauthorized | Self::SecBadCredentials => 401,
             Self::FileTooLarge(_) => 413,
             _ => 500,
         }

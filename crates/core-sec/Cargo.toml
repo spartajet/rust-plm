@@ -1,0 +1,17 @@
+[package]
+name = "core-sec"
+version = "0.1.0"
+edition = "2021"
+description = "RustPLM 安全域：认证(JWT/argon2)与用户仓储（授权 RBAC/ABAC 后续增量）"
+
+[dependencies]
+tokio = { workspace = true }
+sqlx = { workspace = true }
+serde = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+jsonwebtoken = { workspace = true }
+argon2 = { workspace = true }
+hex = { workspace = true }
+core-model = { path = "../core-model" }
