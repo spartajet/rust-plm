@@ -25,9 +25,10 @@ RUN mkdir -p crates/core-model/src crates/core-files/src crates/mod-doc/src \
  && echo "" > spikes/metadata-spike/src/main.rs && echo "" > spikes/bom-spike/src/main.rs \
  && cargo build --release -p plm-server
 
-# ② 真实源码 + 迁移目录（sqlx::migrate! 编译期读取）→ 重建（缓存命中则只重编业务 crate）
+# ② 真实源码 + 迁移目录（sqlx::migrate! 编译期读取）→ 重建（缓存命中则只重编业务 crate）。
+# touch 全部 .rs：COPY 保留构建上下文时戳（早于①桩层 RUN 时戳），cargo 会误判桩产物仍新鲜而跳过重编
 COPY crates ./crates
-RUN touch crates/plm-server/src/main.rs && cargo build --release -p plm-server
+RUN find crates -name '*.rs' -exec touch {} + && cargo build --release -p plm-server
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
