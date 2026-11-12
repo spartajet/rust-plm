@@ -505,6 +505,7 @@ dependencies = [
  "hex",
  "jsonwebtoken",
  "serde",
+ "serde_json",
  "sqlx",
  "tokio",
  "tracing",

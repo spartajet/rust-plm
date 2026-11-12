@@ -71,6 +71,7 @@ pub fn build(state: AppState) -> Router {
             post(sec_users::grant_role).delete(sec_users::revoke_role),
         )
         .route("/api/v1/sec/roles", get(sec_users::list_roles))
+        .route("/api/v1/sec/users", get(sec_users::list_users))
         .route(
             "/api/v1/sec/webhooks",
             post(webhooks::create_webhook).get(webhooks::list_webhooks),

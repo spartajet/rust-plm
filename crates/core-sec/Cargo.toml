@@ -8,6 +8,7 @@ description = "RustPLM 安全域：认证(JWT/argon2)与用户仓储（授权 RB
 tokio = { workspace = true }
 sqlx = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 tracing = { workspace = true }
