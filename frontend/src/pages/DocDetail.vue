@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ElMessage } from "element-plus";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { extractApiError } from "../api/http";
 import { http } from "../api/index";
@@ -17,14 +17,23 @@ const bomRows = ref<BomRow[]>([]);
 const snapshots = ref<VersionSnapshot[]>([]);
 const loading = ref(false);
 const acting = ref(false);
+// BOM 版本切换（增量11）：0=live；N=发布快照 major=N as-of
+const bomMajor = ref(0);
 
 const ui = computed(() => flowUi(doc.value?.object.state ?? ""));
+const bomOptions = computed(() => [
+  { label: "当前版本", value: 0 },
+  ...snapshots.value.map((s) => ({
+    label: `v${s.major}.${s.minor} 发布快照`,
+    value: s.major,
+  })),
+]);
 
 async function load() {
   loading.value = true;
   try {
     doc.value = await getDoc(http, objNo);
-    bomRows.value = await bomExpand(http, objNo, "onelevel");
+    bomRows.value = await bomExpand(http, objNo, "onelevel", bomMajor.value || undefined);
     snapshots.value = (await listVersions(http, objNo)).snapshots;
   } catch (e) {
     ElMessage.error(extractApiError(e));
@@ -32,6 +41,16 @@ async function load() {
     loading.value = false;
   }
 }
+
+async function reloadBom() {
+  try {
+    bomRows.value = await bomExpand(http, objNo, "onelevel", bomMajor.value || undefined);
+  } catch (e) {
+    ElMessage.error(extractApiError(e));
+  }
+}
+
+watch(bomMajor, reloadBom);
 
 onMounted(load);
 
@@ -120,7 +139,24 @@ function back() {
     </el-card>
 
     <el-card style="margin-top: 16px">
-      <template #header>BOM（一级明细）</template>
+      <template #header>
+        <div style="display: flex; align-items: center; gap: 12px">
+          <span>BOM（一级明细）</span>
+          <el-select
+            v-model="bomMajor"
+            size="small"
+            style="width: 180px"
+            data-test="bom-ver-select"
+          >
+            <el-option
+              v-for="o in bomOptions"
+              :key="o.value"
+              :label="o.label"
+              :value="o.value"
+            />
+          </el-select>
+        </div>
+      </template>
       <el-table :data="bomRows" size="small">
         <el-table-column label="子件" min-width="280">
           <template #default="{ row }">{{ row.child }}</template>

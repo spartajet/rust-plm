@@ -7,6 +7,8 @@ export const router = createRouter({
     { path: "/", component: () => import("../pages/Workbench.vue") },
     { path: "/docs", component: () => import("../pages/DocsList.vue") },
     { path: "/docs/:objNo", component: () => import("../pages/DocDetail.vue") },
+    // 用户管理（增量11；后端 sec:manage 门控——无权限者 API 403 提示）
+    { path: "/admin/users", component: () => import("../pages/UserAdmin.vue") },
   ],
 });
 

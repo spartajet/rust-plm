@@ -65,3 +65,143 @@ test("guard: unauthenticated /docs redirects to login", async ({ page }) => {
   await page.waitForURL("**/login", { timeout: 10_000 });
   await expect(page.locator('[data-test="login-btn"]')).toBeVisible();
 });
+
+// ==================== 增量11：看板 / BOM 版本切换 / 用户管理 ====================
+// （造数一律走 page.evaluate 内的 browser fetch——chromium 直连 API，规避本机 node 环回 RST）
+
+test("board: per-state counts match and click links to filtered list", async ({ page }) => {
+  await page.goto("/login");
+  await page.fill('[data-test="username"]', "admin");
+  await page.fill('[data-test="password"]', ADMIN_PW);
+  await page.click('[data-test="login-btn"]');
+  await page.waitForURL("/");
+
+  // 造 1 个 review 对象（此时 journey 已留 1 working；released 已 revise 回 working）
+  const OBJ = `DWG-BOARD-${Date.now()}`;
+  const up = await page.evaluate(async (no) => {
+    const t = localStorage.getItem("rustplm_token") ?? "";
+    const fd = new FormData();
+    fd.set("obj_no", no);
+    fd.set("attrs", JSON.stringify({ name: "Board件" }));
+    fd.set("file", new File(["%BOARD"], "b.dwg"));
+    const r = await fetch("/api/v1/docs", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${t}` },
+      body: fd,
+    });
+    return r.status;
+  }, OBJ);
+  if (up !== 201) throw new Error(`upload failed: ${up}`);
+  const submitted = await page.evaluate(async (no) => {
+    const t = localStorage.getItem("rustplm_token") ?? "";
+    return (
+      await fetch(`/api/v1/docs/${no}/submit`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${t}` },
+      })
+    ).status;
+  }, OBJ);
+  if (submitted !== 200) throw new Error(`submit failed: ${submitted}`);
+
+  await page.goto("/");
+  // 计数与声明顺序的造数一致：journey 1 working + board 1 review
+  await expect(page.locator('[data-test="board-count-working"]')).toHaveText("1", { timeout: 15_000 });
+  await expect(page.locator('[data-test="board-count-review"]')).toHaveText("1");
+  await expect(page.locator('[data-test="board-count-released"]')).toHaveText("0");
+  await expect(page.locator('[data-test="board-count-checked"]')).toHaveText("0");
+  await expect(page.locator('[data-test="board-count-obsolete"]')).toHaveText("0");
+
+  // 点击卡片 → /docs?state=working → 列表恰好 1 行
+  await page.click('[data-test="board-working"]');
+  await page.waitForURL("**/docs?state=working");
+  await expect(page.locator(".el-table__row")).toHaveCount(1);
+});
+
+test("bom version switch: live vs major=1 snapshot on detail page", async ({ page }) => {
+  await page.goto("/login");
+  await page.fill('[data-test="username"]', "admin");
+  await page.fill('[data-test="password"]', ADMIN_PW);
+  await page.click('[data-test="login-btn"]');
+  await page.waitForURL("/");
+
+  const P = `DWG-BOMVER-${Date.now()}`;
+  // chromium 内造数：3 对象 + BOM + 生命周期（API 语义已由后端 e2e 钉住）
+  const upload = (no: string) =>
+    page.evaluate(async (no) => {
+      const t = localStorage.getItem("rustplm_token") ?? "";
+      const fd = new FormData();
+      fd.set("obj_no", no);
+      fd.set("attrs", JSON.stringify({ name: no }));
+      fd.set("file", new File(["%X"], "x.dwg"));
+      return (await fetch("/api/v1/docs", { method: "POST", headers: { Authorization: `Bearer ${t}` }, body: fd })).status;
+    }, no);
+  for (const no of [P, `${P}-C1`, `${P}-C2`]) {
+    const s = await upload(no);
+    if (s !== 201) throw new Error(`upload ${no}: ${s}`);
+  }
+  const idOf = (no: string) =>
+    page.evaluate(async (no) => {
+      const t = localStorage.getItem("rustplm_token") ?? "";
+      const r = await fetch(`/api/v1/docs/${no}`, { headers: { Authorization: `Bearer ${t}` } });
+      const v = await r.json();
+      return v.object.id as string;
+    }, no);
+  const [pid, c1, c2] = [await idOf(P), await idOf(`${P}-C1`), await idOf(`${P}-C2`)];
+  const setLines = (body: unknown[]) =>
+    page.evaluate(async (body) => {
+      const t = localStorage.getItem("rustplm_token") ?? "";
+      return (
+        await fetch(`/api/v1/boms/${(body as { pid: string }).pid}/lines`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${t}`, "Content-Type": "application/json" },
+          body: JSON.stringify((body as { lines: unknown }).lines),
+        })
+      ).status;
+    }, { pid, lines: body });
+  if ((await setLines([{ line_no: 1, child: c1, qty: 2 }, { line_no: 2, child: c2, qty: 1 }])) !== 204)
+    throw new Error("set_lines v1 failed");
+  // v1 发布 → revise → v2 改 BOM（语义由后端 e2e 钉；此处走 browser fetch）
+  const lifecycle = (no: string, act: string) =>
+    page.evaluate(async ({ no, act }) => {
+      const t = localStorage.getItem("rustplm_token") ?? "";
+      return (await fetch(`/api/v1/docs/${no}/${act}`, { method: "POST", headers: { Authorization: `Bearer ${t}` } })).status;
+    }, { no: P, act });
+  for (const act of ["submit", "approve", "revise"]) {
+    const s = await lifecycle(P, act);
+    if (s !== 200) throw new Error(`${act}: ${s}`);
+  }
+  if ((await setLines([{ line_no: 1, child: c2, qty: 5 }])) !== 204) throw new Error("set_lines v2 failed");
+
+  // 详情页：live = 1 行（C2×5）
+  await page.goto(`/docs/${P}`);
+  await expect(page.locator('[data-test="bom-ver-select"]')).toBeVisible();
+  await expect(page.locator(".el-table__row")).toHaveCount(1);
+  await expect(page.getByRole("cell", { name: "5" })).toBeVisible();
+
+  // 切 major=1 快照 → 2 行（v1 冻结形态）
+  await page.click('[data-test="bom-ver-select"]');
+  await page.click("text=v1.0 发布快照");
+  await expect(page.locator(".el-table__row")).toHaveCount(2);
+});
+
+test("user admin: create user and grant role", async ({ page }) => {
+  await page.goto("/login");
+  await page.fill('[data-test="username"]', "admin");
+  await page.fill('[data-test="password"]', ADMIN_PW);
+  await page.click('[data-test="login-btn"]');
+  await page.waitForURL("/");
+
+  await page.goto("/admin/users");
+  await expect(page.locator('[data-test="role-admin-admin"]')).toBeVisible();
+
+  const U = `bd${Date.now()}`;
+  await page.click('[data-test="open-create"]');
+  await page.fill('[data-test="new-username"]', U);
+  await page.fill('[data-test="new-password"]', "bd-pass-123");
+  await page.click('[data-test="create-submit"]');
+  await expect(page.locator('[data-test="role-' + U + '-editor"]')).toBeVisible({ timeout: 10_000 });
+
+  // 授予 editor（点击 tag 切换）
+  await page.click(`[data-test="role-${U}-editor"]`);
+  await expect(page.locator(`[data-test="role-${U}-editor"].el-tag--success`)).toBeVisible({ timeout: 10_000 });
+});
