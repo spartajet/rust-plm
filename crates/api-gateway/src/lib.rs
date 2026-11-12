@@ -6,6 +6,7 @@ pub mod middleware;
 pub mod routes;
 pub mod state;
 
+pub use state::bom_release_hook;
 pub use state::AppState;
 
 use axum::Router;

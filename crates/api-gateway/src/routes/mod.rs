@@ -128,5 +128,8 @@ pub fn build(state: AppState) -> Router {
         .layer(axum::extract::DefaultBodyLimit::max(
             state.max_upload as usize,
         ))
+        // CORS 放开（增量9 裁定）：鉴权走 Bearer 头（非 Cookie），CORS 不构成安全边界；
+        // 前后端分离部署/浏览器直连 API 为正式支持路径（e2e 本机 node 环回不稳实证后切换）
+        .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(state)
 }

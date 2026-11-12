@@ -620,3 +620,272 @@ async fn set_lines_rejected_when_parent_not_working() {
         .expect("working parent 必须可编辑");
     c.drop_it().await;
 }
+
+// ==================== BOM 版本链（增量9 Task1：快照冻结 + as-of 展开） ====================
+
+/// 建 live 边：root->a(2), a->b(3), root->b(1) —— b 经两条路径 qty=7
+async fn seed_deep(c: &Ctx) -> (Uuid, Uuid, Uuid) {
+    let (root, a, b) = (c.node_ids[0], c.node_ids[1], c.node_ids[2]);
+    c.store
+        .set_lines(
+            root,
+            vec![
+                LineInput {
+                    line_no: 1,
+                    child: a,
+                    qty: 2,
+                },
+                LineInput {
+                    line_no: 2,
+                    child: b,
+                    qty: 1,
+                },
+            ],
+        )
+        .await
+        .unwrap();
+    c.store
+        .set_lines(
+            a,
+            vec![LineInput {
+                line_no: 1,
+                child: b,
+                qty: 3,
+            }],
+        )
+        .await
+        .unwrap();
+    (root, a, b)
+}
+
+#[tokio::test]
+async fn snapshot_freezes_idempotent_and_asof_matches_live() {
+    // Review Focus #2：同边集下快照 CTE 与 live expand 三模式对拍
+    let c = setup("vsnap").await;
+    let (root, _a, b) = seed_deep(&c).await;
+
+    let mut tx = c.pool.begin().await.unwrap();
+    let n = c
+        .store
+        .snapshot_live_edges_tx(&mut tx, root, 1)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(n, 3, "快照须落全部 3 条边");
+
+    // 幂等：同 major 重快照 → 0 新增
+    let mut tx = c.pool.begin().await.unwrap();
+    let n2 = c
+        .store
+        .snapshot_live_edges_tx(&mut tx, root, 1)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(n2, 0, "ON CONFLICT 幂等");
+
+    // bom_release 行存在（无 BOM 空集也须有——asof 守卫依据）
+    let rel: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM bom_release WHERE parent=$1 AND major=1")
+            .bind(root)
+            .fetch_one(&c.pool)
+            .await
+            .unwrap();
+    assert_eq!(rel, 1);
+
+    // 三模式对拍：asof(major=1) == live
+    for mode in [ExpandMode::Full, ExpandMode::LeafOnly, ExpandMode::OneLevel] {
+        let live: HashMap<Uuid, i64> = c
+            .store
+            .expand(root, mode)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| (r.child, r.qty_total))
+            .collect();
+        let asof: HashMap<Uuid, i64> = c
+            .store
+            .expand_asof(root, 1, mode)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| (r.child, r.qty_total))
+            .collect();
+        assert_eq!(live, asof, "mode={mode:?} 对拍失配");
+    }
+    let full = c
+        .store
+        .expand_asof(root, 1, ExpandMode::Full)
+        .await
+        .unwrap();
+    let b = full.iter().find(|r| r.child == b).unwrap();
+    assert_eq!(b.qty_total, 7, "双路径聚合 2*3+1");
+    let leaf = c
+        .store
+        .expand_asof(root, 1, ExpandMode::LeafOnly)
+        .await
+        .unwrap();
+    assert_eq!(leaf.len(), 1, "仅 b 是叶子");
+    let one = c
+        .store
+        .expand_asof(root, 1, ExpandMode::OneLevel)
+        .await
+        .unwrap();
+    assert_eq!(one.len(), 2, "一层= a+b");
+    c.drop_it().await;
+}
+
+#[tokio::test]
+async fn asof_isolated_from_live_edits() {
+    // Review Focus #2 隔离钉：改 live 不影响冻结快照
+    let c = setup("viso").await;
+    let (root, a, _b) = seed_deep(&c).await;
+    let mut tx = c.pool.begin().await.unwrap();
+    c.store
+        .snapshot_live_edges_tx(&mut tx, root, 1)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+
+    // v2 工作区：live 替换为 a(qty9)
+    c.store
+        .set_lines(
+            root,
+            vec![LineInput {
+                line_no: 1,
+                child: a,
+                qty: 9,
+            }],
+        )
+        .await
+        .unwrap();
+    let live = c.store.expand(root, ExpandMode::OneLevel).await.unwrap();
+    assert_eq!(live.len(), 1);
+    assert_eq!(live[0].qty_total, 9);
+
+    let asof = c
+        .store
+        .expand_asof(root, 1, ExpandMode::OneLevel)
+        .await
+        .unwrap();
+    assert_eq!(asof.len(), 2, "冻结快照不得被 live 编辑污染");
+    let sum: i64 = asof.iter().map(|r| r.qty_total).sum();
+    assert_eq!(sum, 3, "原 2+1");
+    c.drop_it().await;
+}
+
+#[tokio::test]
+async fn expand_asof_unreleased_major_is_400() {
+    // Review Focus #3：未发布 major → 400 MDL-BAD-REQUEST
+    let c = setup("v400").await;
+    let (root, _a, _b) = seed_deep(&c).await;
+    let e = c
+        .store
+        .expand_asof(root, 9, ExpandMode::Full)
+        .await
+        .unwrap_err();
+    assert_eq!(e.code(), "MDL-BAD-REQUEST");
+    c.drop_it().await;
+}
+
+#[tokio::test]
+async fn empty_bom_release_still_asof_expands_empty() {
+    // 无 BOM 边的对象发布：bom_release 落行、asof 返回空集（非 400）
+    let c = setup("vempty").await;
+    let root = c.node_ids[5];
+    let mut tx = c.pool.begin().await.unwrap();
+    let n = c
+        .store
+        .snapshot_live_edges_tx(&mut tx, root, 1)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(n, 0);
+    let rows = c
+        .store
+        .expand_asof(root, 1, ExpandMode::Full)
+        .await
+        .unwrap();
+    assert!(rows.is_empty());
+    c.drop_it().await;
+}
+
+#[tokio::test]
+async fn shared_subassembly_releases_are_independent() {
+    // 终审 C1 回归钉：子件 C 独立发布(major=1 冻结) → C 升版改下层 → 父件 A 发布。
+    // A 的 as-of 必须是 A 发布时点 live（leaf=2*9=18），C 的 as-of 仍是 C 自己发布时点（leaf=1）。
+    let c = setup("vc1").await;
+    let (a, sub, leaf) = (c.node_ids[0], c.node_ids[1], c.node_ids[2]);
+    c.store
+        .set_lines(
+            a,
+            vec![LineInput {
+                line_no: 1,
+                child: sub,
+                qty: 2,
+            }],
+        )
+        .await
+        .unwrap();
+    c.store
+        .set_lines(
+            sub,
+            vec![LineInput {
+                line_no: 1,
+                child: leaf,
+                qty: 1,
+            }],
+        )
+        .await
+        .unwrap();
+
+    // C 独立发布：冻结 (C,1) = leaf×1
+    let mut tx = c.pool.begin().await.unwrap();
+    c.store
+        .snapshot_live_edges_tx(&mut tx, sub, 1)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+
+    // C 升版工作区：line1 改 qty9
+    c.store
+        .set_lines(
+            sub,
+            vec![LineInput {
+                line_no: 1,
+                child: leaf,
+                qty: 9,
+            }],
+        )
+        .await
+        .unwrap();
+
+    // A 发布：快照须含 A 发布时点整棵子树（A→C×2 与 C→leaf×9）
+    let mut tx = c.pool.begin().await.unwrap();
+    let n = c.store.snapshot_live_edges_tx(&mut tx, a, 1).await.unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(
+        n, 2,
+        "A 冻结须抓到自身边+子件边（不受 C 已有 (C,1) 快照吞并）"
+    );
+
+    // A 的 as-of = A 发布时点：leaf = 2*9 = 18（修复前被静默吞成 2）
+    let asof_a = c.store.expand_asof(a, 1, ExpandMode::Full).await.unwrap();
+    let leaf_in_a = asof_a.iter().find(|r| r.child == leaf).unwrap();
+    assert_eq!(leaf_in_a.qty_total, 18, "A as-of 须为 A 发布时点 live");
+
+    // C 的 as-of 仍 = C 自己发布时点：leaf = 1（不被 A 发布污染）
+    let asof_c = c.store.expand_asof(sub, 1, ExpandMode::Full).await.unwrap();
+    let leaf_in_c = asof_c.iter().find(|r| r.child == leaf).unwrap();
+    assert_eq!(leaf_in_c.qty_total, 1, "C as-of 仍为 C 发布时点");
+
+    // 换号嵌合体场景：C line_no 换 2 后 A 再无动作——(C,1) 快照恒为旧号单行
+    let lines: Vec<(i32, i64)> = sqlx::query_as(
+        "SELECT line_no, qty FROM bom_edge_snapshot WHERE release_root=$1 AND major=1 ORDER BY line_no",
+    )
+    .bind(sub)
+    .fetch_all(&c.pool)
+    .await
+    .unwrap();
+    assert_eq!(lines, vec![(1, 1)], "C 的快照恒为发布时点形态");
+    c.drop_it().await;
+}

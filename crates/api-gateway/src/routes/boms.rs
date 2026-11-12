@@ -58,12 +58,14 @@ pub async fn set_lines(
 #[derive(Deserialize)]
 pub struct ExpandQuery {
     mode: Option<String>,
+    /// 发布 major（增量9 BOM 版本链）：给定则按发布快照 as-of 展开；缺省=live
+    major: Option<i32>,
 }
 
-/// GET /api/v1/boms/{obj_no}/expand?mode=full|leaf|onelevel — NDJSON 流式
+/// GET /api/v1/boms/{obj_no}/expand?mode=full|leaf|onelevel&major=N — NDJSON 流式
 #[utoipa::path(
     get, path = "/api/v1/boms/{obj_no}/expand",
-    params(("obj_no" = String, Path), ("mode" = String, Query, description = "full|leaf|onelevel，缺省 full")),
+    params(("obj_no" = String, Path), ("mode" = String, Query, description = "full|leaf|onelevel，缺省 full"), ("major" = i32, Query, description = "发布 major：as-of 快照展开；缺省=live")),
     responses((status = 200, description = "NDJSON: {child, qty_total} 行流"))
 )]
 pub async fn expand(
@@ -99,11 +101,19 @@ pub async fn expand(
             ));
         }
     };
-    let rows = st
-        .bom
-        .expand(obj.object.id, mode)
-        .await
-        .map_err(|e| ApiError::new(e, &tid.0))?;
+    // 增量9：major=N → 发布快照 as-of 展开；缺省 → live 闭包
+    let rows = match q.major {
+        Some(major) => st
+            .bom
+            .expand_asof(obj.object.id, major, mode)
+            .await
+            .map_err(|e| ApiError::new(e, &tid.0))?,
+        None => st
+            .bom
+            .expand(obj.object.id, mode)
+            .await
+            .map_err(|e| ApiError::new(e, &tid.0))?,
+    };
 
     let body: Vec<String> = rows
         .iter()
