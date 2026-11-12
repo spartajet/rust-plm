@@ -521,3 +521,126 @@ async fn revise_reentry_strict_two_level_chain() {
     assert_eq!(o.major, 2);
     c.drop_it().await;
 }
+
+// ==================== 增量9 ReleaseHook（发布冻结注入点） ====================
+
+use core_version::ReleaseHook;
+use std::sync::Mutex;
+
+#[derive(Default)]
+struct HookLog {
+    calls: Vec<(uuid::Uuid, i32, String)>, // (obj_id, major, type_code)
+    fail: bool,
+}
+
+/// 本地 newtype（孤儿规则：外来 trait × 外来类型不可直接 impl）
+struct LogHook(std::sync::Arc<Mutex<HookLog>>);
+
+#[async_trait::async_trait]
+impl ReleaseHook for LogHook {
+    async fn on_released(
+        &self,
+        _tx: &mut sqlx::PgConnection,
+        type_code: &str,
+        _obj_no: &str,
+        obj_id: uuid::Uuid,
+        major: i32,
+    ) -> core_model::Result<()> {
+        let mut g = self.0.lock().unwrap();
+        if g.fail {
+            return Err(core_model::DomainError::Db("hook 注入失败演练".into()));
+        }
+        g.calls.push((obj_id, major, type_code.to_string()));
+        Ok(())
+    }
+}
+
+async fn setup_hook(hint: &str) -> (Ctx, std::sync::Arc<Mutex<HookLog>>, LifecycleStore) {
+    let c = setup(hint).await;
+    let log = std::sync::Arc::new(Mutex::new(HookLog::default()));
+    let store = LifecycleStore::new_with_hook(c.pool.clone(), Some(std::sync::Arc::new(LogHook(log.clone()))));
+    (c, log, store)
+}
+
+#[tokio::test]
+async fn release_hook_invoked_in_migration_major_pinned() {
+    // Review Focus #1：hook 在发布事务内收到 (obj_id, major=1)
+    let (c, log, store) = setup_hook("hk1").await;
+    c.new_doc("DWG-HK-1").await;
+    store
+        .transition("drawing", "DWG-HK-1", LifecycleEvent::Submit, None)
+        .await
+        .unwrap();
+    let o = store
+        .transition("drawing", "DWG-HK-1", LifecycleEvent::Approve, None)
+        .await
+        .unwrap();
+    assert_eq!(o.state, "released");
+    let calls = log.lock().unwrap().calls.clone();
+    assert_eq!(calls.len(), 1);
+    assert_eq!((calls[0].1, calls[0].2.as_str()), (1, "drawing"));
+    assert_eq!(calls[0].0, o.id);
+
+    // 升版后再发布：major=2
+    store
+        .transition("drawing", "DWG-HK-1", LifecycleEvent::Revise, None)
+        .await
+        .unwrap();
+    store
+        .transition("drawing", "DWG-HK-1", LifecycleEvent::Submit, None)
+        .await
+        .unwrap();
+    store
+        .transition("drawing", "DWG-HK-1", LifecycleEvent::Approve, None)
+        .await
+        .unwrap();
+    let calls = log.lock().unwrap().calls.clone();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[1].1, 2);
+    c.drop_it().await;
+}
+
+#[tokio::test]
+async fn release_hook_error_rolls_back_whole_migration() {
+    // Review Focus #1：hook Err → 发布整体回滚（状态不变/released 事件与快照均不落）
+    let (c, log, store) = setup_hook("hk2").await;
+    log.lock().unwrap().fail = true;
+    c.new_doc("DWG-HK-2").await;
+    store
+        .transition("drawing", "DWG-HK-2", LifecycleEvent::Submit, None)
+        .await
+        .unwrap();
+    let e = store
+        .transition("drawing", "DWG-HK-2", LifecycleEvent::Approve, None)
+        .await
+        .unwrap_err();
+    let _ = e;
+    let row: (String, i64, i64) = sqlx::query_as(
+        "SELECT o.state, \
+            (SELECT count(*) FROM cm_obj_snapshot WHERE obj_no='DWG-HK-2'), \
+            (SELECT count(*) FROM event_outbox WHERE topic='doc.released' AND payload->>'obj_no'='DWG-HK-2') \
+         FROM cm_object o WHERE o.obj_no='DWG-HK-2'",
+    )
+    .fetch_one(&c.pool)
+    .await
+    .unwrap();
+    assert_eq!(row.0, "review", "状态必须留在 review（未发布）");
+    assert_eq!((row.1, row.2), (0, 0), "快照与事件不得落库");
+    c.drop_it().await;
+}
+
+#[tokio::test]
+async fn no_hook_approve_unaffected() {
+    // Review Focus #5：无 hook 装配（LifecycleStore::new）与增量8 行为一致
+    let c = setup("hk3").await;
+    c.new_doc("DWG-HK-3").await;
+    c.release_with_hash("DWG-HK-3", "h").await;
+    let d = c.svc.detail("DWG-HK-3").await.unwrap();
+    assert_eq!(d.object.state, "released");
+    let snaps: i64 = sqlx::query_scalar("SELECT count(*) FROM cm_obj_snapshot WHERE obj_no='DWG-HK-3'")
+        .fetch_one(&c.pool)
+        .await
+        .unwrap();
+    assert_eq!(snaps, 1);
+    c.drop_it().await;
+}

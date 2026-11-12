@@ -7,11 +7,24 @@ use uuid::Uuid;
 
 pub struct LifecycleStore {
     pool: PgPool,
+    /// 发布扩展点（增量9）：released 同事务回调（如 BOM 冻结）；None=无扩展（向后兼容）
+    release_hook: Option<std::sync::Arc<dyn crate::ReleaseHook>>,
 }
 
 impl LifecycleStore {
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            release_hook: None,
+        }
+    }
+
+    /// 注入发布扩展点（plm-server 装配层消费：BOM 冻结等发布时动作）
+    pub fn new_with_hook(pool: PgPool, hook: Option<std::sync::Arc<dyn crate::ReleaseHook>>) -> Self {
+        Self {
+            pool,
+            release_hook: hook,
+        }
     }
 
     /// 迁移对象状态（按 type_code+obj_no 定位最新活版本）。
@@ -178,6 +191,11 @@ impl LifecycleStore {
                 }))
                 .execute(&mut *tx)
                 .await?;
+            // 发布扩展点（增量9）：同事务回调（BOM 冻结等）；Err → 整个迁移回滚
+            if let Some(hook) = &self.release_hook {
+                hook.on_released(&mut *tx, type_code, &row.obj_no, obj.0, obj.3)
+                    .await?;
+            }
         }
         // revise：同事务落 doc.revised（增量8——下游/IM 卡片感知升版）
         if ev == LifecycleEvent::Revise {
