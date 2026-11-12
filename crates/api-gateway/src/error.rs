@@ -20,6 +20,9 @@ pub async fn trace_mw(mut req: axum::extract::Request, next: axum::middleware::N
     if let Ok(v) = HeaderValue::from_str(&tid.0) {
         res.headers_mut().insert("x-trace-id", v);
     }
+    // PLM 数据不得被浏览器/中间层缓存（审计与一致性；终审生命周期 e2e 实证 GET 启发式缓存竞态）
+    res.headers_mut()
+        .insert("cache-control", HeaderValue::from_static("no-store"));
     res
 }
 
