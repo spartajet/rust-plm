@@ -2,6 +2,10 @@
 resolver = "2"
 members = ["crates/*", "spikes/*"]
 
+# AGPL-3.0 双许可：≤30 并发用户免费商用；更大规模商业部署联系作者获取商业许可
+[workspace.package]
+license = "AGPL-3.0-or-later"
+
 [workspace.dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "io-util", "signal"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "uuid", "chrono", "macros", "migrate"] }
