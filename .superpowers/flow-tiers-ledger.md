@@ -14,3 +14,12 @@ Final: fixed I5 e2e objNo 唯一化（Date.now）— 可重复门禁成立
 Final: fixed M1 login 401 旁路 / M3 encodeURIComponent / M4 gitignore / M7 vitest/config / 后端 no-store（生命周期 e2e 实证 GET 缓存竞态的治本）
 Final: minor (deferred): M2 上传无客户端大小/类型校验; M8 按钮不按角色显隐(viewer 见 approve 按钮点击 403——UX 债, Roadmap 深化已列); M9 zh-cn locale/timeout 30s/refresh 未接线
 Final: Ruling: I3 released→obsolete:true 为有意偏离计划原文（PLM 语义合理），补台账裁定——后续按台账改计划而非改代码。
+[增量8 Revise 升版 追加台账]
+Final: Task1-6 全绿合并——Revise 三档通用(released→working major+1/minor=0/iteration归零)+doc.revised outbox+快照 file_hash(0010)；M3' 清偿(ObjectStore::get_latest+mod-doc detail/open_original/update_object 接线)；BOM set_lines 锁后查态仅 working(423)。
+Final: Ruling: transition 保持原签名,新增 transition_with_file(委托+None)——零测试churn,file_hash 仅为 released 快照关注点。
+Final: Ruling: 版本模型=就地升版(A方案),UUID 身份稳定,BOM边/file_ref/前端零迁移;历史经 cm_obj_snapshot(升版不写新快照,approve 时已写)。BOM 边版本化(每 major 冻结边)留待 BOM 版本链增量。
+Final: Ruling: 旧版文件下载端点未做(数据已存 file_hash,出口后置)——快照 file_hash 为不可重建数据先存。
+Final: fixed 快照 file_hash 断言 RED→mod-doc::transition 补 get_latest+original_file 接线 transition_with_file。
+Final: minor (deferred): versions 端点未分页(快照量级小);doc.revised payload 未含 actor(outbox payload 契约债合并台账);前端详情未展示 file_hash 全文(截断展示即可)。
+Final: Ruling: vitest exclude tests/e2e(Playwright 专属)+@types/node——vue-tsc/vitest 门禁此前误吞 e2e collection error,修正后 vitest 单文件 14 绿。
+Final: Ruling: 本机无 nextest,门禁用 cargo test(103 passed,0 failed);CI(ubuntu)仍用 nextest——本地/CI 等价性由 TEST_DATABASE_URL 唯一库方案保证。

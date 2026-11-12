@@ -160,12 +160,11 @@ async fn revise_creates_next_working_major() {
         (1, 0, "released")
     );
     // 发布件哈希随 approve 落快照（数据先存——旧版文件追溯出口在后续增量）
-    let fh: Option<String> = sqlx::query_scalar(
-        "SELECT file_hash FROM cm_obj_snapshot WHERE obj_no='DWG-RV-1'",
-    )
-    .fetch_one(&c.pool)
-    .await
-    .unwrap();
+    let fh: Option<String> =
+        sqlx::query_scalar("SELECT file_hash FROM cm_obj_snapshot WHERE obj_no='DWG-RV-1'")
+            .fetch_one(&c.pool)
+            .await
+            .unwrap();
     assert_eq!(fh.as_deref(), Some("hash-v1-content"));
 
     // doc.revised 事件
@@ -245,11 +244,10 @@ async fn concurrent_revise_exactly_one_winner() {
     let loser = if r1.is_err() { &r1 } else { &r2 };
     assert_eq!(loser.as_ref().unwrap_err().code(), "MDL-LCS-TRANSITION");
 
-    let major: i32 =
-        sqlx::query_scalar("SELECT major_ver FROM cm_object WHERE obj_no='DWG-RV-4'")
-            .fetch_one(&c.pool)
-            .await
-            .unwrap();
+    let major: i32 = sqlx::query_scalar("SELECT major_ver FROM cm_object WHERE obj_no='DWG-RV-4'")
+        .fetch_one(&c.pool)
+        .await
+        .unwrap();
     assert_eq!(major, 2, "败者不得把 major 推到 3");
     c.drop_it().await;
 }
@@ -266,7 +264,11 @@ async fn revise_then_rerelease_versions_chain() {
         .unwrap();
     // working 2.0 期间改属性（就地编辑草稿）
     let d = c.svc.detail("DWG-RV-5").await.unwrap();
-    assert_eq!((d.object.major, d.object.minor), (2, 0), "M3'：detail 取最新版");
+    assert_eq!(
+        (d.object.major, d.object.minor),
+        (2, 0),
+        "M3'：detail 取最新版"
+    );
     c.svc
         .update_object(
             "DWG-RV-5",
@@ -294,7 +296,10 @@ async fn revise_then_rerelease_versions_chain() {
     .unwrap();
     assert_eq!(snaps.len(), 2, "两个 major 各一份 released 快照");
     assert_eq!((snaps[0].0, snaps[0].3.as_deref()), (1, Some("h1")));
-    assert_eq!((snaps[1].0, snaps[1].1, snaps[1].3.as_deref()), (2, 0, Some("h2")));
+    assert_eq!(
+        (snaps[1].0, snaps[1].1, snaps[1].3.as_deref()),
+        (2, 0, Some("h2"))
+    );
     // v1 快照不被 v2 变更污染
     let v1_attrs: serde_json::Value = sqlx::query_scalar(
         "SELECT attrs FROM cm_obj_snapshot WHERE obj_no='DWG-RV-5' AND major_ver=1",

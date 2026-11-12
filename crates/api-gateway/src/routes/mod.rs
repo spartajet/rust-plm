@@ -25,10 +25,7 @@ pub fn build(state: AppState) -> Router {
         .route("/api/v1/docs", get(docs::list_docs))
         .route("/api/v1/docs/{obj_no}", get(docs::get_doc))
         .route("/api/v1/docs/{obj_no}/file", get(docs::download_doc))
-        .route(
-            "/api/v1/docs/{obj_no}/versions",
-            get(docs::versions_doc),
-        )
+        .route("/api/v1/docs/{obj_no}/versions", get(docs::versions_doc))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             require_perm("docs", "read"),

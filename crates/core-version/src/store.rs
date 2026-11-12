@@ -149,10 +149,7 @@ impl LifecycleStore {
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| {
-            DomainError::IllegalTransition(
-                row.state.clone(),
-                format!("{} (并发变更)", ev.as_str()),
-            )
+            DomainError::IllegalTransition(row.state.clone(), format!("{} (并发变更)", ev.as_str()))
         })?;
 
         // released：同事务快照（含发布件哈希） + 事件

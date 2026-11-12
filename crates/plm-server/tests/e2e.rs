@@ -907,10 +907,15 @@ async fn revise_and_versions_via_api() {
     assert_eq!(v["current"]["state"], "released");
     assert_eq!(v["snapshots"].as_array().unwrap().len(), 1);
     assert_eq!(v["snapshots"][0]["major"], 1);
-    assert!(v["snapshots"][0]["file_hash"].is_string(), "快照须带发布件哈希");
+    assert!(
+        v["snapshots"][0]["file_hash"].is_string(),
+        "快照须带发布件哈希"
+    );
 
     // viewer 只读：versions 200，revise 403（Review Focus #5）
-    let (s, _) = ctx.get_authed("/api/v1/docs/DWG-RV-E1/versions", &view).await;
+    let (s, _) = ctx
+        .get_authed("/api/v1/docs/DWG-RV-E1/versions", &view)
+        .await;
     assert_eq!(s, 200);
     let (s, body, _) = send(&ctx.app, lc(&view, "DWG-RV-E1", "revise")).await;
     assert_eq!(s, 403);

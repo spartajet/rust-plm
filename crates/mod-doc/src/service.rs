@@ -142,7 +142,15 @@ impl DocService {
     ) -> Result<BizObject> {
         let cur = self.objects.get_latest(Self::TYPE, obj_no).await?;
         self.objects
-            .update(Self::TYPE, obj_no, cur.major, cur.minor, patch, expect_rev, actor)
+            .update(
+                Self::TYPE,
+                obj_no,
+                cur.major,
+                cur.minor,
+                patch,
+                expect_rev,
+                actor,
+            )
             .await
     }
 
@@ -173,28 +181,33 @@ impl DocService {
         &self,
         obj_no: &str,
     ) -> Result<(BizObject, Vec<crate::dto::VersionSnapshot>)> {
+        #[derive(sqlx::FromRow)]
+        struct SnapRow {
+            major_ver: i32,
+            minor_ver: i32,
+            state: String,
+            file_hash: Option<String>,
+            created_at: Option<chrono::DateTime<chrono::Utc>>,
+        }
         let object = self.objects.get_latest(Self::TYPE, obj_no).await?;
-        let rows: Vec<(i32, i32, String, Option<String>, Option<chrono::DateTime<chrono::Utc>>)> =
-            sqlx::query_as(
-                "SELECT major_ver, minor_ver, state, file_hash, created_at FROM cm_obj_snapshot \
+        let rows: Vec<SnapRow> = sqlx::query_as(
+            "SELECT major_ver, minor_ver, state, file_hash, created_at FROM cm_obj_snapshot \
                  WHERE type_code = $1 AND obj_no = $2 \
                  ORDER BY major_ver DESC, minor_ver DESC",
-            )
-            .bind(Self::TYPE)
-            .bind(obj_no)
-            .fetch_all(&self.pool)
-            .await?;
+        )
+        .bind(Self::TYPE)
+        .bind(obj_no)
+        .fetch_all(&self.pool)
+        .await?;
         let snaps = rows
             .into_iter()
-            .map(
-                |(major, minor, state, file_hash, created_at)| crate::dto::VersionSnapshot {
-                    major,
-                    minor,
-                    state,
-                    file_hash,
-                    created_at,
-                },
-            )
+            .map(|r| crate::dto::VersionSnapshot {
+                major: r.major_ver,
+                minor: r.minor_ver,
+                state: r.state,
+                file_hash: r.file_hash,
+                created_at: r.created_at,
+            })
             .collect();
         Ok((object, snaps))
     }
