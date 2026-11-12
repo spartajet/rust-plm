@@ -19,7 +19,11 @@ curl -X POST http://localhost:8080/api/v1/auth/login \
   -d '{"username":"admin","password":"你的密码"}'
 # → {"access_token":"…","refresh_token":"…","expires_in":900}
 
-# 上传（需 Bearer；access 15 分钟，POST /api/v1/auth/refresh 轮换）
+# 用户与角色（仅 admin）：内置 admin/editor/viewer
+# editor=上传+读, viewer=只读; max_secret_level: 0公开/1内部/2秘密/3机密（越级 404/列表过滤）
+curl -X POST http://localhost:8080/api/v1/sec/users   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json'   -d '{"username":"zhang","password":"Zhang@2026","roles":["editor"],"max_secret_level":2}'
+
+# 上传（需 Bearer；access 15 分钟，POST /api/v1/auth/refresh 轮换；editor 及以上）
 curl -X POST http://localhost:8080/api/v1/docs \
   -H "Authorization: Bearer $TOKEN" \
   -F 'obj_no=DWG-001' \
@@ -65,7 +69,7 @@ docs/adr/        架构决策记录
 
 ## Roadmap（版本规划见需求文档 §8）
 
-骨架 ✓ → 认证 ✓（core-sec：登录/JWT/admin 引导）→ 授权(RBAC/ABAC) + 版本/生命周期 + 事件（core-version/events）→ 三档流程 → BOM 引擎（闭包表已验证 10 万行展开 42ms）→ 前端工作台（Vue3+EP）→ 钉钉/企微/飞书卡片审批。
+骨架 ✓ → 认证 ✓ → 授权(RBAC+密级) ✓ → 版本/生命周期 + 事件（core-version/events）→ 三档流程 → BOM 引擎→ 三档流程 → BOM 引擎（闭包表已验证 10 万行展开 42ms）→ 前端工作台（Vue3+EP）→ 钉钉/企微/飞书卡片审批。
 
 ## 许可
 
