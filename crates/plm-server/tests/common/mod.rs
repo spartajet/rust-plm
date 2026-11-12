@@ -88,6 +88,7 @@ pub async fn migrated(
     mod_doc::migrator().run(&pool).await.unwrap();
     core_sec::migrator().run(&pool).await.unwrap();
     core_version::migrator().run(&pool).await.unwrap();
+    core_bom::migrator().run(&pool).await.unwrap();
     let registry = TypeRegistry::load(pool.clone()).await.unwrap();
     // NOTIFY 即时 + 1s 兜底的热刷新；handle 交由 cleanup abort（否则坏池任务阻塞测试进程退出）
     let watcher = registry.spawn_watcher(1).await;
@@ -113,6 +114,7 @@ impl TestCtx {
             .await
             .unwrap();
         let lifecycle = Arc::new(LifecycleStore::new(pool.clone()));
+        let bom = Arc::new(core_bom::BomStore::new(pool.clone()));
         let app = api_gateway::router(AppState {
             registry: registry.clone(),
             service,
@@ -120,6 +122,7 @@ impl TestCtx {
             max_upload,
             sec,
             lifecycle,
+            bom,
         });
 
         Self {
@@ -296,6 +299,7 @@ pub fn degraded_app(
     ));
     let sec = Arc::new(SecService::new(bad_pool.clone(), "degraded-secret".into()));
     let lifecycle = Arc::new(LifecycleStore::new(bad_pool.clone()));
+    let bom = Arc::new(core_bom::BomStore::new(bad_pool.clone()));
     api_gateway::router(AppState {
         registry,
         service,
@@ -303,5 +307,6 @@ pub fn degraded_app(
         max_upload,
         sec,
         lifecycle,
+        bom,
     })
 }

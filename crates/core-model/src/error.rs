@@ -72,6 +72,8 @@ pub enum DomainError {
     SecRoleNotFound(String),
     #[error("非法生命周期迁移: {0} 不允许 {1}")]
     IllegalTransition(String, String),
+    #[error("BOM 循环引用：加边将构成环")]
+    BomCycle,
     #[error("会签校验失败：第二级审批须由不同人执行")]
     MakerCheckerViolation,
 }
@@ -110,6 +112,7 @@ impl DomainError {
             Self::SecRoleNotFound(_) => "MDL-SEC-ROLE-NOT-FOUND",
             Self::IllegalTransition(_, _) => "MDL-LCS-TRANSITION",
             Self::MakerCheckerViolation => "MDL-LCS-MAKER-CHECKER",
+            Self::BomCycle => "MDL-BOM-CYCLE",
         }
     }
 
@@ -135,6 +138,7 @@ impl DomainError {
             Self::SecRoleNotFound(_) => 400,
             Self::IllegalTransition(_, _) => 409,
             Self::MakerCheckerViolation => 409,
+            Self::BomCycle => 409,
             Self::SecUserExists => 409,
             Self::FileTooLarge(_) => 413,
             _ => 500,

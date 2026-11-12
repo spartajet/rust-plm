@@ -717,3 +717,144 @@ async fn flow_tier_strict_maker_checker_via_api() {
     assert_eq!(v["state"], "released");
     ctx.cleanup().await;
 }
+
+// ==================== BOM 钉子（增量6 Review Focus #4/#5） ====================
+
+#[tokio::test]
+async fn bom_expand_whereused_and_permissions() {
+    let ctx = TestCtx::setup("bom", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "vw", "vw-pass-123", &["viewer"], 0)
+        .await;
+    let vw = ctx.login_as("vw", "vw-pass-123").await;
+
+    for (no, name) in [("DWG-BOM-R", "R"), ("DWG-BOM-M", "M"), ("DWG-BOM-L", "L")] {
+        let (s, _, _) = send(
+            &ctx.app,
+            post_docs_multipart(
+                Some(&admin),
+                no,
+                &format!(r#"{{"name":"{name}"}}"#),
+                Some("f.dwg"),
+                FILE.to_vec(),
+            ),
+        )
+        .await;
+        assert_eq!(s, 201);
+    }
+    let get_id = |app: axum::Router, t: String, no: &'static str| {
+        Box::pin(async move {
+            let req = axum::http::Request::builder()
+                .method("GET")
+                .uri(format!("/api/v1/docs/{no}"))
+                .header("authorization", format!("Bearer {t}"))
+                .body(axum::body::Body::empty())
+                .unwrap();
+            let (s, body, _) = send(&app, req).await;
+            assert_eq!(s, 200);
+            let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            v["object"]["id"].as_str().unwrap().to_string()
+        }) as std::pin::Pin<Box<dyn std::future::Future<Output = String>>>
+    };
+    let mid_id = get_id(ctx.app.clone(), admin.clone(), "DWG-BOM-M").await;
+    let leaf_id = get_id(ctx.app.clone(), admin.clone(), "DWG-BOM-L").await;
+    let root_id = get_id(ctx.app.clone(), admin.clone(), "DWG-BOM-R").await;
+
+    let post_lines = |t: &str, no: &str, body: String| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/boms/{no}/lines"))
+            .header("content-type", "application/json")
+            .header("authorization", format!("Bearer {t}"))
+            .header("content-length", body.len())
+            .body(axum::body::Body::from(body))
+            .unwrap()
+    };
+    // root BOM：1 × mid (qty 2)（Review Focus #5：viewer 写 → 403）
+    let (s, _, _) = send(
+        &ctx.app,
+        post_lines(
+            &vw,
+            "DWG-BOM-R",
+            format!(r#"[{{"line_no":1,"child":"{mid_id}","qty":2}}]"#),
+        ),
+    )
+    .await;
+    assert_eq!(s, 403, "viewer 写 BOM 必须 403");
+
+    // admin 写 mid BOM：1 × leaf (qty 3)
+    let (s, _, _) = send(
+        &ctx.app,
+        post_lines(
+            &admin,
+            "DWG-BOM-M",
+            format!(r#"[{{"line_no":1,"child":"{leaf_id}","qty":3}}]"#),
+        ),
+    )
+    .await;
+    assert_eq!(s, 204);
+    // admin 写 root BOM：1 × mid (qty 2)
+    let (s, _, _) = send(
+        &ctx.app,
+        post_lines(
+            &admin,
+            "DWG-BOM-R",
+            format!(r#"[{{"line_no":1,"child":"{mid_id}","qty":2}}]"#),
+        ),
+    )
+    .await;
+    assert_eq!(s, 204);
+
+    // 展开 full：leaf qty_total = 2*3 = 6
+    let (s, body) = ctx
+        .get_authed("/api/v1/boms/DWG-BOM-R/expand", &admin)
+        .await;
+    assert_eq!(s, 200);
+    let rows: Vec<serde_json::Value> = serde_json::Deserializer::from_slice(&body)
+        .into_iter::<serde_json::Value>()
+        .map(|r| r.unwrap())
+        .collect();
+    assert_eq!(rows.len(), 2, "full 展开应有 mid+leaf 两行");
+    let leaf_row = rows
+        .iter()
+        .find(|r| r["child"] == serde_json::json!(leaf_id))
+        .unwrap();
+    assert_eq!(leaf_row["qty_total"], 6, "leaf 数量 = 2*3");
+
+    // leaf 模式：只有 leaf
+    let (s, body) = ctx
+        .get_authed("/api/v1/boms/DWG-BOM-R/expand?mode=leaf", &admin)
+        .await;
+    assert_eq!(s, 200);
+    let rows: Vec<serde_json::Value> = serde_json::Deserializer::from_slice(&body)
+        .into_iter::<serde_json::Value>()
+        .map(|r| r.unwrap())
+        .collect();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["child"], serde_json::json!(leaf_id));
+
+    // where-used：leaf 反查 root (qty 6) 与 mid (qty 3)
+    let (s, body) = ctx
+        .get_authed("/api/v1/boms/DWG-BOM-L/where-used", &admin)
+        .await;
+    assert_eq!(s, 200);
+    let rows: Vec<serde_json::Value> = serde_json::Deserializer::from_slice(&body)
+        .into_iter::<serde_json::Value>()
+        .map(|r| r.unwrap())
+        .collect();
+    assert_eq!(rows.len(), 2);
+
+    // 循环引用 → 409：mid 的 BOM 指回 root
+    let (s, _, _) = send(
+        &ctx.app,
+        post_lines(
+            &admin,
+            "DWG-BOM-M",
+            format!(r#"[{{"line_no":1,"child":"{root_id}","qty":1}}]"#),
+        ),
+    )
+    .await;
+    assert_eq!(s, 409, "循环引用必须 409");
+
+    ctx.cleanup().await;
+}
