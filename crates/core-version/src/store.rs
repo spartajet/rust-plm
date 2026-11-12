@@ -213,6 +213,30 @@ impl LifecycleStore {
                 .execute(&mut *tx)
                 .await?;
         }
+        // 评审进入：同事务落 doc.submitted（review）/ doc.checked（strict 二级）——IM 审批卡片数据源（增量10）
+        match new_state {
+            "review" | "checked" => {
+                let topic = if new_state == "review" {
+                    "doc.submitted"
+                } else {
+                    "doc.checked"
+                };
+                sqlx::query("INSERT INTO event_outbox(topic, payload) VALUES ($1, $2)")
+                    .bind(topic)
+                    .bind(serde_json::json!({
+                        "type_code": type_code,
+                        "obj_no": row.obj_no,
+                        "major": obj.3,
+                        "minor": obj.4,
+                        "state": new_state,
+                        "actor": updated_by.map(|u| u.to_string()),
+                        "at": chrono::Utc::now(),
+                    }))
+                    .execute(&mut *tx)
+                    .await?;
+            }
+            _ => {}
+        }
 
         tx.commit().await?;
 

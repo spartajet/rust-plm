@@ -648,3 +648,80 @@ async fn no_hook_approve_unaffected() {
     assert_eq!(snaps, 1);
     c.drop_it().await;
 }
+
+// ==================== 增量10：评审事件（doc.submitted / doc.checked） ====================
+
+#[tokio::test]
+async fn submit_writes_doc_submitted_outbox() {
+    // Review Focus #1：submit→review 落 doc.submitted（payload obj_no/major/actor）
+    let c = setup("im1").await;
+    c.new_doc("DWG-IM-1").await;
+    let actor = uuid::Uuid::new_v4();
+    let o = c
+        .store
+        .transition("drawing", "DWG-IM-1", LifecycleEvent::Submit, Some(actor))
+        .await
+        .unwrap();
+    assert_eq!(o.state, "review");
+
+    let n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM event_outbox WHERE topic='doc.submitted' AND payload->>'obj_no'='DWG-IM-1'",
+    )
+    .fetch_one(&c.pool)
+    .await
+    .unwrap();
+    assert_eq!(n, 1, "评审进入必须落 doc.submitted");
+    let p: serde_json::Value = sqlx::query_scalar(
+        "SELECT payload FROM event_outbox WHERE topic='doc.submitted' AND payload->>'obj_no'='DWG-IM-1'",
+    )
+    .fetch_one(&c.pool)
+    .await
+    .unwrap();
+    assert_eq!(p.get("major").and_then(|v| v.as_i64()), Some(1));
+    assert_eq!(p.get("type_code").and_then(|v| v.as_str()), Some("drawing"));
+    assert_eq!(p.get("actor").and_then(|v| v.as_str()), Some(actor.to_string().as_str()));
+    c.drop_it().await;
+}
+
+#[tokio::test]
+async fn strict_first_approve_writes_doc_checked_outbox() {
+    // strict 档第一级 approve→checked 落 doc.checked（二级卡片数据源）
+    let c = setup("im2").await;
+    sqlx::query("UPDATE cm_type SET config = config || jsonb_build_object('flow_tier','strict') WHERE code='drawing'")
+        .execute(&c.pool)
+        .await
+        .unwrap();
+    c.registry.reload_if_changed().await.unwrap();
+    c.new_doc("DWG-IM-2").await;
+    let (drafter, checker) = (uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+    c.store
+        .transition("drawing", "DWG-IM-2", LifecycleEvent::Submit, Some(drafter))
+        .await
+        .unwrap();
+    let o = c
+        .store
+        .transition("drawing", "DWG-IM-2", LifecycleEvent::Approve, Some(checker))
+        .await
+        .unwrap();
+    assert_eq!(o.state, "checked");
+    let n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM event_outbox WHERE topic='doc.checked' AND payload->>'obj_no'='DWG-IM-2'",
+    )
+    .fetch_one(&c.pool)
+    .await
+    .unwrap();
+    assert_eq!(n, 1, "checked 进入必须落 doc.checked");
+    // approve→released 不落这两个主题（released 自有 doc.released）
+    c.store
+        .transition("drawing", "DWG-IM-2", LifecycleEvent::Approve, Some(drafter))
+        .await
+        .unwrap();
+    let n2: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM event_outbox WHERE topic IN ('doc.submitted','doc.checked') AND payload->>'obj_no'='DWG-IM-2'",
+    )
+    .fetch_one(&c.pool)
+    .await
+    .unwrap();
+    assert_eq!(n2, 2, "release 不新增 submitted/checked");
+    c.drop_it().await;
+}
