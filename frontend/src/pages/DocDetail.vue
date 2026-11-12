@@ -4,7 +4,7 @@ import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { extractApiError } from "../api/http";
 import { http } from "../api/index";
-import { bomExpand, getDoc, listVersions, transition, type BomRow, type DocResponse, type VersionSnapshot } from "../api/docs";
+import { bomExpand, downloadFile, getDoc, listVersions, transition, type BomRow, type DocResponse, type VersionSnapshot } from "../api/docs";
 import { flowUi, stateLabel, stateTagType } from "../utils/flowUi";
 import type { LifecycleAction } from "../api/docs";
 
@@ -48,11 +48,18 @@ async function act(action: LifecycleAction) {
   }
 }
 
-function download() {
-  window.open(
-    `${import.meta.env.VITE_API_BASE ?? "http://localhost:8080"}/api/v1/docs/${objNo}/file`,
-    "_blank",
-  );
+async function download() {
+  try {
+    const blob = await downloadFile(http, objNo);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = doc.value?.file?.name ?? objNo;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    ElMessage.error(extractApiError(e));
+  }
 }
 
 function back() {

@@ -28,6 +28,7 @@ fn unique_db(hint: &str) -> String {
 struct Ctx {
     svc: Arc<DocService>,
     store: LifecycleStore,
+    registry: Arc<TypeRegistry>,
     pool: PgPool,
     db: String,
     admin_url: String,
@@ -75,6 +76,7 @@ async fn setup(hint: &str) -> Ctx {
     Ctx {
         svc,
         store,
+        registry,
         pool,
         db,
         admin_url,
@@ -316,5 +318,206 @@ async fn revise_then_rerelease_versions_chain() {
     .await
     .unwrap();
     assert_eq!(rel_events, 2);
+    c.drop_it().await;
+}
+
+// ==================== 终审修复轮（C1 回归钉 / I1 / I2） ====================
+
+#[tokio::test]
+async fn revise_then_same_objno_create_is_409() {
+    // 终审 C1：就地升版打破"同号唯一行必为(1,0)"——create 预检不得按 (1,0) 查，
+    // 否则升版后同号可重复建档产生双活行、编号永久卡死。
+    let c = setup("revc1").await;
+    c.new_doc("DWG-RV-C1").await;
+    c.release_with_hash("DWG-RV-C1", "h").await;
+    c.store
+        .transition("drawing", "DWG-RV-C1", LifecycleEvent::Revise, None)
+        .await
+        .unwrap();
+
+    let e = {
+        let mut r = Cursor::new(b"X".to_vec());
+        c.svc
+            .upload(
+                "DWG-RV-C1".into(),
+                serde_json::json!({"name": "N"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+                "f.dwg".into(),
+                None,
+                &mut r,
+            )
+            .await
+            .unwrap_err()
+    };
+    assert_eq!(e.code(), "MDL-OBJ-NO-DUPLICATE", "同号重建必须 409");
+
+    // 双活行不得出现
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM cm_object WHERE obj_no='DWG-RV-C1'")
+        .fetch_one(&c.pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 1, "同号必须恒一活行");
+    c.drop_it().await;
+}
+
+#[tokio::test]
+async fn open_original_follows_latest_after_revise() {
+    // 终审 I1：Review Focus #3 的第三枚钉——升版后文件读取跟随 2.0
+    let c = setup("revo1").await;
+    c.new_doc("DWG-RV-O1").await;
+    c.release_with_hash("DWG-RV-O1", "h").await;
+    c.store
+        .transition("drawing", "DWG-RV-O1", LifecycleEvent::Revise, None)
+        .await
+        .unwrap();
+    let (name, mut stream, size) = c.svc.open_original("DWG-RV-O1").await.unwrap();
+    assert_eq!(name, "f.dwg");
+    assert!(size > 0);
+    use tokio::io::AsyncReadExt;
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf).await.unwrap();
+    assert_eq!(buf, b"RV-CONTENT");
+    c.drop_it().await;
+}
+
+#[tokio::test]
+async fn revise_reentry_minimal_direct_release() {
+    // 终审 I2：minimal 档升版重入——revise→submit 一键直发 v2.0
+    let c = setup("revm1").await;
+    sqlx::query("UPDATE cm_type SET config = config || jsonb_build_object('flow_tier','minimal') WHERE code='drawing'")
+        .execute(&c.pool)
+        .await
+        .unwrap();
+    c.registry.reload_if_changed().await.unwrap();
+
+    c.new_doc("DWG-RV-M1").await;
+    let o = c
+        .store
+        .transition("drawing", "DWG-RV-M1", LifecycleEvent::Submit, None)
+        .await
+        .unwrap();
+    assert_eq!(o.state, "released", "minimal submit 直发");
+    let o = c
+        .store
+        .transition("drawing", "DWG-RV-M1", LifecycleEvent::Revise, None)
+        .await
+        .unwrap();
+    assert_eq!((o.major, o.state.as_str()), (2, "working"));
+    let o = c
+        .store
+        .transition("drawing", "DWG-RV-M1", LifecycleEvent::Submit, None)
+        .await
+        .unwrap();
+    assert_eq!(o.state, "released", "重入后仍一键直发");
+    assert_eq!(o.major, 2);
+
+    let snaps: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM cm_obj_snapshot WHERE obj_no='DWG-RV-M1'")
+            .fetch_one(&c.pool)
+            .await
+            .unwrap();
+    assert_eq!(snaps, 2, "两个 major 各一快照");
+    c.drop_it().await;
+}
+
+#[tokio::test]
+async fn revise_reentry_strict_two_level_chain() {
+    // 终审 I2：strict 档升版重入——v2.0 再走两级审批+会签发布
+    let c = setup("revs1").await;
+    sqlx::query("UPDATE cm_type SET config = config || jsonb_build_object('flow_tier','strict') WHERE code='drawing'")
+        .execute(&c.pool)
+        .await
+        .unwrap();
+    c.registry.reload_if_changed().await.unwrap();
+
+    let drafter = uuid::Uuid::new_v4();
+    let checker = uuid::Uuid::new_v4();
+    c.new_doc("DWG-RV-S1").await;
+    c.store
+        .transition(
+            "drawing",
+            "DWG-RV-S1",
+            LifecycleEvent::Submit,
+            Some(drafter),
+        )
+        .await
+        .unwrap();
+    c.store
+        .transition(
+            "drawing",
+            "DWG-RV-S1",
+            LifecycleEvent::Approve,
+            Some(checker),
+        )
+        .await
+        .unwrap();
+    c.store
+        .transition(
+            "drawing",
+            "DWG-RV-S1",
+            LifecycleEvent::Approve,
+            Some(drafter),
+        )
+        .await
+        .unwrap();
+    let o = c
+        .store
+        .transition(
+            "drawing",
+            "DWG-RV-S1",
+            LifecycleEvent::Revise,
+            Some(drafter),
+        )
+        .await
+        .unwrap();
+    assert_eq!((o.major, o.state.as_str()), (2, "working"));
+
+    // v2 重走两级：submit→review→approve→checked→approve→released（会签仍生效）
+    c.store
+        .transition(
+            "drawing",
+            "DWG-RV-S1",
+            LifecycleEvent::Submit,
+            Some(drafter),
+        )
+        .await
+        .unwrap();
+    let o = c
+        .store
+        .transition(
+            "drawing",
+            "DWG-RV-S1",
+            LifecycleEvent::Approve,
+            Some(checker),
+        )
+        .await
+        .unwrap();
+    assert_eq!(o.state, "checked");
+    // 会签在 v2 重入时仍生效：第二级与第一级复核人同人 → 409
+    let e = c
+        .store
+        .transition(
+            "drawing",
+            "DWG-RV-S1",
+            LifecycleEvent::Approve,
+            Some(checker),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(e.code(), "MDL-LCS-MAKER-CHECKER", "会签在 v2 重入时仍生效");
+    let o = c
+        .store
+        .transition(
+            "drawing",
+            "DWG-RV-S1",
+            LifecycleEvent::Approve,
+            Some(drafter),
+        )
+        .await
+        .unwrap();
+    assert_eq!(o.state, "released");
+    assert_eq!(o.major, 2);
     c.drop_it().await;
 }

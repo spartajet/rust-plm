@@ -150,10 +150,12 @@ impl ObjectStore for PgObjectStore {
         let td = self.registry.type_def(&cmd.type_code)?;
         let mut attrs = cmd.attrs;
 
-        // 编号唯一性预检（返回语义化错误；并发兜底靠唯一索引）
+        // 编号唯一性预检（返回语义化错误；并发兜底靠唯一索引）。
+        // 增量8 终审 C1：不得按 (1,0) 查——就地升版后唯一活行可能是 (2,0)，
+        // 版本过滤会击穿预检产生双活行、同号永久卡死。软删复用语义不变（deleted_at 过滤保留）。
         let dup: Option<i32> = sqlx::query_scalar(
             "SELECT 1 FROM cm_object WHERE type_id=$1 AND obj_no=$2 \
-             AND major_ver=1 AND minor_ver=0 AND deleted_at IS NULL LIMIT 1",
+             AND deleted_at IS NULL LIMIT 1",
         )
         .bind(td.id)
         .bind(&cmd.obj_no)

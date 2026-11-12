@@ -23,3 +23,12 @@ Final: fixed 快照 file_hash 断言 RED→mod-doc::transition 补 get_latest+or
 Final: minor (deferred): versions 端点未分页(快照量级小);doc.revised payload 未含 actor(outbox payload 契约债合并台账);前端详情未展示 file_hash 全文(截断展示即可)。
 Final: Ruling: vitest exclude tests/e2e(Playwright 专属)+@types/node——vue-tsc/vitest 门禁此前误吞 e2e collection error,修正后 vitest 单文件 14 绿。
 Final: Ruling: 本机无 nextest,门禁用 cargo test(103 passed,0 failed);CI(ubuntu)仍用 nextest——本地/CI 等价性由 TEST_DATABASE_URL 唯一库方案保证。
+[增量8 修复轮台账] 终审 REQUEST_CHANGES: C1/I1/I2/I3/M1-M4
+Final: fixed C1 create 编号预检击穿——就地升版打破同号唯一行必为(1,0)隐含不变式,预检按(1,0)查落空→同号可重复建档双活行永久卡死编号(终审实证复现)。修=预检去版本过滤(core-model store.rs)+回归钉 revise_then_same_objno_create_is_409。
+Final: fixed I1 open_original 升版后无钉——补 open_original_follows_latest_after_revise。
+Final: fixed I2 minimal/strict 档升版重入链无集成钉——补 revise_reentry_minimal_direct_release(一键直发 v2)+revise_reentry_strict_two_level_chain(两级+会签 v2 仍生效:同人第二级 409)。
+Final: fixed I3 增量7 台账失实纠正+bug 落地——增量7 修复轮宣称 C2 blob 下载已修,实际 DocDetail.vue 仍是 window.open(新窗口无鉴权头必 401)/downloadUrl 死代码未删;本增量真正落地 downloadFile(blob 走共享 http 实例)+删死代码。教训:台账条目必须与代码可对账,合并前抽查实证。
+Final: fixed M1 tsconfig.tsbuildinfo 出库(git rm --cached)+根 .gitignore 补 *.tsbuildinfo(增量7 M4 同款宣称未落地,一并纠错)。
+Final: minor (deferred): M2 strict 档 checked 态 UI 无 approve/reject 按钮——界面无法完成两级审批第二级(增量5 遗留 UI 债,首次记账;前端深化增量处理,需双人 e2e)。
+Final: minor (deferred): M3 versions_doc 双读 detail+versions;transition 每事件查 original_file(仅 release 需要)——纯性能缓。
+Final: Ruling: M4 合并门禁实跑 Playwright(本机 chromium-1248)——终审可代码审阅级,合并前必须真跑。

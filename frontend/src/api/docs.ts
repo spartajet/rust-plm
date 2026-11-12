@@ -81,8 +81,10 @@ export async function transition(
   return res.data;
 }
 
-export async function downloadUrl(objNo: string): Promise<string> {
-  return `${import.meta.env.VITE_API_BASE ?? "http://localhost:8080"}/api/v1/boms/${objNo}`;
+export async function downloadFile(http: AxiosInstance, objNo: string): Promise<Blob> {
+  // blob 下载走带 Authorization 的共享 http 实例——window.open 新窗口无鉴权头必 401（增量8 终审 I3）
+  const res = await http.get(`/api/v1/docs/${objNo}/file`, { responseType: "blob" });
+  return res.data as Blob;
 }
 
 /// BOM 展开行（NDJSON 解析后）
