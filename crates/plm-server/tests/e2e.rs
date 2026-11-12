@@ -405,3 +405,140 @@ async fn rbac_secret_level_filter_and_404() {
     assert_eq!(v["total"], 1);
     ctx.cleanup().await;
 }
+
+// ==================== 生命周期链钉子（增量3 Review Focus #1–#5） ====================
+
+#[tokio::test]
+async fn lifecycle_full_chain_and_permissions() {
+    let ctx = TestCtx::setup("lc", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    // editor 提交；approve 是 admin 专属（Review Focus #5）
+    ctx.create_user_as_admin(&admin, "ed", "ed-pass-123", &["editor"], 0)
+        .await;
+    let ed = ctx.login_as("ed", "ed-pass-123").await;
+
+    let (s, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&ed),
+            "DWG-LC-E1",
+            r#"{"name":"N"}"#,
+            Some("e.dwg"),
+            FILE.to_vec(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201);
+
+    // editor submit → 200 review（write 权限）
+    let sub = |t: &str, no: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/submit"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let (s, _, _) = send(&ctx.app, sub(&ed, "DWG-LC-E1")).await;
+    assert_eq!(s, 200);
+
+    // editor approve → 403（docs:approve 仅 admin）
+    let app = |t: &str, no: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/approve"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let (s, body, _) = send(&ctx.app, app(&ed, "DWG-LC-E1")).await;
+    assert_eq!(s, 403);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["code"], "MDL-SEC-FORBIDDEN");
+
+    // admin approve → released
+    let (s, body, _) = send(&ctx.app, app(&admin, "DWG-LC-E1")).await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["state"], "released");
+
+    // Review Focus #1：released update → 423
+    let (s, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&ed),
+            "DWG-LC-E1",
+            r#"{"name":"N"}"#,
+            Some("e.dwg"),
+            FILE.to_vec(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 423, "发布态重复上传(同号不同内容走新版本前)必须 423");
+
+    // 非法链：released submit → 409（Review Focus #2 同源）
+    let (s, body, _) = send(&ctx.app, sub(&ed, "DWG-LC-E1")).await;
+    assert_eq!(s, 409);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["code"], "MDL-LCS-TRANSITION");
+
+    // obsolete 收尾
+    let obs = |t: &str, no: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/obsolete"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let (s, _, _) = send(&ctx.app, obs(&admin, "DWG-LC-E1")).await;
+    assert_eq!(s, 200);
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn lifecycle_reject_back_to_working_editable() {
+    // Review Focus #3：reject 回 working 后可再改再提交
+    let ctx = TestCtx::setup("lcr", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    let (s, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&admin),
+            "DWG-LC-R1",
+            r#"{"name":"V1"}"#,
+            Some("r.dwg"),
+            FILE.to_vec(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201);
+    let t0 = ctx.login().await;
+    let sub = |no: &str, t: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/submit"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let (s, _, _) = send(&ctx.app, sub("DWG-LC-R1", &t0)).await;
+    assert_eq!(s, 200);
+    let rej = |no: &str, t: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/reject"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let t = ctx.login().await;
+    let (s, _, _) = send(&ctx.app, rej("DWG-LC-R1", &t)).await;
+    assert_eq!(s, 200);
+
+    // 回 working 后可再次提交
+    let (s, body, _) = send(&ctx.app, sub("DWG-LC-R1", &t0)).await;
+    assert_eq!(s, 200, "reject 后可再提交");
+    let _ = body;
+    ctx.cleanup().await;
+}

@@ -75,6 +75,7 @@ pub async fn migrated(hint: &str) -> (PgPool, Arc<TypeRegistry>, PathBuf, String
     core_model::migrator().run(&pool).await.unwrap();
     mod_doc::migrator().run(&pool).await.unwrap();
     core_sec::migrator().run(&pool).await.unwrap();
+    core_version::migrator().run(&pool).await.unwrap();
     let registry = TypeRegistry::load(pool.clone()).await.unwrap();
     let files_root = std::env::temp_dir().join(format!("plmsrv-{db}"));
     (pool, registry, files_root, db, admin_url)
