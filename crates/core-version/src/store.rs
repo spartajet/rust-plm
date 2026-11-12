@@ -88,17 +88,24 @@ impl LifecycleStore {
                 Option<Uuid>,
             ),
         >(
+            // 终审 C2：旧状态入 WHERE 守卫——并发迁移竞态输家得 409，而非静默覆盖
             "UPDATE cm_object SET state = $3, updated_at = now(), updated_by = $4 \
-             WHERE id = $1 \
+             WHERE id = $1 AND state = $2 \
              RETURNING id, type_id, obj_no, major_ver, minor_ver, iteration, state, \
                        secret_level, owner, attrs, attrs_rev, created_at, updated_at, created_by, updated_by",
         )
         .bind(row.id)
-        .bind(row.attrs_rev)
+        .bind(&row.state)
         .bind(new_state)
         .bind(updated_by)
-        .fetch_one(&mut *tx)
-        .await?;
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| {
+            DomainError::IllegalTransition(
+                row.state.clone(),
+                format!("{} (并发变更)", ev.as_str()),
+            )
+        })?;
 
         // released：同事务快照 + 事件
         if new_state == "released" {

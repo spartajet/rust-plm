@@ -260,3 +260,35 @@ async fn release_snapshot_immutable_and_outbox_row() {
     assert_eq!(ev, 1, "发布必须落 doc.released 事件");
     c.drop_it().await;
 }
+
+#[tokio::test]
+async fn released_update_forbidden_423() {
+    // 终审 C1：423（MDL-OBJ-STATE-FORBIDDEN）服务层钉——released 对象 update 拒绝
+    let c = setup("s423").await;
+    c.new_doc("DWG-LC-5").await;
+    c.store
+        .transition("drawing", "DWG-LC-5", LifecycleEvent::Submit, None)
+        .await
+        .unwrap();
+    c.store
+        .transition("drawing", "DWG-LC-5", LifecycleEvent::Approve, None)
+        .await
+        .unwrap();
+    let o = c.svc.detail("DWG-LC-5").await.unwrap();
+    let err = c
+        .svc
+        .update_object(
+            "DWG-LC-5",
+            &serde_json::json!({"name": "X"})
+                .as_object()
+                .unwrap()
+                .clone(),
+            o.object.attrs_rev,
+            uuid::Uuid::nil(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "MDL-OBJ-STATE-FORBIDDEN");
+    assert_eq!(err.http_status(), 423);
+    c.drop_it().await;
+}

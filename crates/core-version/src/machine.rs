@@ -37,7 +37,7 @@ impl LifecycleEvent {
 }
 
 /// 默认迁移表：working→(submit)→review→(approve)→released→(obsolete)→obsolete；
-/// review→(reject)→working；released→(submit)→review（升版审批，经变更流程时使用）。
+/// review→(reject)→working。released 升版迁移未启用（须经变更流程 ECO，后续增量）。
 pub fn allowed(state: &str, ev: LifecycleEvent) -> Option<&'static str> {
     match (state, ev) {
         ("working", LifecycleEvent::Submit) => Some("review"),

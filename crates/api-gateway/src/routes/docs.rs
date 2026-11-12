@@ -344,6 +344,18 @@ async fn do_transition(
     obj_no: &str,
     ev: core_version::LifecycleEvent,
 ) -> Result<axum::Json<serde_json::Value>, ApiError> {
+    // 终审 I1：生命周期端点同受密级 ABAC 约束（越级 404 不泄露存在性）
+    let d = st
+        .service
+        .detail(obj_no)
+        .await
+        .map_err(|e| ApiError::new(e, &tid.0))?;
+    if d.object.secret_level > user.max_secret_level {
+        return Err(ApiError::new(
+            core_model::DomainError::ObjNotFound(format!("docs:{obj_no}")),
+            &tid.0,
+        ));
+    }
     let o = st
         .service
         .transition(&st.lifecycle, ev, obj_no, user.id)
@@ -358,7 +370,7 @@ macro_rules! lc_endpoint {
             post,
             path = $path_lit,
             params(("obj_no" = String, Path)),
-            responses((status = 200, description = $doc_lit), (status = 403), (status = 409))
+            responses((status = 200, description = $doc_lit), (status = 403), (status = 404), (status = 409))
         )]
         pub async fn $fn_name(
             State(st): State<AppState>,

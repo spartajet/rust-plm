@@ -474,7 +474,8 @@ async fn lifecycle_full_chain_and_permissions() {
         ),
     )
     .await;
-    assert_eq!(s, 423, "发布态重复上传(同号不同内容走新版本前)必须 423");
+    // 同号同版本重复上传 → 409（唯一预检真实命中）；released 属性修改 423 由 lifecycle_it::released_update_forbidden_423 钉住（终审 C1）
+    assert_eq!(s, 409, "发布态同号重复上传必须 409");
 
     // 非法链：released submit → 409（Review Focus #2 同源）
     let (s, body, _) = send(&ctx.app, sub(&ed, "DWG-LC-E1")).await;
