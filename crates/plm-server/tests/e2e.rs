@@ -271,3 +271,137 @@ async fn healthz_degraded_when_db_unreachable() {
         .unwrap();
     admin.close().await;
 }
+
+// ==================== 授权增量钉子（计划 Review Focus #1–#4） ====================
+
+#[tokio::test]
+async fn rbac_viewer_cannot_write_403() {
+    let ctx = TestCtx::setup("rbac1", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "vw", "vw-pass-123", &["viewer"], 0)
+        .await;
+    let vw = ctx.login_as("vw", "vw-pass-123").await;
+
+    // viewer 读 → 200；写 → 403（已认证但无权限，而非 401）
+    let (s, _) = ctx.get_authed("/api/v1/docs", &vw).await;
+    assert_eq!(s, 200);
+    let (s, body, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&vw),
+            "DWG-VW-1",
+            r#"{"name":"N"}"#,
+            Some("v.dwg"),
+            FILE.to_vec(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 403, "viewer 写入必须 403");
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["code"], "MDL-SEC-FORBIDDEN");
+
+    // Review Focus #4：非 admin 调用户管理 → 403
+    let req = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/v1/sec/users")
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {vw}"))
+        .body(axum::body::Body::from(
+            r#"{"username":"x","password":"12345678"}"#.to_string(),
+        ))
+        .unwrap();
+    let (s, body, _) = send(&ctx.app, req).await;
+    assert_eq!(s, 403);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["code"], "MDL-SEC-FORBIDDEN");
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn rbac_revoke_role_immediate_403() {
+    let ctx = TestCtx::setup("rbac2", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "ed", "ed-pass-123", &["editor"], 0)
+        .await;
+    let ed = ctx.login_as("ed", "ed-pass-123").await;
+
+    // 授权期内可写
+    let (s, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&ed),
+            "DWG-ED-1",
+            r#"{"name":"N"}"#,
+            Some("e.dwg"),
+            FILE.to_vec(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201);
+
+    // 回收 editor 角色 → 下一次请求立即 403（无重启）
+    let req = axum::http::Request::builder()
+        .method("DELETE")
+        .uri("/api/v1/sec/users/ed/roles/editor")
+        .header("authorization", format!("Bearer {admin}"))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let (s, _, _) = send(&ctx.app, req).await;
+    assert_eq!(s, 204);
+
+    let (s, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&ed),
+            "DWG-ED-2",
+            r#"{"name":"N"}"#,
+            Some("e.dwg"),
+            FILE.to_vec(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 403, "回收后必须立即 403");
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn rbac_secret_level_filter_and_404() {
+    let ctx = TestCtx::setup("rbac3", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    // viewer max_secret_level=0；secret 系统列默认 0——用 SQL 提升该对象密级到 2（秘密）
+    ctx.create_user_as_admin(&admin, "low", "low-pass-123", &["editor"], 0)
+        .await;
+    let ed = ctx.login_as("low", "low-pass-123").await;
+    let (s, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&ed),
+            "DWG-SEC-9",
+            r#"{"name":"N"}"#,
+            Some("s.dwg"),
+            FILE.to_vec(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201);
+    sqlx::query("UPDATE cm_object SET secret_level = 2 WHERE obj_no = 'DWG-SEC-9'")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+
+    // 密级 2 > viewer/editor 上限 0：list 不出现；detail 404（防存在性泄露）
+    let (s, body) = ctx.get_authed("/api/v1/docs", &ed).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 0, "越密级对象不得出现在列表");
+
+    let (s, _) = ctx.get_authed("/api/v1/docs/DWG-SEC-9", &ed).await;
+    assert_eq!(s, 404, "越密级 detail 必须 404（不泄露存在性）");
+
+    // admin（上限 3）可见
+    let (s, body) = ctx.get_authed("/api/v1/docs", &admin).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 1);
+    ctx.cleanup().await;
+}

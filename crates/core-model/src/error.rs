@@ -64,6 +64,12 @@ pub enum DomainError {
     SecUnauthorized,
     #[error("用户名或密码错误")]
     SecBadCredentials,
+    #[error("无权执行该操作")]
+    SecForbidden,
+    #[error("用户已存在")]
+    SecUserExists,
+    #[error("角色不存在: {0}")]
+    SecRoleNotFound(String),
 }
 
 impl DomainError {
@@ -95,6 +101,9 @@ impl DomainError {
             Self::BadRequest(_) => "MDL-BAD-REQUEST",
             Self::SecUnauthorized => "MDL-SEC-UNAUTHORIZED",
             Self::SecBadCredentials => "MDL-SEC-BAD-CREDENTIALS",
+            Self::SecForbidden => "MDL-SEC-FORBIDDEN",
+            Self::SecUserExists => "MDL-SEC-USER-EXISTS",
+            Self::SecRoleNotFound(_) => "MDL-SEC-ROLE-NOT-FOUND",
         }
     }
 
@@ -116,6 +125,9 @@ impl DomainError {
             Self::HookTimeout(_) => 504,
             Self::FieldRequired(_) | Self::FileMulti | Self::FileEmpty | Self::BadRequest(_) => 400,
             Self::SecUnauthorized | Self::SecBadCredentials => 401,
+            Self::SecForbidden => 403,
+            Self::SecRoleNotFound(_) => 400,
+            Self::SecUserExists => 409,
             Self::FileTooLarge(_) => 413,
             _ => 500,
         }

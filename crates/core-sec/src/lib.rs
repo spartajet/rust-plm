@@ -2,6 +2,7 @@
 //! 授权（RBAC/ABAC）后续增量；骨架期所有认证用户权限等价。
 
 pub mod claims;
+pub mod rbac;
 pub mod service;
 
 pub use claims::Claims;

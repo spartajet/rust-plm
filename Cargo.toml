@@ -21,8 +21,9 @@ axum = { version = "0.8", features = ["multipart"] }
 tokio-util = { version = "0.7", features = ["io"] }
 futures-util = "0.3"
 figment = { version = "0.10", features = ["env"] }
-utoipa = { version = "5", features = ["axum_extras"] }
+utoipa = { version = "5", features = ["axum_extras", "uuid"] }
 jsonwebtoken = "9"
+casbin = { version = "2", default-features = false, features = ["runtime-tokio"] }
 argon2 = "0.5"
 
 [profile.release]

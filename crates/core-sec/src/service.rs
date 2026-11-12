@@ -11,6 +11,7 @@ use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TokenPair {
@@ -26,11 +27,12 @@ pub struct AdminBootInfo {
     pub printed_password: Option<String>,
 }
 
-/// 已认证用户（中间件注入 Extension）
+/// 已认证用户（中间件注入 Extension；max_secret_level 由授权段回填）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthUser {
     pub id: uuid::Uuid,
     pub username: String,
+    pub max_secret_level: i16,
 }
 
 fn now() -> i64 {
@@ -111,6 +113,11 @@ pub struct SecService {
     pool: PgPool,
     enc: EncodingKey,
     dec: DecodingKey,
+    /// casbin 求值器（策略源=PG 表；grant/revoke/建号后整体重建，arc-swap 即时生效）。
+    /// None=尚未装载（fail-closed：一切 enforce → false）
+    enf: arc_swap::ArcSwap<Option<casbin::Enforcer>>,
+    /// 策略行计数缓存（周期重载的轻量变更探测）
+    last_policy_count: std::sync::atomic::AtomicI64,
 }
 
 impl SecService {
@@ -133,7 +140,174 @@ impl SecService {
             pool,
             enc: EncodingKey::from_secret(secret.as_bytes()),
             dec: DecodingKey::from_secret(secret.as_bytes()),
+            enf: arc_swap::ArcSwap::from_pointee(None),
+            last_policy_count: std::sync::atomic::AtomicI64::new(-1),
         }
+    }
+
+    /// 从 PG 策略表重建求值器（启动/grant/revoke/建号后调用；进程内即时生效）
+    pub async fn reload_policies(&self) -> Result<()> {
+        let e = crate::rbac::build_enforcer(&self.pool).await?;
+        self.enf.store(Arc::new(Some(e)));
+        Ok(())
+    }
+
+    /// 周期策略重载（终审 C2：多实例传播，≤interval 对端生效；单实例拾取进程外变更）。
+    pub async fn spawn_policy_reloader(
+        self: &Arc<Self>,
+        interval_ms: u64,
+    ) -> tokio::task::JoinHandle<()> {
+        let me = Arc::clone(self);
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_millis(interval_ms));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            tick.tick().await; // 首个 tick 立即返回，跳过
+            loop {
+                tick.tick().await;
+                if let Err(e) = me.reload_if_changed_policies().await {
+                    tracing::warn!(error = %e, "策略周期重载失败（保留旧策略）");
+                }
+            }
+        })
+    }
+
+    /// 轻量变更探测（策略行计数）→ 变化才全量重建
+    pub async fn reload_if_changed_policies(&self) -> Result<()> {
+        let cnt: i64 = sqlx::query_scalar(
+            "SELECT (SELECT count(*) FROM sec_role_perm) + (SELECT count(*) FROM sec_user_role)",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        if self
+            .last_policy_count
+            .load(std::sync::atomic::Ordering::Relaxed)
+            != cnt
+        {
+            self.last_policy_count
+                .store(cnt, std::sync::atomic::Ordering::Relaxed);
+            let e = crate::rbac::build_enforcer(&self.pool).await?;
+            self.enf.store(Arc::new(Some(e)));
+        }
+        Ok(())
+    }
+
+    /// 授权判定（用户名为主体；未装载/未知用户 → false，fail-closed）
+    pub async fn enforce(&self, username: &str, obj: &str, act: &str) -> Result<bool> {
+        use casbin::CoreApi;
+        match self.enf.load().as_ref() {
+            Some(e) => e
+                .enforce((username, obj, act))
+                .map_err(|err| DomainError::Internal(format!("casbin enforce: {err}"))),
+            None => Ok(false),
+        }
+    }
+
+    /// 建用户（admin 专用路径经网关权限层把关）：重复(大小写归一) → USER-EXISTS；角色必须存在
+    pub async fn create_user(
+        &self,
+        username: &str,
+        password: &str,
+        display_name: Option<&str>,
+        roles: &[&str],
+        max_secret_level: i16,
+    ) -> Result<uuid::Uuid> {
+        // 终审 I4：密级范围硬校验
+        if !(0..=3).contains(&max_secret_level) {
+            return Err(DomainError::BadRequest(
+                "max_secret_level 须在 0..=3".into(),
+            ));
+        }
+        for r in roles {
+            self.ensure_role(r).await?; // 终审 I2：与 grant 同语义 400
+        }
+        let hash = hash_password(password)?;
+        // 终审 I3：用户+角色单事务（中途失败不留"有号无权"死局）
+        let mut tx = self.pool.begin().await?;
+        let id: Option<uuid::Uuid> = sqlx::query_scalar(
+            "INSERT INTO sec_user(username, password_hash, display_name, max_secret_level) VALUES ($1, $2, $3, $4) ON CONFLICT (lower(username)) DO NOTHING RETURNING id",
+        )
+        .bind(username)
+        .bind(hash)
+        .bind(display_name)
+        .bind(max_secret_level)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(id) = id else {
+            return Err(DomainError::SecUserExists);
+        };
+        for r in roles {
+            sqlx::query("INSERT INTO sec_user_role(username, role_code) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+                .bind(username)
+                .bind(r)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        self.reload_policies().await?;
+        Ok(id)
+    }
+
+    /// 规范用户名（存在性 + 大小写归一；终审 I1：拒绝幽灵绑定）
+    async fn canonical_user(&self, username: &str) -> Result<String> {
+        let canonical: Option<String> =
+            sqlx::query_scalar("SELECT username FROM sec_user WHERE lower(username) = lower($1)")
+                .bind(username)
+                .fetch_optional(&self.pool)
+                .await?;
+        canonical.ok_or_else(|| DomainError::BadRequest(format!("用户不存在: {username}")))
+    }
+
+    /// 角色存在性（终审 I2：与 create_user 同语义 400，杜绝 FK 500）
+    async fn ensure_role(&self, role: &str) -> Result<()> {
+        let ok: Option<i32> = sqlx::query_scalar("SELECT 1 FROM sec_role WHERE code = $1")
+            .bind(role)
+            .fetch_optional(&self.pool)
+            .await?;
+        if ok.is_none() {
+            return Err(DomainError::SecRoleNotFound(role.to_string()));
+        }
+        Ok(())
+    }
+
+    pub async fn grant(&self, username: &str, role: &str) -> Result<()> {
+        let canonical = self.canonical_user(username).await?;
+        self.ensure_role(role).await?;
+        sqlx::query(
+            "INSERT INTO sec_user_role(username, role_code) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        )
+        .bind(canonical)
+        .bind(role)
+        .execute(&self.pool)
+        .await?;
+        self.reload_policies().await
+    }
+
+    pub async fn revoke(&self, username: &str, role: &str) -> Result<()> {
+        let canonical = self.canonical_user(username).await?;
+        self.ensure_role(role).await?;
+        sqlx::query("DELETE FROM sec_user_role WHERE username = $1 AND role_code = $2")
+            .bind(canonical)
+            .bind(role)
+            .execute(&self.pool)
+            .await?;
+        self.reload_policies().await
+    }
+
+    /// 密级上限（ABAC 第一维；每请求一次索引查询，位图优化见 PRD 规模化目标）
+    pub async fn max_secret_level_of(&self, user: uuid::Uuid) -> Result<i16> {
+        sqlx::query_scalar("SELECT max_secret_level FROM sec_user WHERE id = $1")
+            .bind(user)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(DomainError::SecUnauthorized)
+    }
+
+    pub async fn user_id(&self, username: &str) -> Result<uuid::Uuid> {
+        sqlx::query_scalar("SELECT id FROM sec_user WHERE lower(username) = lower($1)")
+            .bind(username)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(DomainError::SecUnauthorized)
     }
 
     /// 签发任意 claims（内部 + 测试 + 后续密码重置令牌）
@@ -176,6 +350,14 @@ impl SecService {
                 .fetch_optional(&self.pool)
                 .await?;
         if exists.is_some() {
+            // 终审 C1：历史库重启路径也必须补绑定 + 装载策略（否则全站 403 死锁）
+            sqlx::query(
+                "INSERT INTO sec_user_role(username, role_code) VALUES ('admin', 'admin') \
+                 ON CONFLICT DO NOTHING",
+            )
+            .execute(&self.pool)
+            .await?;
+            self.reload_policies().await?;
             return Ok(AdminBootInfo {
                 created: false,
                 printed_password: None,
@@ -189,13 +371,27 @@ impl SecService {
             }
         };
         let hash = hash_password(&plain)?;
-        sqlx::query("INSERT INTO sec_user(username, password_hash, display_name) VALUES ('admin', $1, '管理员')")
-            .bind(hash)
-            .execute(&self.pool)
-            .await?;
+        // M5：ON CONFLICT 幂等（双实例首启败者不再崩溃）；admin 显式全密级可见
+        let created = sqlx::query(
+            "INSERT INTO sec_user(username, password_hash, display_name, max_secret_level) \
+             VALUES ('admin', $1, '管理员', 3) ON CONFLICT (lower(username)) DO NOTHING",
+        )
+        .bind(hash)
+        .execute(&self.pool)
+        .await?
+        .rows_affected()
+            > 0;
+        // admin 角色绑定幂等补齐（迁移/历史库也可能缺）；随后重建求值器
+        sqlx::query(
+            "INSERT INTO sec_user_role(username, role_code) VALUES ('admin', 'admin') \
+             ON CONFLICT DO NOTHING",
+        )
+        .execute(&self.pool)
+        .await?;
+        self.reload_policies().await?;
         Ok(AdminBootInfo {
-            created: true,
-            printed_password: printed,
+            created,
+            printed_password: printed.filter(|_| created),
         })
     }
 
