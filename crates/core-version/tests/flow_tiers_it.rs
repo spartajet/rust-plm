@@ -1,6 +1,5 @@
 //! 三档流程集成测试（增量5 / SMB-2）：minimal / standard / strict + 档位热切换 + 会签。
 
-use core_model::types::AttrMap;
 use core_model::{HookRegistry, PgObjectStore, TypeRegistry};
 use core_version::{LifecycleEvent, LifecycleStore};
 use mod_doc::DocService;

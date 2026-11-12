@@ -3,6 +3,7 @@
 pub mod auth;
 pub mod docs;
 pub mod infra;
+pub mod meta;
 pub mod sec_users;
 pub mod webhooks;
 
@@ -70,12 +71,24 @@ pub fn build(state: AppState) -> Router {
         .route("/api/v1/auth/refresh", post(auth::refresh))
         .layer(axum::extract::DefaultBodyLimit::max(16 * 1024));
 
+    let meta = Router::new()
+        .route("/api/v1/meta/types/{code}", get(meta::get_type))
+        .route(
+            "/api/v1/meta/types/{code}/flow-tier",
+            axum::routing::put(meta::set_flow_tier),
+        )
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            require_perm("docs", "approve"),
+        ));
+
     let public = Router::new()
         .route("/healthz", get(infra::healthz))
         .route("/api/docs/openapi.json", get(infra::openapi_json))
         .route("/api/docs", get(infra::scalar_ui));
 
     public
+        .merge(meta)
         .merge(auth)
         .merge(docs_rw)
         .merge(docs_r)

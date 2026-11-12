@@ -253,7 +253,7 @@ async fn oversize_rejected_no_201() {
 async fn healthz_degraded_when_db_unreachable() {
     // 终审 I1：DB ping 失败必须 503/degraded，而非恒 200。
     use common::migrated;
-    let (_good_pool, registry, _root, db, admin_url) = migrated("degraded").await;
+    let (_good_pool, registry, _watcher, _root, db, admin_url) = migrated("degraded").await;
     let bad: PgPool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(1)
         .connect_lazy("postgres://postgres:root@localhost:5432/no_such_db_e2e")
@@ -566,5 +566,153 @@ async fn webhooks_editor_manage_403() {
     assert_eq!(s, 403);
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(v["code"], "MDL-SEC-FORBIDDEN");
+    ctx.cleanup().await;
+}
+
+// ==================== 三档流程钉子（增量5 Review Focus） ====================
+
+#[tokio::test]
+async fn flow_tier_minimal_and_switch_and_permission() {
+    let ctx = TestCtx::setup("tier", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "ed", "ed-pass-123", &["editor"], 0)
+        .await;
+    let ed = ctx.login_as("ed", "ed-pass-123").await;
+
+    // Review Focus #5：editor 改档位 → 403
+    let req = axum::http::Request::builder()
+        .method("PUT")
+        .uri("/api/v1/meta/types/drawing/flow-tier")
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {ed}"))
+        .body(axum::body::Body::from(r#"{"tier":"minimal"}"#.to_string()))
+        .unwrap();
+    let (s, _, _) = send(&ctx.app, req).await;
+    assert_eq!(s, 403, "档位修改须 docs:approve（admin）");
+
+    // admin 切 minimal → 热生效
+    let req = axum::http::Request::builder()
+        .method("PUT")
+        .uri("/api/v1/meta/types/drawing/flow-tier")
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {admin}"))
+        .body(axum::body::Body::from(r#"{"tier":"minimal"}"#.to_string()))
+        .unwrap();
+    let (s, _, _) = send(&ctx.app, req).await;
+    assert_eq!(s, 204);
+    // 等 TypeRegistry NOTIFY 热刷新（watcher NOTIFY 即时 / 兜底 1s；1.5s 覆盖两者）
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+
+    // GET 档位确认
+    let (s, body) = ctx.get_authed("/api/v1/meta/types/drawing", &admin).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["flow_tier"], "minimal");
+
+    // Review Focus #1：submit 直达 released（editor 有 write 权限）
+    let (s, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&ed),
+            "DWG-TIER-1",
+            r#"{"name":"N"}"#,
+            Some("t.dwg"),
+            FILE.to_vec(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201);
+    let sub = |t: &str, no: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/submit"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let (s, body, _) = send(&ctx.app, sub(&ed, "DWG-TIER-1")).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["state"], "released", "极简档提交即发布");
+
+    // Review Focus #4：跨档 released 语义一致——obsolete 可用、423 保护
+    let obs = |t: &str, no: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/obsolete"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let (s, _, _) = send(&ctx.app, obs(&admin, "DWG-TIER-1")).await;
+    assert_eq!(s, 200);
+
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn flow_tier_strict_maker_checker_via_api() {
+    let ctx = TestCtx::setup("tierstrict", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    // strict 档两级审批需要两个有审批权的人：总工 chief（admin 角色）+ admin
+    ctx.create_user_as_admin(&admin, "chief", "chief-pass-1", &["admin"], 0)
+        .await;
+    ctx.create_user_as_admin(&admin, "ed", "ed-pass-123", &["editor"], 0)
+        .await;
+    let chief = ctx.login_as("chief", "chief-pass-1").await;
+    let ed = ctx.login_as("ed", "ed-pass-123").await;
+
+    // admin 切 strict
+    let req = axum::http::Request::builder()
+        .method("PUT")
+        .uri("/api/v1/meta/types/drawing/flow-tier")
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {admin}"))
+        .body(axum::body::Body::from(r#"{"tier":"strict"}"#.to_string()))
+        .unwrap();
+    let (s, _, _) = send(&ctx.app, req).await;
+    assert_eq!(s, 204);
+    tokio::time::sleep(std::time::Duration::from_millis(1200)).await; // watcher 兜底 1s + 余量
+
+    let (s, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&ed),
+            "DWG-STRICT-1",
+            r#"{"name":"N"}"#,
+            Some("s.dwg"),
+            FILE.to_vec(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201);
+
+    let post_lc = |t: &str, no: &str, action: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/{action}"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    // ed submit → review（write 权限）
+    let (s, _, _) = send(&ctx.app, post_lc(&ed, "DWG-STRICT-1", "submit")).await;
+    assert_eq!(s, 200);
+    // editor 尝试 approve → 403（approve 权限语义钉）
+    let (s, _, _) = send(&ctx.app, post_lc(&ed, "DWG-STRICT-1", "approve")).await;
+    assert_eq!(s, 403);
+    // chief 第一级 approve → checked
+    let (s, _, _) = send(&ctx.app, post_lc(&chief, "DWG-STRICT-1", "approve")).await;
+    assert_eq!(s, 200);
+    // chief 同人第二级 → 409 MAKER-CHECKER（Review Focus #2）
+    let (s, body, _) = send(&ctx.app, post_lc(&chief, "DWG-STRICT-1", "approve")).await;
+    assert_eq!(s, 409);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["code"], "MDL-LCS-MAKER-CHECKER");
+    // admin 异人第二级 → released
+    let (s, body, _) = send(&ctx.app, post_lc(&admin, "DWG-STRICT-1", "approve")).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["state"], "released");
     ctx.cleanup().await;
 }
