@@ -17,6 +17,9 @@ export function flowUi(state: string): FlowUi {
       return { ...ALL_OFF, submit: true, obsolete: true };
     case "review":
       return { ...ALL_OFF, approve: true, reject: true };
+    case "checked":
+      // strict 档第二级复核（增量11 M2 清偿）：同 approve/reject 按钮组驱动
+      return { ...ALL_OFF, approve: true, reject: true };
     case "released":
       return { ...ALL_OFF, obsolete: true, revise: true };
     default:
@@ -27,6 +30,7 @@ export function flowUi(state: string): FlowUi {
 export const STATE_LABEL: Record<string, string> = {
   working: "工作中",
   review: "审核中",
+  checked: "待复核",
   released: "已发布",
   obsolete: "已作废",
 };
