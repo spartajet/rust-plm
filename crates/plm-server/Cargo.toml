@@ -27,10 +27,15 @@ core-sec = { path = "../core-sec" }
 core-version = { path = "../core-version" }
 core-events = { path = "../core-events" }
 core-bom = { path = "../core-bom" }
+core-im = { path = "../core-im" }
+reqwest = { workspace = true }
 api-gateway = { path = "../api-gateway" }
 
 [dev-dependencies]
 axum = { workspace = true }
+core-im = { path = "../core-im" }
+hmac = { workspace = true }
+sha2 = { workspace = true }
 bytes = "1"
 uuid = { workspace = true }
 tower = { version = "0.5", features = ["util"] }

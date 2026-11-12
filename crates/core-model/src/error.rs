@@ -44,6 +44,9 @@ pub enum DomainError {
     HookTimeout(String),
     #[error("数据库错误: {0}")]
     Db(String),
+    /// 服务不可用（增量10：依赖未就绪/未配置——IM 回调未配密钥 fail-closed 503）
+    #[error("服务不可用: {0}")]
+    ServiceUnavailable(String),
     #[error("内部错误: {0}")]
     Internal(String),
 
@@ -98,6 +101,7 @@ impl DomainError {
             Self::HookRejected(_) => "MDL-HOOK-REJECTED",
             Self::HookTimeout(_) => "MDL-HOOK-TIMEOUT",
             Self::Db(_) => "MDL-DB",
+            Self::ServiceUnavailable(_) => "MDL-SVC-UNAVAILABLE",
             Self::Internal(_) => "MDL-INTERNAL",
             Self::FieldRequired(_) => "MDL-FIELD-REQUIRED",
             Self::File(_) => "MDL-FILE",
@@ -132,6 +136,7 @@ impl DomainError {
             | Self::AttrEnumInvalid(_) => 400,
             Self::HookRejected(_) => 422,
             Self::HookTimeout(_) => 504,
+            Self::ServiceUnavailable(_) => 503,
             Self::FieldRequired(_) | Self::FileMulti | Self::FileEmpty | Self::BadRequest(_) => 400,
             Self::SecUnauthorized | Self::SecBadCredentials => 401,
             Self::SecForbidden => 403,

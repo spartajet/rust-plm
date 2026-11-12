@@ -1142,3 +1142,145 @@ async fn bom_version_chain_freeze_isolate_asof() {
     assert_eq!(s, 200, "admin（上限内）不受影响");
     ctx.cleanup().await;
 }
+
+// ==================== IM 卡片审批（增量10 Review Focus #4） ====================
+
+fn im_sign_hex(secret: &str, body: &str) -> String {
+    use hmac::Mac;
+    let mut mac = hmac::Hmac::<sha2::Sha256>::new_from_slice(secret.as_bytes()).unwrap();
+    mac.update(body.as_bytes());
+    mac.finalize()
+        .into_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+fn im_action(body: &str, sign: Option<&str>) -> axum::http::Request<axum::body::Body> {
+    let mut b = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/v1/im/actions")
+        .header("content-type", "application/json")
+        .header("content-length", body.len());
+    if let Some(s) = sign {
+        b = b.header("x-im-sign", s);
+    }
+    b.body(axum::body::Body::from(body.to_string())).unwrap()
+}
+
+#[tokio::test]
+async fn im_actions_full_loop_and_guards() {
+    let ctx = TestCtx::setup("imact", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "imapp", "imapp-pass-123", &["editor"], 0)
+        .await;
+    ctx.create_user_as_admin(&admin, "imapp2", "imapp2-pass-123", &["editor"], 0)
+        .await;
+    let ed = ctx.login_as("imapp", "imapp-pass-123").await;
+
+    let (s, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&ed),
+            "DWG-IM-A1",
+            r#"{"name":"N"}"#,
+            Some("a.dwg"),
+            FILE.to_vec(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201);
+    let sub = |t: &str, no: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/submit"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let (s, _, _) = send(&ctx.app, sub(&ed, "DWG-IM-A1")).await;
+    assert_eq!(s, 200);
+
+    // app.harness 需注入 im 上下文——通过环境化配置装配（im_secret 与映射在 common）
+    let secret = "im-test-secret";
+    // 正确签名 + 映射 + 权限 → approve → released（Review Focus #4 主链）
+    // 映射由 harness 的 im_user_map：{"im-ding-1":"imapp2"}，imapp2 仅 editor……
+    // 故主链用 admin 映射 {"im-admin":"admin"}；bad-perm 场景用 editor 映射。
+    let body = r#"{"obj_no":"DWG-IM-A1","action":"approve","user":"im-admin"}"#;
+    let sign = im_sign_hex(secret, body);
+    let (s, rbody, _) = send(&ctx.app, im_action(body, Some(&sign))).await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&rbody));
+    let v: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
+    assert_eq!(v["state"], "released", "IM 审批必须生效");
+    let (s, rbody) = ctx.get_authed("/api/v1/docs/DWG-IM-A1", &admin).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
+    assert_eq!(v["object"]["state"], "released");
+
+    // 坏签名 → 401
+    let body2 = r#"{"obj_no":"DWG-IM-A1","action":"reject","user":"im-admin"}"#;
+    let (s, rbody, _) = send(&ctx.app, im_action(body2, Some("deadbeef"))).await;
+    assert_eq!(s, 401);
+    let v: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
+    assert_eq!(v["code"], "MDL-SEC-UNAUTHORIZED");
+
+    // 未映射用户 → 403
+    let body3 = r#"{"obj_no":"DWG-IM-A1","action":"approve","user":"im-stranger"}"#;
+    let sign3 = im_sign_hex(secret, body3);
+    let (s, _, _) = send(&ctx.app, im_action(body3, Some(&sign3))).await;
+    assert_eq!(s, 403);
+
+    // 无 docs:approve 权限（editor）→ 403
+    // （secret_level 5 重新提交：released→revise→submit）
+    let lc = |t: &str, no: &str, act: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/{act}"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let (s, _, _) = send(&ctx.app, lc(&admin, "DWG-IM-A1", "revise")).await;
+    assert_eq!(s, 200);
+    let (s, _, _) = send(&ctx.app, sub(&ed, "DWG-IM-A1")).await;
+    assert_eq!(s, 200);
+    let body4 = r#"{"obj_no":"DWG-IM-A1","action":"approve","user":"im-editor"}"#;
+    let sign4 = im_sign_hex(secret, body4);
+    let (s, rbody, _) = send(&ctx.app, im_action(body4, Some(&sign4))).await;
+    assert_eq!(s, 403, "editor 无 docs:approve 必须 403");
+    let v: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
+    assert_eq!(v["code"], "MDL-SEC-FORBIDDEN");
+
+    // 越密级 → 404（不泄露存在性）：密级 9 > admin 上限 3
+    sqlx::query("UPDATE cm_object SET secret_level = 9 WHERE obj_no = 'DWG-IM-A1'")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let body5 = r#"{"obj_no":"DWG-IM-A1","action":"approve","user":"im-admin"}"#;
+    let sign5 = im_sign_hex(secret, body5);
+    let (s, _, _) = send(&ctx.app, im_action(body5, Some(&sign5))).await;
+    assert_eq!(s, 404, "越密级 IM 动作必须 404");
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn im_actions_fail_closed_when_unconfigured() {
+    // 终审 M1：未配 PLM_IM_SECRET → 端点 503 fail-closed（degraded harness im_secret 为空）
+    use common::migrated;
+    let (_good_pool, registry, watcher, _root, db, admin_url) = migrated("imdead").await;
+    let bad: PgPool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect_lazy("postgres://postgres:root@localhost:5432/no_such_db_e2e")
+        .expect("lazy pool 创建不应失败");
+    let app = common::degraded_app(registry, bad, 1024 * 1024);
+    let body = r#"{"obj_no":"X","action":"approve","user":"u"}"#;
+    let (status, _, _) = send(&app, im_action(body, None)).await;
+    assert_eq!(status, 503, "未配置密钥必须 503 fail-closed");
+    watcher.abort();
+
+    let admin = PgPool::connect(&admin_url).await.unwrap();
+    sqlx::query(&format!("DROP DATABASE IF EXISTS \"{db}\" WITH (FORCE)"))
+        .execute(&admin)
+        .await
+        .unwrap();
+}

@@ -55,13 +55,16 @@ dependencies = [
  "core-bom",
  "core-events",
  "core-files",
+ "core-im",
  "core-model",
  "core-sec",
  "core-version",
  "futures-util",
+ "hmac",
  "mod-doc",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "tokio",
  "tokio-util",
@@ -449,6 +452,30 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
+
+[[package]]
+name = "core-im"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "core-events",
+ "core-files",
+ "core-model",
+ "core-version",
+ "hmac",
+ "mod-doc",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "tokio",
+ "tower",
+ "tracing",
+]
 
 [[package]]
 name = "core-model"
@@ -1661,14 +1688,18 @@ dependencies = [
  "core-bom",
  "core-events",
  "core-files",
+ "core-im",
  "core-model",
  "core-sec",
  "core-version",
  "figment",
+ "hmac",
  "http-body-util",
  "mod-doc",
+ "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "tokio",
  "tower",

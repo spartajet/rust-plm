@@ -47,3 +47,16 @@ Final: fixed C1 快照键冲突静默错值（reviewer 真库实证：子件 C �
 Final: fixed I1 expand（live+?major=）ABAC 越级 404 专项 e2e 钉（越级 3 路径 404+admin 200）。
 Final: fixed M1 冗余 _HashMap 别名+烧导入死行清除；M2 返回值语义随 C1 修正（幂等重入返回 0，bom_release 守卫前置于插入）。
 Final: Ruling: 幂等语义教训——「行级 ON CONFLICT DO NOTHING」只适用键空间独占的表；键空间会被多方写入的表（此处=发布事件），幂等必须锚定事件级行（bom_release）而非数据行。
+[增量10 IM 卡片审批 追加台账]
+Final: Task1-3 完成——doc.submitted/doc.checked 事件；core-im（三渲染器+钉钉加签+HMAC 校验+CardPusher 订阅 im_card_log，与 dispatcher 双消费者解耦以 event_id 唯一锚定）；/api/v1/im/actions 全链（401/403/404 守卫）；e2e 18/18。
+Final: Ruling: IM 卡片推送订阅不依赖 event_outbox status（dispatcher 会认领置位）——以 im_card_log(event_id UNIQUE) 独立锚定，集成钉实证 dispatcher 先行认领后 pusher 仍消费。
+Final: Ruling: 卡内按钮→PLM 闭环需各平台企业应用回调凭证——本期以统一 HMAC 回调契约先行（真实 IM 网关转发即接），机器人出站推送开箱即用；真实凭证联调后置。
+Final: Ruling: CardPusher 单实例顺序处理（FOR UPDATE SKIP LOCKED 免）——SMB 单体单实例定位；多实例部署前须加认领语义（与 dispatcher 对齐）。
+Final: minor (deferred): 飞书卡片为 text 型（interactive 卡需应用凭证）；卡片内审批按钮渲染；im_card_log 管理端点（死信重放）；IM 用户映射热更新（当前重启生效）。
+[增量10 终审修复轮台账] REQUEST_CHANGES: I1/M1/M2/M3/M4
+Final: fixed I1 订阅水位线永久漏事件（bigserial 提交序倒挂：后提交低 id 行被 id>max 永久跳过=审批卡静默丢失，reviewer 真库实证；与本增量"审批卡"核心目的同权重的静默丢失类缺陷）——订阅改反连接 NOT EXISTS(锚定 event_id UNIQUE)+回归钉 subscription_survives_commit_order_inversion（双事务探针）；计划文档同步作废水位线方案并记裁定。
+Final: fixed M1 fail-closed 对账——未配密钥实为 400(serde BadRequest)，commit 宣称 503 失实（增量8 I3 教训重演警示：声明必须与代码对账）——新增 DomainError::ServiceUnavailable(503, MDL-SVC-UNAVAILABLE)+im.rs 改用+degraded_app 补 fail-closed e2e 钉(503)。
+Final: fixed M3 pusher.spawn 移至 core_events 迁移后（冷库首启首 tick 不撞未建表）+spawn 补 MissedTickBehavior::Delay（镜像 dispatcher，tick 慢不突发补帧）。
+Final: minor (deferred): M2 HMAC 回调无重放防御（签名仅覆盖 body，无 timestamp/nonce——被截获的合法 approve 可在 revise→submit 新回合重放）——契约先行可接受，真实 IM 网关联调时按平台签名语义补时效性。
+Final: minor (deferred): M4 provider=none 时 NoopSender 把未发送卡记 status=1/sent 假账（纯记账语义；真实部署应配 provider 或后续引入 status=skipped）。
+Final: minor (deferred): 反连接每 1s tick 对 event_outbox 按 topic 过滤扫描（topic 无索引）——SMB 量级毫秒级无碍；outbox 长期增长后加部分索引 ON event_outbox(topic) WHERE topic IN (IM 主题) 或定期归档（终审复审建议入账）。
