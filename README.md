@@ -77,7 +77,7 @@ curl -o 支架.dwg -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v
 cd frontend && npm install
 # 浏览器直连 API（后端 CORS 已放开；本机 node 环回不稳时绕开 vite 代理）
 VITE_API_BASE=http://127.0.0.1:18095 npx vite --port 5173 --host 127.0.0.1
-# 打开 http://127.0.0.1:5173 → 登录 admin → 图纸列表/上传/详情/生命周期/BOM/升版/版本历史
+# 打开 http://127.0.0.1:5173 → 登录 admin → 看板/图纸列表(密级列)/详情(生命周期+BOM 版本切换+升版+版本历史)/用户管理(建号+角色授予/回收)
 ```
 
 # 本地开发（无 Docker）
@@ -109,7 +109,7 @@ docs/adr/        架构决策记录
 
 ## Roadmap（版本规划见需求文档 §8）
 
-骨架 ✓ → 认证 ✓ → 授权 ✓ → 生命周期 ✓ → Webhook 外投 ✓ → 三档流程 ✓ → BOM 引擎 ✓ → 前端工作台 ✓（登录/列表/上传/详情/生命周期/BOM）→ Revise 升版 ✓（released→下一 major；版本历史=发布快照链）→ BOM 版本链 ✓（发布冻结快照+?major= as-of 展开）→ IM 卡片审批 ✓（评审推卡钉钉/企微/飞书+HMAC 回调审批闭环）→ 前端工作台深化（看板/密级/用户管理 UI/BOM 版本切换/strict 档 checked 态按钮）。
+骨架 ✓ → 认证 ✓ → 授权 ✓ → 生命周期 ✓ → Webhook 外投 ✓ → 三档流程 ✓ → BOM 引擎 ✓ → 前端工作台 ✓（登录/列表/上传/详情/生命周期/BOM）→ Revise 升版 ✓（released→下一 major；版本历史=发布快照链）→ BOM 版本链 ✓（发布冻结快照+?major= as-of 展开）→ IM 卡片审批 ✓（评审推卡钉钉/企微/飞书+HMAC 回调审批闭环）→ 前端工作台深化 ✓（看板 5 态计数/BOM 版本切换/strict checked 态按钮/密级列/用户管理）。
 
 ## 许可
 
