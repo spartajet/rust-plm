@@ -9,6 +9,8 @@ import { expect, test } from "@playwright/test";
  */
 
 const ADMIN_PW = process.env.E2E_ADMIN_PASSWORD ?? "e2e-pass-123";
+// 终审 I5：唯一 obj_no 保证 e2e 可重复执行
+const OBJ = `DWG-E2E-FE-${Date.now()}`;
 
 test("full journey: login → upload → list → detail → lifecycle", async ({ page }) => {
   // 1) 登录
@@ -21,7 +23,7 @@ test("full journey: login → upload → list → detail → lifecycle", async (
   // 2) 进入图纸页 → 打开上传对话框
   await page.goto("/docs");
   await page.click("text=上传图纸");
-  await page.fill('[data-test="upload-objno"]', "DWG-E2E-FE-1");
+  await page.fill('[data-test="upload-objno"]', OBJ);
   await page.fill('[data-test="upload-name"]', "前端E2E支架");
   await page.fill('[data-test="upload-material"]', "Q235");
   await page.setInputFiles('[data-test="upload-file"]', {
@@ -31,10 +33,10 @@ test("full journey: login → upload → list → detail → lifecycle", async (
   });
   await page.click('[data-test="upload-submit"]');
   // toast 3s 即逝不作断言；等刷新后的行出现（Review Focus #4）
-  await expect(page.getByRole("cell", { name: "DWG-E2E-FE-1" })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("cell", { name: OBJ })).toBeVisible({ timeout: 15_000 });
 
   // 4) 详情：属性与状态
-  await page.goto("/docs/DWG-E2E-FE-1");
+  await page.goto(`/docs/${OBJ}`);
   await expect(page.getByText("前端E2E支架")).toBeVisible();
   await expect(page.locator('[data-test="state-tag"]')).toHaveText("工作中");
 
@@ -46,4 +48,11 @@ test("full journey: login → upload → list → detail → lifecycle", async (
 
   // 6) released 态：submit 按钮不再显示
   await expect(page.locator('[data-test="act-submit"]')).toHaveCount(0);
+});
+
+test("guard: unauthenticated /docs redirects to login", async ({ page }) => {
+  // 终审 C1：守卫接线钉——未认证直接访问受保护页必须跳 /login
+  await page.goto("/docs");
+  await page.waitForURL("**/login", { timeout: 10_000 });
+  await expect(page.locator('[data-test="login-btn"]')).toBeVisible();
 });
