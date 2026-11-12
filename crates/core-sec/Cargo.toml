@@ -14,4 +14,6 @@ tracing = { workspace = true }
 jsonwebtoken = { workspace = true }
 argon2 = { workspace = true }
 hex = { workspace = true }
+casbin = { workspace = true }
+arc-swap = { workspace = true }
 core-model = { path = "../core-model" }

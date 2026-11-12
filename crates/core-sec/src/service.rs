@@ -11,6 +11,7 @@ use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TokenPair {
@@ -111,6 +112,9 @@ pub struct SecService {
     pool: PgPool,
     enc: EncodingKey,
     dec: DecodingKey,
+    /// casbin 求值器（策略源=PG 表；grant/revoke/建号后整体重建，arc-swap 即时生效）。
+    /// None=尚未装载（fail-closed：一切 enforce → false）
+    enf: arc_swap::ArcSwap<Option<casbin::Enforcer>>,
 }
 
 impl SecService {
@@ -133,7 +137,103 @@ impl SecService {
             pool,
             enc: EncodingKey::from_secret(secret.as_bytes()),
             dec: DecodingKey::from_secret(secret.as_bytes()),
+            enf: arc_swap::ArcSwap::from_pointee(None),
         }
+    }
+
+    /// 从 PG 策略表重建求值器（启动/grant/revoke/建号后调用；进程内即时生效）
+    pub async fn reload_policies(&self) -> Result<()> {
+        let e = crate::rbac::build_enforcer(&self.pool).await?;
+        self.enf.store(Arc::new(Some(e)));
+        Ok(())
+    }
+
+    /// 授权判定（用户名为主体；未装载/未知用户 → false，fail-closed）
+    pub async fn enforce(&self, username: &str, obj: &str, act: &str) -> Result<bool> {
+        use casbin::CoreApi;
+        match self.enf.load().as_ref() {
+            Some(e) => e
+                .enforce((username, obj, act))
+                .map_err(|err| DomainError::Internal(format!("casbin enforce: {err}"))),
+            None => Ok(false),
+        }
+    }
+
+    /// 建用户（admin 专用路径经网关权限层把关）：重复(大小写归一) → USER-EXISTS；角色必须存在
+    pub async fn create_user(
+        &self,
+        username: &str,
+        password: &str,
+        display_name: Option<&str>,
+        roles: &[&str],
+        max_secret_level: i16,
+    ) -> Result<uuid::Uuid> {
+        for r in roles {
+            let ok: Option<i32> = sqlx::query_scalar("SELECT 1 FROM sec_role WHERE code = $1")
+                .bind(r)
+                .fetch_optional(&self.pool)
+                .await?;
+            if ok.is_none() {
+                return Err(DomainError::SecRoleNotFound(r.to_string()));
+            }
+        }
+        let hash = hash_password(password)?;
+        let id: Option<uuid::Uuid> = sqlx::query_scalar(
+            "INSERT INTO sec_user(username, password_hash, display_name, max_secret_level)              VALUES ($1, $2, $3, $4) ON CONFLICT (lower(username)) DO NOTHING RETURNING id",
+        )
+        .bind(username)
+        .bind(hash)
+        .bind(display_name)
+        .bind(max_secret_level)
+        .fetch_optional(&self.pool)
+        .await?;
+        let id = id.ok_or(DomainError::SecUserExists)?;
+        for r in roles {
+            sqlx::query("INSERT INTO sec_user_role(username, role_code) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+                .bind(username)
+                .bind(r)
+                .execute(&self.pool)
+                .await?;
+        }
+        self.reload_policies().await?;
+        Ok(id)
+    }
+
+    pub async fn grant(&self, username: &str, role: &str) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO sec_user_role(username, role_code) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        )
+        .bind(username)
+        .bind(role)
+        .execute(&self.pool)
+        .await?;
+        self.reload_policies().await
+    }
+
+    pub async fn revoke(&self, username: &str, role: &str) -> Result<()> {
+        sqlx::query("DELETE FROM sec_user_role WHERE username = $1 AND role_code = $2")
+            .bind(username)
+            .bind(role)
+            .execute(&self.pool)
+            .await?;
+        self.reload_policies().await
+    }
+
+    /// 密级上限（ABAC 第一维；每请求一次索引查询，位图优化见 PRD 规模化目标）
+    pub async fn max_secret_level_of(&self, user: uuid::Uuid) -> Result<i16> {
+        sqlx::query_scalar("SELECT max_secret_level FROM sec_user WHERE id = $1")
+            .bind(user)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(DomainError::SecUnauthorized)
+    }
+
+    pub async fn user_id(&self, username: &str) -> Result<uuid::Uuid> {
+        sqlx::query_scalar("SELECT id FROM sec_user WHERE lower(username) = lower($1)")
+            .bind(username)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(DomainError::SecUnauthorized)
     }
 
     /// 签发任意 claims（内部 + 测试 + 后续密码重置令牌）
