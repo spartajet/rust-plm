@@ -70,6 +70,8 @@ pub enum DomainError {
     SecUserExists,
     #[error("角色不存在: {0}")]
     SecRoleNotFound(String),
+    #[error("非法生命周期迁移: {0} 不允许 {1}")]
+    IllegalTransition(String, String),
 }
 
 impl DomainError {
@@ -104,6 +106,7 @@ impl DomainError {
             Self::SecForbidden => "MDL-SEC-FORBIDDEN",
             Self::SecUserExists => "MDL-SEC-USER-EXISTS",
             Self::SecRoleNotFound(_) => "MDL-SEC-ROLE-NOT-FOUND",
+            Self::IllegalTransition(_, _) => "MDL-LCS-TRANSITION",
         }
     }
 
@@ -127,6 +130,7 @@ impl DomainError {
             Self::SecUnauthorized | Self::SecBadCredentials => 401,
             Self::SecForbidden => 403,
             Self::SecRoleNotFound(_) => 400,
+            Self::IllegalTransition(_, _) => 409,
             Self::SecUserExists => 409,
             Self::FileTooLarge(_) => 413,
             _ => 500,
