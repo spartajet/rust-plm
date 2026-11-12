@@ -37,7 +37,8 @@ fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
 
-/// 密钥解析（纯 IO 可单测）：env 优先 → 文件复用 → 随机生成落盘
+/// 密钥解析（纯 IO 可单测）：env 优先 → 文件复用 → 随机生成落盘；
+/// 落盘不可用时**降级**为内存随机密钥并 WARN（服务照常启动，重启失效）——终审 I2。
 pub fn resolve_secret(env_secret: Option<&str>, key_dir: &Path) -> std::io::Result<String> {
     if let Some(s) = env_secret.filter(|s| !s.trim().is_empty()) {
         return Ok(s.to_string());
@@ -50,10 +51,42 @@ pub fn resolve_secret(env_secret: Option<&str>, key_dir: &Path) -> std::io::Resu
         }
     }
     let secret = hex::encode(rand_bytes());
-    std::fs::create_dir_all(key_dir)?;
-    std::fs::write(&path, &secret)?;
-    tracing::warn!(path = %path.display(), "PLM_JWT_SECRET 未设置：已生成密钥文件（跨重启有效）；多实例部署请显式设置 PLM_JWT_SECRET");
+    let persisted = write_secret_file(key_dir, &path, &secret);
+    if let Err(e) = persisted {
+        tracing::warn!(
+            error = %e,
+            "jwt.key 落盘失败：使用内存随机密钥（重启后全部令牌失效）。多实例部署请显式设置 PLM_JWT_SECRET"
+        );
+    } else {
+        tracing::warn!(
+            path = %path.display(),
+            "PLM_JWT_SECRET 未设置：已生成密钥文件（跨重启有效）；多实例部署请显式设置 PLM_JWT_SECRET"
+        );
+    }
     Ok(secret)
+}
+
+/// jwt.key 落盘：Unix 收紧 0600（终审 I1）；失败由调用方降级
+fn write_secret_file(key_dir: &Path, path: &Path, secret: &str) -> std::io::Result<()> {
+    std::fs::create_dir_all(key_dir)?;
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?
+            .write_all(secret.as_bytes())?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = key_dir;
+        std::fs::write(path, secret)
+    }
 }
 
 fn rand_bytes() -> [u8; 32] {
@@ -180,12 +213,16 @@ impl SecService {
         .bind(username)
         .fetch_optional(&self.pool)
         .await?;
-        // 统一 401 语义（不泄露"用户存在"）；argon2 错误一律折叠为凭证错误
+        // 统一 401 语义：响应体与**耗时**均不区分"用户不存在/禁用/密码错"（终审 I3）——
+        // 未知/禁用路径对 DUMMY_HASH 跑一次等价 argon2 验证
         let bad = || DomainError::SecBadCredentials;
-        let r = row.ok_or_else(bad)?;
-        if !r.enabled {
-            return Err(bad());
-        }
+        let r = match row {
+            Some(r) if r.enabled => r,
+            _ => {
+                fold_unknown_user(password);
+                return Err(bad());
+            }
+        };
         let parsed = PasswordHash::new(&r.password_hash).map_err(|_| bad())?;
         Argon2::default()
             .verify_password(password.as_bytes(), &parsed)
@@ -235,6 +272,22 @@ fn hash_password(plain: &str) -> Result<String> {
         .hash_password(plain.as_bytes(), &salt)
         .map_err(|e| DomainError::Internal(format!("argon2 hash: {e}")))?
         .to_string())
+}
+
+/// 未知/禁用用户的等价验证目标（终审 I3）：对同一密码短语 argon2 一次，抹平时序差。
+/// PHC 串进程内懒生成（OnceLock）——自愈、无魔法常量；生成失败则跳过（最坏退回时序差，不影响正确性）。
+fn fold_unknown_user(password: &str) {
+    static DUMMY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let hash = DUMMY.get_or_init(|| {
+        let salt = SaltString::generate(&mut OsRng);
+        Argon2::default()
+            .hash_password(b"dummy", &salt)
+            .map(|h| h.to_string())
+            .unwrap_or_default()
+    });
+    if let Ok(parsed) = PasswordHash::new(hash) {
+        let _ = Argon2::default().verify_password(password.as_bytes(), &parsed);
+    }
 }
 
 /// 中间件用：Bearer 前缀剥离（畸形 → 401）
