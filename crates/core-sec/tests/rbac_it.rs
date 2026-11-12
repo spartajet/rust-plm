@@ -1,6 +1,5 @@
 //! 授权域集成测试（计划 Task1）：enforce 矩阵 / 建号重复 / 授权回收即时生效 / 密级注入过滤。
 
-use core_model::DomainError;
 use core_sec::SecService;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
@@ -85,7 +84,7 @@ impl Ctx {
 async fn enforce_matrix_three_roles() {
     let c = setup("matrix").await;
     c.sec
-        .create_user("ed", "pw123456", Some("工".into()), &["editor"], 1)
+        .create_user("ed", "pw123456", Some("工"), &["editor"], 1)
         .await
         .unwrap();
     c.sec

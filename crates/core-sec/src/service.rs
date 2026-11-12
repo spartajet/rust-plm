@@ -290,13 +290,29 @@ impl SecService {
             }
         };
         let hash = hash_password(&plain)?;
-        sqlx::query("INSERT INTO sec_user(username, password_hash, display_name) VALUES ('admin', $1, '管理员')")
-            .bind(hash)
-            .execute(&self.pool)
-            .await?;
+        // M5：ON CONFLICT 幂等（双实例首启败者不再崩溃）
+        let created = sqlx::query(
+            "INSERT INTO sec_user(username, password_hash, display_name) \
+             VALUES ('admin', $1, '管理员') ON CONFLICT (lower(username)) DO NOTHING",
+        )
+        .bind(hash)
+        .execute(&self.pool)
+        .await?
+        .rows_affected()
+            > 0;
+        // admin 角色绑定幂等补齐（迁移/历史库也可能缺）；随后重建求值器
+        sqlx::query(
+            "INSERT INTO sec_user_role(username, role_code) VALUES ('admin', 'admin') \
+             ON CONFLICT DO NOTHING",
+        )
+        .execute(&self.pool)
+        .await?;
+        if created {
+            self.reload_policies().await?;
+        }
         Ok(AdminBootInfo {
-            created: true,
-            printed_password: printed,
+            created,
+            printed_password: printed.filter(|_| created),
         })
     }
 

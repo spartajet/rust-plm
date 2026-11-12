@@ -5,7 +5,7 @@ pub mod docs;
 pub mod infra;
 pub mod sec_users;
 
-use crate::middleware::{require_auth, require_perm};
+use crate::middleware::require_perm;
 use crate::state::AppState;
 use axum::routing::{get, post};
 use axum::Router;
@@ -54,10 +54,6 @@ pub fn build(state: AppState) -> Router {
         .merge(docs_rw)
         .merge(docs_r)
         .merge(sec_mgmt)
-        .layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            require_auth,
-        ))
         .layer(axum::middleware::from_fn(crate::error::trace_mw))
         .layer(axum::extract::DefaultBodyLimit::max(
             state.max_upload as usize,

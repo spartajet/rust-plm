@@ -16,9 +16,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct TestCtx {
     pub app: axum::Router,
     pub files_root: PathBuf,
+    pub pool: PgPool,
     db: String,
     admin_url: String,
-    pool: PgPool,
 }
 
 fn unique_db(hint: &str) -> String {
@@ -111,6 +111,46 @@ impl TestCtx {
             admin_url,
             pool,
         }
+    }
+
+    /// admin 建号（密级+角色）并返回 (username, password)
+    pub async fn create_user_as_admin(
+        &self,
+        admin_token: &str,
+        username: &str,
+        password: &str,
+        roles: &[&str],
+        max_secret_level: i16,
+    ) {
+        let body = serde_json::json!({
+            "username": username, "password": password,
+            "roles": roles, "max_secret_level": max_secret_level,
+        });
+        let req = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/sec/users")
+            .header("content-type", "application/json")
+            .header("authorization", format!("Bearer {admin_token}"))
+            .body(axum::body::Body::from(body.to_string()))
+            .unwrap();
+        let (status, b, _) = send(&self.app, req).await;
+        assert_eq!(status, 201, "建号必须成功: {}", String::from_utf8_lossy(&b));
+    }
+
+    /// 以任意账号登录
+    pub async fn login_as(&self, username: &str, password: &str) -> String {
+        let req = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/login")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(format!(
+                r#"{{"username":"{username}","password":"{password}"}}"#
+            )))
+            .unwrap();
+        let (status, body, _) = send(&self.app, req).await;
+        assert_eq!(status, 200);
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        v["access_token"].as_str().unwrap().to_string()
     }
 
     /// 以 admin 登录并返回 access token（e2e 全链用）

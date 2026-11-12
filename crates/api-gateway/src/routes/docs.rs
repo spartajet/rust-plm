@@ -9,6 +9,7 @@ use axum::Extension;
 use axum::Json;
 use core_model::query::{Cond, ObjectQuery, Op, Page, Sort};
 use core_model::types::AttrMap;
+use core_sec::AuthUser;
 use futures_util::StreamExt;
 use serde::Deserialize;
 use serde::Serialize;
@@ -166,9 +167,16 @@ pub struct ListQ {
 pub async fn list_docs(
     State(st): State<AppState>,
     Extension(tid): Extension<crate::error::TraceId>,
+    Extension(user): Extension<AuthUser>,
     Query(q): Query<ListQ>,
 ) -> Result<Json<ListResponse>, ApiError> {
     let mut conds = Vec::new();
+    // ABAC 密级维：仅可见 secret_level ≤ 用户上限的对象（授权增量 Goal 3）
+    conds.push(Cond {
+        attr: "secret_level".into(),
+        op: Op::Le,
+        value: json!(user.max_secret_level),
+    });
     for (k, v) in &q.raw {
         if let Some(attr) = k.strip_prefix("filter[").and_then(|s| s.strip_suffix(']')) {
             conds.push(Cond {
@@ -221,6 +229,7 @@ pub async fn list_docs(
 pub async fn get_doc(
     State(st): State<AppState>,
     Extension(tid): Extension<crate::error::TraceId>,
+    Extension(user): Extension<AuthUser>,
     Path(obj_no): Path<String>,
 ) -> Result<Json<DocResponse>, ApiError> {
     let d = st
@@ -228,6 +237,13 @@ pub async fn get_doc(
         .detail(&obj_no)
         .await
         .map_err(|e| ApiError::new(e, &tid.0))?;
+    // ABAC 密级维：越级 → 404（不泄露存在性）
+    if d.object.secret_level > user.max_secret_level {
+        return Err(ApiError::new(
+            core_model::DomainError::ObjNotFound(format!("docs:{obj_no}")),
+            &tid.0,
+        ));
+    }
     Ok(Json(to_response(d)))
 }
 
@@ -240,8 +256,18 @@ pub async fn get_doc(
 pub async fn download_doc(
     State(st): State<AppState>,
     Extension(tid): Extension<crate::error::TraceId>,
+    Extension(user): Extension<AuthUser>,
     Path(obj_no): Path<String>,
 ) -> Result<Response, ApiError> {
+    // ABAC 密级维：越级 → 404（与 detail 同语义，防绕过下载）
+    if let Ok(d) = st.service.detail(&obj_no).await {
+        if d.object.secret_level > user.max_secret_level {
+            return Err(ApiError::new(
+                core_model::DomainError::ObjNotFound(format!("docs:{obj_no}")),
+                &tid.0,
+            ));
+        }
+    }
     let (name, stream, size) = st
         .service
         .open_original(&obj_no)
