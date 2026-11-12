@@ -37,7 +37,10 @@ pub fn bom_release_hook(bom: Arc<core_bom::BomStore>) -> Arc<dyn core_version::R
             obj_id: uuid::Uuid,
             major: i32,
         ) -> core_model::Result<()> {
-            self.0.snapshot_live_edges_tx(tx, obj_id, major).await.map(|_| ())
+            self.0
+                .snapshot_live_edges_tx(tx, obj_id, major)
+                .await
+                .map(|_| ())
         }
     }
     Arc::new(Hook(bom))

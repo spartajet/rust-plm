@@ -979,7 +979,13 @@ async fn bom_version_chain_freeze_isolate_asof() {
     for no in ["DWG-BV-P", "DWG-BV-C1", "DWG-BV-C2"] {
         let (s, _, _) = send(
             &ctx.app,
-            post_docs_multipart(Some(&ed), no, r#"{"name":"N"}"#, Some("b.dwg"), FILE.to_vec()),
+            post_docs_multipart(
+                Some(&ed),
+                no,
+                r#"{"name":"N"}"#,
+                Some("b.dwg"),
+                FILE.to_vec(),
+            ),
         )
         .await;
         assert_eq!(s, 201, "{no}");
@@ -1021,7 +1027,10 @@ async fn bom_version_chain_freeze_isolate_asof() {
             .filter(|l| !l.trim().is_empty())
             .map(|l| {
                 let v: serde_json::Value = serde_json::from_str(l).unwrap();
-                (v["child"].as_str().unwrap().to_string(), v["qty_total"].as_i64().unwrap())
+                (
+                    v["child"].as_str().unwrap().to_string(),
+                    v["qty_total"].as_i64().unwrap(),
+                )
             })
             .collect()
     };
@@ -1029,7 +1038,13 @@ async fn bom_version_chain_freeze_isolate_asof() {
     // v1 working：父 BOM = C1×2 + C2×1
     let (s, body, _) = send(
         &ctx.app,
-        set_lines(&ed, "DWG-BV-P", format!(r#"[{{"line_no":1,"child":"{c1}","qty":2}},{{"line_no":2,"child":"{c2}","qty":1}}]"#)),
+        set_lines(
+            &ed,
+            "DWG-BV-P",
+            format!(
+                r#"[{{"line_no":1,"child":"{c1}","qty":2}},{{"line_no":2,"child":"{c2}","qty":1}}]"#
+            ),
+        ),
     )
     .await;
     assert_eq!(s, 204, "body={}", String::from_utf8_lossy(&body));
@@ -1061,11 +1076,12 @@ async fn bom_version_chain_freeze_isolate_asof() {
         .await
         .unwrap();
     assert_eq!(snaps, 2, "v1 冻结 2 条边");
-    let rel: i64 = sqlx::query_scalar("SELECT count(*) FROM bom_release WHERE parent=$1 AND major=1")
-        .bind(uuid::Uuid::parse_str(&pid).unwrap())
-        .fetch_one(&ctx.pool)
-        .await
-        .unwrap();
+    let rel: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM bom_release WHERE parent=$1 AND major=1")
+            .bind(uuid::Uuid::parse_str(&pid).unwrap())
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
     assert_eq!(rel, 1);
 
     // expand 缺省（live）与 ?major=1 一致
@@ -1081,7 +1097,11 @@ async fn bom_version_chain_freeze_isolate_asof() {
     assert_eq!(s, 200);
     let (s, _, _) = send(
         &ctx.app,
-        set_lines(&ed, "DWG-BV-P", format!(r#"[{{"line_no":1,"child":"{c2}","qty":5}}]"#)),
+        set_lines(
+            &ed,
+            "DWG-BV-P",
+            format!(r#"[{{"line_no":1,"child":"{c2}","qty":5}}]"#),
+        ),
     )
     .await;
     assert_eq!(s, 204);

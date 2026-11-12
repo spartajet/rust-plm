@@ -53,6 +53,9 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/jso
 curl -g -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/v1/boms/DWG-001/expand?mode=full'
 curl -g -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/v1/boms/<子对象id>/where-used'
 
+# BOM 版本链（增量9）：发布即冻结子树快照；?major=N 按发布时点 as-of 展开
+curl -g -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/v1/boms/DWG-001/expand?mode=full&major=1'
+
 # 详情 / 下载 / API 文档（docs 与文件下载同样需要 Bearer）
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001
 curl -o 支架.dwg -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001/file
@@ -63,8 +66,9 @@ curl -o 支架.dwg -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v
 
 ```bash
 cd frontend && npm install
-VITE_API_PROXY_TARGET=http://localhost:18095 npx vite --port 5173
-# 打开 http://localhost:5173 → 登录 admin → 图纸列表/上传/详情/生命周期/BOM
+# 浏览器直连 API（后端 CORS 已放开；本机 node 环回不稳时绕开 vite 代理）
+VITE_API_BASE=http://127.0.0.1:18095 npx vite --port 5173 --host 127.0.0.1
+# 打开 http://127.0.0.1:5173 → 登录 admin → 图纸列表/上传/详情/生命周期/BOM/升版/版本历史
 ```
 
 # 本地开发（无 Docker）
@@ -96,7 +100,7 @@ docs/adr/        架构决策记录
 
 ## Roadmap（版本规划见需求文档 §8）
 
-骨架 ✓ → 认证 ✓ → 授权 ✓ → 生命周期 ✓ → Webhook 外投 ✓ → 三档流程 ✓ → BOM 引擎 ✓ → 前端工作台 ✓（登录/列表/上传/详情/生命周期/BOM）→ Revise 升版 ✓（released→下一 major；版本历史=发布快照链）→ BOM 版本链 → IM 卡片审批（钉钉/企微/飞书）→ 前端工作台深化（看板/密级/用户管理 UI）。
+骨架 ✓ → 认证 ✓ → 授权 ✓ → 生命周期 ✓ → Webhook 外投 ✓ → 三档流程 ✓ → BOM 引擎 ✓ → 前端工作台 ✓（登录/列表/上传/详情/生命周期/BOM）→ Revise 升版 ✓（released→下一 major；版本历史=发布快照链）→ BOM 版本链 ✓（发布冻结快照+?major= as-of 展开）→ IM 卡片审批（钉钉/企微/飞书）→ 前端工作台深化（看板/密级/用户管理 UI/BOM 版本切换）。
 
 ## 许可
 

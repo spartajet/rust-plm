@@ -558,7 +558,10 @@ impl ReleaseHook for LogHook {
 async fn setup_hook(hint: &str) -> (Ctx, std::sync::Arc<Mutex<HookLog>>, LifecycleStore) {
     let c = setup(hint).await;
     let log = std::sync::Arc::new(Mutex::new(HookLog::default()));
-    let store = LifecycleStore::new_with_hook(c.pool.clone(), Some(std::sync::Arc::new(LogHook(log.clone()))));
+    let store = LifecycleStore::new_with_hook(
+        c.pool.clone(),
+        Some(std::sync::Arc::new(LogHook(log.clone()))),
+    );
     (c, log, store)
 }
 
@@ -637,10 +640,11 @@ async fn no_hook_approve_unaffected() {
     c.release_with_hash("DWG-HK-3", "h").await;
     let d = c.svc.detail("DWG-HK-3").await.unwrap();
     assert_eq!(d.object.state, "released");
-    let snaps: i64 = sqlx::query_scalar("SELECT count(*) FROM cm_obj_snapshot WHERE obj_no='DWG-HK-3'")
-        .fetch_one(&c.pool)
-        .await
-        .unwrap();
+    let snaps: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM cm_obj_snapshot WHERE obj_no='DWG-HK-3'")
+            .fetch_one(&c.pool)
+            .await
+            .unwrap();
     assert_eq!(snaps, 1);
     c.drop_it().await;
 }

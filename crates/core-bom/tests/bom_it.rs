@@ -632,14 +632,29 @@ async fn seed_deep(c: &Ctx) -> (Uuid, Uuid, Uuid) {
         .set_lines(
             root,
             vec![
-                LineInput { line_no: 1, child: a, qty: 2 },
-                LineInput { line_no: 2, child: b, qty: 1 },
+                LineInput {
+                    line_no: 1,
+                    child: a,
+                    qty: 2,
+                },
+                LineInput {
+                    line_no: 2,
+                    child: b,
+                    qty: 1,
+                },
             ],
         )
         .await
         .unwrap();
     c.store
-        .set_lines(a, vec![LineInput { line_no: 1, child: b, qty: 3 }])
+        .set_lines(
+            a,
+            vec![LineInput {
+                line_no: 1,
+                child: b,
+                qty: 3,
+            }],
+        )
         .await
         .unwrap();
     (root, a, b)
@@ -649,25 +664,34 @@ async fn seed_deep(c: &Ctx) -> (Uuid, Uuid, Uuid) {
 async fn snapshot_freezes_idempotent_and_asof_matches_live() {
     // Review Focus #2：同边集下快照 CTE 与 live expand 三模式对拍
     let c = setup("vsnap").await;
-    let (root, a, b) = seed_deep(&c).await;
+    let (root, _a, b) = seed_deep(&c).await;
 
     let mut tx = c.pool.begin().await.unwrap();
-    let n = c.store.snapshot_live_edges_tx(&mut *tx, root, 1).await.unwrap();
+    let n = c
+        .store
+        .snapshot_live_edges_tx(&mut tx, root, 1)
+        .await
+        .unwrap();
     tx.commit().await.unwrap();
     assert_eq!(n, 3, "快照须落全部 3 条边");
 
     // 幂等：同 major 重快照 → 0 新增
     let mut tx = c.pool.begin().await.unwrap();
-    let n2 = c.store.snapshot_live_edges_tx(&mut *tx, root, 1).await.unwrap();
+    let n2 = c
+        .store
+        .snapshot_live_edges_tx(&mut tx, root, 1)
+        .await
+        .unwrap();
     tx.commit().await.unwrap();
     assert_eq!(n2, 0, "ON CONFLICT 幂等");
 
     // bom_release 行存在（无 BOM 空集也须有——asof 守卫依据）
-    let rel: i64 = sqlx::query_scalar("SELECT count(*) FROM bom_release WHERE parent=$1 AND major=1")
-        .bind(root)
-        .fetch_one(&c.pool)
-        .await
-        .unwrap();
+    let rel: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM bom_release WHERE parent=$1 AND major=1")
+            .bind(root)
+            .fetch_one(&c.pool)
+            .await
+            .unwrap();
     assert_eq!(rel, 1);
 
     // 三模式对拍：asof(major=1) == live
@@ -690,12 +714,24 @@ async fn snapshot_freezes_idempotent_and_asof_matches_live() {
             .collect();
         assert_eq!(live, asof, "mode={mode:?} 对拍失配");
     }
-    let full = c.store.expand_asof(root, 1, ExpandMode::Full).await.unwrap();
+    let full = c
+        .store
+        .expand_asof(root, 1, ExpandMode::Full)
+        .await
+        .unwrap();
     let b = full.iter().find(|r| r.child == b).unwrap();
     assert_eq!(b.qty_total, 7, "双路径聚合 2*3+1");
-    let leaf = c.store.expand_asof(root, 1, ExpandMode::LeafOnly).await.unwrap();
+    let leaf = c
+        .store
+        .expand_asof(root, 1, ExpandMode::LeafOnly)
+        .await
+        .unwrap();
     assert_eq!(leaf.len(), 1, "仅 b 是叶子");
-    let one = c.store.expand_asof(root, 1, ExpandMode::OneLevel).await.unwrap();
+    let one = c
+        .store
+        .expand_asof(root, 1, ExpandMode::OneLevel)
+        .await
+        .unwrap();
     assert_eq!(one.len(), 2, "一层= a+b");
     let _ = _HashMap::<Uuid, i64>::new();
     c.drop_it().await;
@@ -707,19 +743,33 @@ async fn asof_isolated_from_live_edits() {
     let c = setup("viso").await;
     let (root, a, _b) = seed_deep(&c).await;
     let mut tx = c.pool.begin().await.unwrap();
-    c.store.snapshot_live_edges_tx(&mut *tx, root, 1).await.unwrap();
+    c.store
+        .snapshot_live_edges_tx(&mut tx, root, 1)
+        .await
+        .unwrap();
     tx.commit().await.unwrap();
 
     // v2 工作区：live 替换为 a(qty9)
     c.store
-        .set_lines(root, vec![LineInput { line_no: 1, child: a, qty: 9 }])
+        .set_lines(
+            root,
+            vec![LineInput {
+                line_no: 1,
+                child: a,
+                qty: 9,
+            }],
+        )
         .await
         .unwrap();
     let live = c.store.expand(root, ExpandMode::OneLevel).await.unwrap();
     assert_eq!(live.len(), 1);
     assert_eq!(live[0].qty_total, 9);
 
-    let asof = c.store.expand_asof(root, 1, ExpandMode::OneLevel).await.unwrap();
+    let asof = c
+        .store
+        .expand_asof(root, 1, ExpandMode::OneLevel)
+        .await
+        .unwrap();
     assert_eq!(asof.len(), 2, "冻结快照不得被 live 编辑污染");
     let sum: i64 = asof.iter().map(|r| r.qty_total).sum();
     assert_eq!(sum, 3, "原 2+1");
@@ -730,14 +780,13 @@ async fn asof_isolated_from_live_edits() {
 async fn expand_asof_unreleased_major_is_400() {
     // Review Focus #3：未发布 major → 400 MDL-BAD-REQUEST
     let c = setup("v400").await;
-    let (root, a, _b) = seed_deep(&c).await;
+    let (root, _a, _b) = seed_deep(&c).await;
     let e = c
         .store
         .expand_asof(root, 9, ExpandMode::Full)
         .await
         .unwrap_err();
     assert_eq!(e.code(), "MDL-BAD-REQUEST");
-    let _ = a;
     c.drop_it().await;
 }
 
@@ -747,10 +796,18 @@ async fn empty_bom_release_still_asof_expands_empty() {
     let c = setup("vempty").await;
     let root = c.node_ids[5];
     let mut tx = c.pool.begin().await.unwrap();
-    let n = c.store.snapshot_live_edges_tx(&mut *tx, root, 1).await.unwrap();
+    let n = c
+        .store
+        .snapshot_live_edges_tx(&mut tx, root, 1)
+        .await
+        .unwrap();
     tx.commit().await.unwrap();
     assert_eq!(n, 0);
-    let rows = c.store.expand_asof(root, 1, ExpandMode::Full).await.unwrap();
+    let rows = c
+        .store
+        .expand_asof(root, 1, ExpandMode::Full)
+        .await
+        .unwrap();
     assert!(rows.is_empty());
     c.drop_it().await;
 }

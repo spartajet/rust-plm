@@ -32,3 +32,13 @@ Final: fixed M1 tsconfig.tsbuildinfo 出库(git rm --cached)+根 .gitignore 补 
 Final: minor (deferred): M2 strict 档 checked 态 UI 无 approve/reject 按钮——界面无法完成两级审批第二级(增量5 遗留 UI 债,首次记账;前端深化增量处理,需双人 e2e)。
 Final: minor (deferred): M3 versions_doc 双读 detail+versions;transition 每事件查 original_file(仅 release 需要)——纯性能缓。
 Final: Ruling: M4 合并门禁实跑 Playwright(本机 chromium-1248)——终审可代码审阅级,合并前必须真跑。
+[增量9 BOM 版本链 追加台账]
+Final: Task1-3 完成——方案A(发布快照冻结+as-of CTE)：bom_release/bom_edge_snapshot(0011)；快照范围=整个子树(bom_path 自包含 root 自行)；expand_asof 三模式与 live 同边集对拍；ReleaseHook 注入点(core-version 定义,api-gateway::bom_release_hook 装配共用,main 与 e2e harness 同源防漂移)。
+Final: Ruling: live bom_edge 语义="最新 major 工作区"——revise 后 v2 编辑直接替换 live；v1 形态只存快照。历史 where-used 后置(现保持 live 反查)。
+Final: Ruling: bom_release 独立成表(非仅边快照)——无 BOM 边的对象发布也落行,as-of 守卫可区分"发布但空"vs"未发布"(后者 400)。
+Final: minor (deferred): 前端详情页 BOM 卡版本切换下拉未做(API 已就绪 bomExpand(major),前端深化增量处理)；where_used 历史化；快照子树含共享子件的全量复制(存储放大可接受,量级=发布次数×子树边数)。
+[增量9 修复轮（e2e 门禁）台账]
+Final: Ruling: e2e 挂死假 500 根因=本机 node.exe 环回 socket 间歇性 ECONNRESET(~15-20%,串行也复现;控制实验 node→node 同样失败;curl/chromium 全稳;疑似安全软件对 node 注入,亦解释增量7 npm 拉取失败)——非产品 bug。
+Final: Ruling: 架构级绕开=浏览器(chromium,稳)直连 API：后端加 tower-http CorsLayer::permissive(裁定:鉴权走 Bearer 头非 Cookie,CORS 不构成安全边界;前后端分离部署为正式支持路径)；e2e 以 VITE_API_BASE=http://127.0.0.1:18095 直连,vite 代理保留为可选(本机 localhost 解析为 ::1 单栈,后端仅绑 0.0.0.0,代理须显式 127.0.0.1)。
+Final: Ruling: Playwright 稳定性实证——修复前 1.0m 挂死/间歇失败,修复后 3/3 连跑 2/2 全绿(3.3-3.7s)。
+Final: minor (deferred): 旧本机 vite 进程曾占 5173(TaskStop 未杀子进程)——e2e 前置需清场(taskkill node+strictPort);README 已写 strictPort 直连配方。

@@ -20,7 +20,10 @@ impl LifecycleStore {
     }
 
     /// 注入发布扩展点（plm-server 装配层消费：BOM 冻结等发布时动作）
-    pub fn new_with_hook(pool: PgPool, hook: Option<std::sync::Arc<dyn crate::ReleaseHook>>) -> Self {
+    pub fn new_with_hook(
+        pool: PgPool,
+        hook: Option<std::sync::Arc<dyn crate::ReleaseHook>>,
+    ) -> Self {
         Self {
             pool,
             release_hook: hook,
@@ -193,7 +196,7 @@ impl LifecycleStore {
                 .await?;
             // 发布扩展点（增量9）：同事务回调（BOM 冻结等）；Err → 整个迁移回滚
             if let Some(hook) = &self.release_hook {
-                hook.on_released(&mut *tx, type_code, &row.obj_no, obj.0, obj.3)
+                hook.on_released(&mut tx, type_code, &row.obj_no, obj.0, obj.3)
                     .await?;
             }
         }

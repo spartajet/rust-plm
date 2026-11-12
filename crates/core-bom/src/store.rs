@@ -243,11 +243,13 @@ impl BomStore {
         parent: Uuid,
         major: i32,
     ) -> Result<u64> {
-        sqlx::query("INSERT INTO bom_release(parent, major) VALUES ($1, $2) ON CONFLICT DO NOTHING")
-            .bind(parent)
-            .bind(major)
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            "INSERT INTO bom_release(parent, major) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        )
+        .bind(parent)
+        .bind(major)
+        .execute(&mut *tx)
+        .await?;
         let n = sqlx::query(
             "INSERT INTO bom_edge_snapshot(parent, major, line_no, child, qty) \
              SELECT e.parent, $2, e.line_no, e.child, e.qty FROM bom_edge e \
@@ -270,17 +272,14 @@ impl BomStore {
         major: i32,
         mode: ExpandMode,
     ) -> Result<Vec<ExpandRow>> {
-        let released: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM bom_release WHERE parent = $1 AND major = $2",
-        )
-        .bind(parent)
-        .bind(major)
-        .fetch_one(&self.pool)
-        .await?;
+        let released: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM bom_release WHERE parent = $1 AND major = $2")
+                .bind(parent)
+                .bind(major)
+                .fetch_one(&self.pool)
+                .await?;
         if released == 0 {
-            return Err(DomainError::BadRequest(format!(
-                "major {major} 无发布快照"
-            )));
+            return Err(DomainError::BadRequest(format!("major {major} 无发布快照")));
         }
         match mode {
             ExpandMode::Full | ExpandMode::LeafOnly => {
