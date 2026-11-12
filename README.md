@@ -30,6 +30,11 @@ curl -X POST http://localhost:8080/api/v1/docs \
   -F 'attrs={"name":"支架","material":"Q235"}' \
   -F 'file=@支架.dwg'
 
+# 生命周期：提交→审批→发布（released 不可变；发布落快照+doc.released 事件）
+curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001/submit
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/api/v1/docs/DWG-001/approve
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/api/v1/docs/DWG-001/obsolete
+
 # 列表（filter 等值过滤 / sort 排序 / page+size 分页）
 curl -g -H "Authorization: Bearer $TOKEN" \
   'http://localhost:8080/api/v1/docs?filter[material]=Q235&sort=-updated_at'
@@ -69,7 +74,7 @@ docs/adr/        架构决策记录
 
 ## Roadmap（版本规划见需求文档 §8）
 
-骨架 ✓ → 认证 ✓ → 授权(RBAC+密级) ✓ → 版本/生命周期 + 事件（core-version/events）→ 三档流程 → BOM 引擎→ 三档流程 → BOM 引擎（闭包表已验证 10 万行展开 42ms）→ 前端工作台（Vue3+EP）→ 钉钉/企微/飞书卡片审批。
+骨架 ✓ → 认证 ✓ → 授权(RBAC+密级) ✓ → 生命周期(提交/审批/发布/快照) ✓ → 事件外投 Webhook（core-events）→ 三档流程 → BOM 引擎→ 三档流程 → BOM 引擎（闭包表已验证 10 万行展开 42ms）→ 前端工作台（Vue3+EP）→ 钉钉/企微/飞书卡片审批。
 
 ## 许可
 

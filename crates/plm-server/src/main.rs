@@ -75,6 +75,10 @@ async fn main() -> Result<()> {
         .run(&pool)
         .await
         .context("core-sec 迁移失败")?;
+    core_version::migrator()
+        .run(&pool)
+        .await
+        .context("core-version 迁移失败")?;
 
     // JWT 密钥策略（env → data_dir/jwt.key → 随机）+ admin 引导（仅缺省时创建）
     let jwt_secret = core_sec::resolve_secret(cfg.jwt_secret.as_deref(), &cfg.data_dir)
@@ -105,12 +109,14 @@ async fn main() -> Result<()> {
         files,
     ));
 
+    let lifecycle = Arc::new(core_version::LifecycleStore::new(pool.clone()));
     let state = api_gateway::AppState {
         registry: registry.clone(),
         service,
         pool,
         max_upload: cfg.max_upload,
         sec,
+        lifecycle,
     };
     let app = api_gateway::router(state);
 

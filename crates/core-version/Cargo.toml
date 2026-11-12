@@ -1,0 +1,20 @@
+[package]
+name = "core-version"
+version = "0.1.0"
+edition = "2021"
+description = "RustPLM 版本与生命周期：表驱动状态机 + 发布快照 + 发布事件落库"
+
+[dependencies]
+tokio = { workspace = true }
+sqlx = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+core-model = { path = "../core-model" }
+
+[dev-dependencies]
+mod-doc = { path = "../mod-doc" }
+core-files = { path = "../core-files" }
+tokio = { workspace = true, features = ["test-util"] }

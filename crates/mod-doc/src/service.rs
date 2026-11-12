@@ -131,6 +131,30 @@ impl DocService {
         self.objects.query(q).await
     }
 
+    /// 修改 working 态对象属性（乐观锁；发布态由 ObjectStore 423 拒绝）
+    pub async fn update_object(
+        &self,
+        obj_no: &str,
+        patch: &AttrMap,
+        expect_rev: i32,
+        actor: uuid::Uuid,
+    ) -> Result<BizObject> {
+        self.objects
+            .update(Self::TYPE, obj_no, 1, 0, patch, expect_rev, actor)
+            .await
+    }
+
+    /// 生命周期转发（网关 5 端点消费；权限在网关把关）
+    pub async fn transition(
+        &self,
+        store: &core_version::LifecycleStore,
+        ev: core_version::LifecycleEvent,
+        obj_no: &str,
+        actor: uuid::Uuid,
+    ) -> Result<BizObject> {
+        store.transition(Self::TYPE, obj_no, ev, Some(actor)).await
+    }
+
     pub async fn detail(&self, obj_no: &str) -> Result<DocDetail> {
         let object = self.objects.get(Self::TYPE, obj_no, 1, 0).await?;
         let file = self.original_file(object.id).await?;

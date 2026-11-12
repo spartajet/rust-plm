@@ -15,8 +15,10 @@ pub struct AppState {
     pub pool: PgPool,
     /// 上传体积上限（字节），DefaultBodyLimit 使用
     pub max_upload: u64,
-    /// 认证服务（Task2 起 docs 路由要求 Bearer）
+    /// 认证服务（docs 路由要求 Bearer）
     pub sec: Arc<SecService>,
+    /// 生命周期存储（增量3）
+    pub lifecycle: Arc<core_version::LifecycleStore>,
 }
 
 /// OpenAPI 聚合文档（/api/docs/openapi.json）
