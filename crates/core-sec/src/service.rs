@@ -27,11 +27,12 @@ pub struct AdminBootInfo {
     pub printed_password: Option<String>,
 }
 
-/// 已认证用户（中间件注入 Extension）
+/// 已认证用户（中间件注入 Extension；max_secret_level 由授权段回填）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthUser {
     pub id: uuid::Uuid,
     pub username: String,
+    pub max_secret_level: i16,
 }
 
 fn now() -> i64 {
