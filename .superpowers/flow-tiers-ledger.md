@@ -47,3 +47,9 @@ Final: fixed C1 快照键冲突静默错值（reviewer 真库实证：子件 C �
 Final: fixed I1 expand（live+?major=）ABAC 越级 404 专项 e2e 钉（越级 3 路径 404+admin 200）。
 Final: fixed M1 冗余 _HashMap 别名+烧导入死行清除；M2 返回值语义随 C1 修正（幂等重入返回 0，bom_release 守卫前置于插入）。
 Final: Ruling: 幂等语义教训——「行级 ON CONFLICT DO NOTHING」只适用键空间独占的表；键空间会被多方写入的表（此处=发布事件），幂等必须锚定事件级行（bom_release）而非数据行。
+[增量10 IM 卡片审批 追加台账]
+Final: Task1-3 完成——doc.submitted/doc.checked 事件；core-im（三渲染器+钉钉加签+HMAC 校验+CardPusher 订阅 im_card_log，与 dispatcher 双消费者解耦以 event_id 唯一锚定）；/api/v1/im/actions 全链（401/403/404 守卫）；e2e 18/18。
+Final: Ruling: IM 卡片推送订阅不依赖 event_outbox status（dispatcher 会认领置位）——以 im_card_log(event_id UNIQUE) 独立锚定，集成钉实证 dispatcher 先行认领后 pusher 仍消费。
+Final: Ruling: 卡内按钮→PLM 闭环需各平台企业应用回调凭证——本期以统一 HMAC 回调契约先行（真实 IM 网关转发即接），机器人出站推送开箱即用；真实凭证联调后置。
+Final: Ruling: CardPusher 单实例顺序处理（FOR UPDATE SKIP LOCKED 免）——SMB 单体单实例定位；多实例部署前须加认领语义（与 dispatcher 对齐）。
+Final: minor (deferred): 飞书卡片为 text 型（interactive 卡需应用凭证）；卡片内审批按钮渲染；im_card_log 管理端点（死信重放）；IM 用户映射热更新（当前重启生效）。

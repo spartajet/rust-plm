@@ -108,7 +108,10 @@ impl Ctx {
         self.svc
             .upload(
                 obj_no.into(),
-                serde_json::json!({"name": "N"}).as_object().unwrap().clone(),
+                serde_json::json!({"name": "N"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
                 "f.dwg".into(),
                 None,
                 &mut r,
@@ -126,17 +129,16 @@ impl Ctx {
 async fn fake_im() -> (String, Arc<Mutex<Vec<serde_json::Value>>>) {
     let captured: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
     let cap = captured.clone();
-    let app = axum::Router::new()
-        .route(
-            "/robot/send",
-            post(move |axum::Json(v): axum::Json<serde_json::Value>| {
-                let cap = cap.clone();
-                async move {
-                    cap.lock().unwrap().push(v);
-                    axum::Json(serde_json::json!({"errcode": 0}))
-                }
-            }),
-        );
+    let app = axum::Router::new().route(
+        "/robot/send",
+        post(move |axum::Json(v): axum::Json<serde_json::Value>| {
+            let cap = cap.clone();
+            async move {
+                cap.lock().unwrap().push(v);
+                axum::Json(serde_json::json!({"errcode": 0}))
+            }
+        }),
+    );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -160,43 +162,52 @@ async fn pusher_delivers_card_and_marks_sent() {
     ));
     pusher.tick().await.unwrap();
 
-    let got = captured.lock().unwrap();
-    assert_eq!(got.len(), 1, "假 IM 须收到 1 张卡");
-    let text = got[0]["markdown"]["text"].as_str().unwrap();
-    assert!(text.contains("DWG-PUSH-1"), "text={text}");
-    assert!(text.contains("http://plm/docs/DWG-PUSH-1"), "链接占位须替换");
+    {
+        let got = captured.lock().unwrap();
+        assert_eq!(got.len(), 1, "假 IM 须收到 1 张卡");
+        let text = got[0]["markdown"]["text"].as_str().unwrap();
+        assert!(text.contains("DWG-PUSH-1"), "text={text}");
+        assert!(
+            text.contains("http://plm/docs/DWG-PUSH-1"),
+            "链接占位须替换"
+        );
+    }
 
-    let row: (i16, Option<chrono::DateTime<chrono::Utc>>) = sqlx::query_as(
-        "SELECT status, sent_at FROM im_card_log WHERE obj_no='DWG-PUSH-1'",
-    )
-    .fetch_one(&c.pool)
-    .await
-    .unwrap();
+    let row: (i16, Option<chrono::DateTime<chrono::Utc>>) =
+        sqlx::query_as("SELECT status, sent_at FROM im_card_log WHERE obj_no='DWG-PUSH-1'")
+            .fetch_one(&c.pool)
+            .await
+            .unwrap();
     assert_eq!(row.0, 1, "须标 sent");
     assert!(row.1.is_some());
 
     // 幂等：再 tick 不重发（event_id UNIQUE 已订阅）
     pusher.tick().await.unwrap();
-    drop(got);
     assert_eq!(captured.lock().unwrap().len(), 1, "同事件不得重发");
 
     // dispatcher 先行认领（status=1）后 pusher 仍消费新事件（Review Focus #5）
     let dispatcher = core_events::EventDispatcher::new(c.pool.clone());
     c.submit("DWG-PUSH-2").await;
     dispatcher.tick().await.unwrap(); // outbox 行被 webhook 消费者置位
-    let claimed: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM event_outbox WHERE status<>0 AND payload->>'obj_no'='DWG-PUSH-2'")
-            .fetch_one(&c.pool)
-            .await
-            .unwrap();
+    let claimed: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM event_outbox WHERE status<>0 AND payload->>'obj_no'='DWG-PUSH-2'",
+    )
+    .fetch_one(&c.pool)
+    .await
+    .unwrap();
     assert_eq!(claimed, 1, "前置：dispatcher 已认领该行");
     drop(captured.lock().unwrap());
     pusher.tick().await.unwrap();
-    let got2 = captured.lock().unwrap();
-    assert!(
-        got2.iter().any(|v| v["markdown"]["text"].as_str().unwrap().contains("DWG-PUSH-2")),
-        "dispatcher 认领后 IM pusher 仍须独立消费"
-    );
+    {
+        let got2 = captured.lock().unwrap();
+        assert!(
+            got2.iter().any(|v| v["markdown"]["text"]
+                .as_str()
+                .unwrap()
+                .contains("DWG-PUSH-2")),
+            "dispatcher 认领后 IM pusher 仍须独立消费"
+        );
+    }
     c.drop_it().await;
 }
 
@@ -217,12 +228,11 @@ async fn pusher_retries_then_dead_letters() {
 
     for round in 1..=3 {
         pusher.tick().await.unwrap();
-        let (attempts, status): (i32, i16) = sqlx::query_as(
-            "SELECT attempts, status FROM im_card_log WHERE obj_no='DWG-PUSH-3'",
-        )
-        .fetch_one(&c.pool)
-        .await
-        .unwrap();
+        let (attempts, status): (i32, i16) =
+            sqlx::query_as("SELECT attempts, status FROM im_card_log WHERE obj_no='DWG-PUSH-3'")
+                .fetch_one(&c.pool)
+                .await
+                .unwrap();
         assert_eq!(attempts, round, "第 {round} 轮失败后 attempts={round}");
         assert_eq!(status, 0, "未达上限仍 pending");
 
@@ -242,12 +252,11 @@ async fn pusher_retries_then_dead_letters() {
     }
     // 第 4 次失败 → 死信
     pusher.tick().await.unwrap();
-    let (status, error): (i16, Option<String>) = sqlx::query_as(
-        "SELECT status, error FROM im_card_log WHERE obj_no='DWG-PUSH-3'",
-    )
-    .fetch_one(&c.pool)
-    .await
-    .unwrap();
+    let (status, error): (i16, Option<String>) =
+        sqlx::query_as("SELECT status, error FROM im_card_log WHERE obj_no='DWG-PUSH-3'")
+            .fetch_one(&c.pool)
+            .await
+            .unwrap();
     assert_eq!(status, 2, "MAX_ATTEMPTS 后必须死信");
     assert!(error.is_some());
     c.drop_it().await;

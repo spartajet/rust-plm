@@ -3,7 +3,7 @@
 
 use crate::error::ApiError;
 use crate::state::AppState;
-use axum::extract::{State};
+use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::Extension;
 use axum::Json;
@@ -60,15 +60,15 @@ pub async fn im_action(
     }
 
     let req: ImActionReq = serde_json::from_slice(&body).map_err(|e| {
-        ApiError::new(core_model::DomainError::BadRequest(format!("JSON 解析失败: {e}")), &tid.0)
+        ApiError::new(
+            core_model::DomainError::BadRequest(format!("JSON 解析失败: {e}")),
+            &tid.0,
+        )
     })?;
 
     // IM 用户 → PLM 用户（未映射 403，不泄露存在性）
     let Some(username) = st.im_user_map.get(&req.user) else {
-        return Err(ApiError::new(
-            core_model::DomainError::SecForbidden,
-            &tid.0,
-        ));
+        return Err(ApiError::new(core_model::DomainError::SecForbidden, &tid.0));
     };
     let username = username.clone();
 
@@ -79,10 +79,7 @@ pub async fn im_action(
         .await
         .map_err(|e| ApiError::new(e, &tid.0))?;
     if !allowed {
-        return Err(ApiError::new(
-            core_model::DomainError::SecForbidden,
-            &tid.0,
-        ));
+        return Err(ApiError::new(core_model::DomainError::SecForbidden, &tid.0));
     }
     let d = st
         .service
@@ -110,7 +107,9 @@ pub async fn im_action(
         "reject" => LifecycleEvent::Reject,
         other => {
             return Err(ApiError::new(
-                core_model::DomainError::BadRequest(format!("action 须为 approve|reject，得到 {other}")),
+                core_model::DomainError::BadRequest(format!(
+                    "action 须为 approve|reject，得到 {other}"
+                )),
                 &tid.0,
             ))
         }

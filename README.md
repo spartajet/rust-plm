@@ -44,6 +44,15 @@ curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs
 # 版本历史：当前最新版 + 各次发布的不可变快照（含发布件哈希）
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001/versions
 
+# IM 卡片审批（增量10）：评审进入群机器人推卡（钉钉加签/企微/飞书）；卡内动作经回调回流
+# 服务端配置（环境变量）：
+#   PLM_IM_PROVIDER=dingtalk|wecom|feishu   PLM_IM_WEBHOOK=https://oapi.dingtalk.com/robot/send?access_token=...
+#   PLM_IM_SECRET=<机器人加签密钥>           PLM_IM_DOC_URL_TEMPLATE=http://plm.your.co/docs/{obj_no}
+#   PLM_IM_USER_MAP={"im-ding-1":"zhangsan","im-wecom-2":"lisi"}   # IM id→PLM username
+# 动作回调（IM 企业应用回调网关转发到此端点；X-IM-Sign = hex(HMAC-SHA256(PLM_IM_SECRET, body))）：
+curl -X POST http://localhost:8080/api/v1/im/actions -H 'Content-Type: application/json'   -H 'X-IM-Sign: <hex>' -d '{"obj_no":"DWG-001","action":"approve","user":"im-ding-1"}'
+# 卡片按钮→PLM 闭环需各平台企业应用回调（凭证联调后置）；机器人出站推送开箱即用
+
 # 列表（filter 等值过滤 / sort 排序 / page+size 分页）
 curl -g -H "Authorization: Bearer $TOKEN" \
   'http://localhost:8080/api/v1/docs?filter[material]=Q235&sort=-updated_at'
@@ -100,7 +109,7 @@ docs/adr/        架构决策记录
 
 ## Roadmap（版本规划见需求文档 §8）
 
-骨架 ✓ → 认证 ✓ → 授权 ✓ → 生命周期 ✓ → Webhook 外投 ✓ → 三档流程 ✓ → BOM 引擎 ✓ → 前端工作台 ✓（登录/列表/上传/详情/生命周期/BOM）→ Revise 升版 ✓（released→下一 major；版本历史=发布快照链）→ BOM 版本链 ✓（发布冻结快照+?major= as-of 展开）→ IM 卡片审批（钉钉/企微/飞书）→ 前端工作台深化（看板/密级/用户管理 UI/BOM 版本切换）。
+骨架 ✓ → 认证 ✓ → 授权 ✓ → 生命周期 ✓ → Webhook 外投 ✓ → 三档流程 ✓ → BOM 引擎 ✓ → 前端工作台 ✓（登录/列表/上传/详情/生命周期/BOM）→ Revise 升版 ✓（released→下一 major；版本历史=发布快照链）→ BOM 版本链 ✓（发布冻结快照+?major= as-of 展开）→ IM 卡片审批 ✓（评审推卡钉钉/企微/飞书+HMAC 回调审批闭环）→ 前端工作台深化（看板/密级/用户管理 UI/BOM 版本切换/strict 档 checked 态按钮）。
 
 ## 许可
 

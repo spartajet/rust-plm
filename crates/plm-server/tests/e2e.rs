@@ -1145,16 +1145,18 @@ async fn bom_version_chain_freeze_isolate_asof() {
 
 // ==================== IM 卡片审批（增量10 Review Focus #4） ====================
 
-use core_im::verify_hmac_hex;
-
 fn im_sign_hex(secret: &str, body: &str) -> String {
     use hmac::Mac;
     let mut mac = hmac::Hmac::<sha2::Sha256>::new_from_slice(secret.as_bytes()).unwrap();
     mac.update(body.as_bytes());
-    mac.finalize().into_bytes().iter().map(|b| format!("{b:02x}")).collect()
+    mac.finalize()
+        .into_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
-fn im_action(secret: &str, body: &str, sign: Option<&str>) -> axum::http::Request<axum::body::Body> {
+fn im_action(body: &str, sign: Option<&str>) -> axum::http::Request<axum::body::Body> {
     let mut b = axum::http::Request::builder()
         .method("POST")
         .uri("/api/v1/im/actions")
@@ -1178,7 +1180,13 @@ async fn im_actions_full_loop_and_guards() {
 
     let (s, _, _) = send(
         &ctx.app,
-        post_docs_multipart(Some(&ed), "DWG-IM-A1", r#"{"name":"N"}"#, Some("a.dwg"), FILE.to_vec()),
+        post_docs_multipart(
+            Some(&ed),
+            "DWG-IM-A1",
+            r#"{"name":"N"}"#,
+            Some("a.dwg"),
+            FILE.to_vec(),
+        ),
     )
     .await;
     assert_eq!(s, 201);
@@ -1200,7 +1208,7 @@ async fn im_actions_full_loop_and_guards() {
     // 故主链用 admin 映射 {"im-admin":"admin"}；bad-perm 场景用 editor 映射。
     let body = r#"{"obj_no":"DWG-IM-A1","action":"approve","user":"im-admin"}"#;
     let sign = im_sign_hex(secret, body);
-    let (s, rbody, _) = send(&ctx.app, im_action(secret, body, Some(&sign))).await;
+    let (s, rbody, _) = send(&ctx.app, im_action(body, Some(&sign))).await;
     assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&rbody));
     let v: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
     assert_eq!(v["state"], "released", "IM 审批必须生效");
@@ -1211,7 +1219,7 @@ async fn im_actions_full_loop_and_guards() {
 
     // 坏签名 → 401
     let body2 = r#"{"obj_no":"DWG-IM-A1","action":"reject","user":"im-admin"}"#;
-    let (s, rbody, _) = send(&ctx.app, im_action(secret, body2, Some("deadbeef"))).await;
+    let (s, rbody, _) = send(&ctx.app, im_action(body2, Some("deadbeef"))).await;
     assert_eq!(s, 401);
     let v: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
     assert_eq!(v["code"], "MDL-SEC-UNAUTHORIZED");
@@ -1219,7 +1227,7 @@ async fn im_actions_full_loop_and_guards() {
     // 未映射用户 → 403
     let body3 = r#"{"obj_no":"DWG-IM-A1","action":"approve","user":"im-stranger"}"#;
     let sign3 = im_sign_hex(secret, body3);
-    let (s, _, _) = send(&ctx.app, im_action(secret, body3, Some(&sign3))).await;
+    let (s, _, _) = send(&ctx.app, im_action(body3, Some(&sign3))).await;
     assert_eq!(s, 403);
 
     // 无 docs:approve 权限（editor）→ 403
@@ -1238,7 +1246,7 @@ async fn im_actions_full_loop_and_guards() {
     assert_eq!(s, 200);
     let body4 = r#"{"obj_no":"DWG-IM-A1","action":"approve","user":"im-editor"}"#;
     let sign4 = im_sign_hex(secret, body4);
-    let (s, rbody, _) = send(&ctx.app, im_action(secret, body4, Some(&sign4))).await;
+    let (s, rbody, _) = send(&ctx.app, im_action(body4, Some(&sign4))).await;
     assert_eq!(s, 403, "editor 无 docs:approve 必须 403");
     let v: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
     assert_eq!(v["code"], "MDL-SEC-FORBIDDEN");
@@ -1250,7 +1258,7 @@ async fn im_actions_full_loop_and_guards() {
         .unwrap();
     let body5 = r#"{"obj_no":"DWG-IM-A1","action":"approve","user":"im-admin"}"#;
     let sign5 = im_sign_hex(secret, body5);
-    let (s, _, _) = send(&ctx.app, im_action(secret, body5, Some(&sign5))).await;
+    let (s, _, _) = send(&ctx.app, im_action(body5, Some(&sign5))).await;
     assert_eq!(s, 404, "越密级 IM 动作必须 404");
     ctx.cleanup().await;
 }

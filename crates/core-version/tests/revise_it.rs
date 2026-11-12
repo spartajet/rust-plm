@@ -679,7 +679,10 @@ async fn submit_writes_doc_submitted_outbox() {
     .unwrap();
     assert_eq!(p.get("major").and_then(|v| v.as_i64()), Some(1));
     assert_eq!(p.get("type_code").and_then(|v| v.as_str()), Some("drawing"));
-    assert_eq!(p.get("actor").and_then(|v| v.as_str()), Some(actor.to_string().as_str()));
+    assert_eq!(
+        p.get("actor").and_then(|v| v.as_str()),
+        Some(actor.to_string().as_str())
+    );
     c.drop_it().await;
 }
 
@@ -700,7 +703,12 @@ async fn strict_first_approve_writes_doc_checked_outbox() {
         .unwrap();
     let o = c
         .store
-        .transition("drawing", "DWG-IM-2", LifecycleEvent::Approve, Some(checker))
+        .transition(
+            "drawing",
+            "DWG-IM-2",
+            LifecycleEvent::Approve,
+            Some(checker),
+        )
         .await
         .unwrap();
     assert_eq!(o.state, "checked");
@@ -713,7 +721,12 @@ async fn strict_first_approve_writes_doc_checked_outbox() {
     assert_eq!(n, 1, "checked 进入必须落 doc.checked");
     // approve→released 不落这两个主题（released 自有 doc.released）
     c.store
-        .transition("drawing", "DWG-IM-2", LifecycleEvent::Approve, Some(drafter))
+        .transition(
+            "drawing",
+            "DWG-IM-2",
+            LifecycleEvent::Approve,
+            Some(drafter),
+        )
         .await
         .unwrap();
     let n2: i64 = sqlx::query_scalar(

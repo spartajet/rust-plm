@@ -157,12 +157,12 @@ async fn main() -> Result<()> {
         cfg.im_doc_url_template.clone(),
     ));
     pusher.spawn(1000);
-    let im_user_map: std::collections::HashMap<String, String> = if cfg.im_user_map.trim().is_empty()
-    {
-        Default::default()
-    } else {
-        serde_json::from_str(&cfg.im_user_map).context("PLM_IM_USER_MAP 须为 JSON 对象")?
-    };
+    let im_user_map: std::collections::HashMap<String, String> =
+        if cfg.im_user_map.trim().is_empty() {
+            Default::default()
+        } else {
+            serde_json::from_str(&cfg.im_user_map).context("PLM_IM_USER_MAP 须为 JSON 对象")?
+        };
     // 事件外投循环（ADR-0007；1s 轮询 + 退避/死信）
     core_events::migrator()
         .run(&pool)

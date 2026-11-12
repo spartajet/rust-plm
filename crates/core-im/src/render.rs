@@ -35,10 +35,7 @@ fn body_of(input: &CardInput) -> String {
         format!("- 对象：{}", input.obj_no),
         format!("- 版本：v{}.{}", input.major, input.minor),
         format!("- 状态：{state_label}"),
-        format!(
-            "- 提交人：{}",
-            input.actor.unwrap_or("-")
-        ),
+        format!("- 提交人：{}", input.actor.unwrap_or("-")),
     ];
     if let Some(u) = &input.url {
         lines.push(format!("\n[前往评审]({u})"));
@@ -130,7 +127,10 @@ mod tests {
         assert_eq!(v["msgtype"], "markdown");
         let text = v["markdown"]["text"].as_str().unwrap();
         assert!(text.contains("DWG-X") && text.contains("v2.0") && text.contains("前往评审"));
-        assert!(v["markdown"]["title"].as_str().unwrap().contains("评审请求"));
+        assert!(v["markdown"]["title"]
+            .as_str()
+            .unwrap()
+            .contains("评审请求"));
     }
 
     #[test]
@@ -163,10 +163,21 @@ mod tests {
     fn dingtalk_sign_is_deterministic_and_url_encoded() {
         let s = dingtalk_sign("sec9", 1_700_000_000_000);
         assert_eq!(dingtalk_sign("sec9", 1_700_000_000_000), s, "同输入同签名");
-        assert_ne!(dingtalk_sign("sec9", 1_700_000_000_001), s, "时间戳变化签名变化");
-        let url = dingtalk_signed_url("https://oapi.dingtalk.com/robot/send?access_token=x", "sec9", 1);
+        assert_ne!(
+            dingtalk_sign("sec9", 1_700_000_000_001),
+            s,
+            "时间戳变化签名变化"
+        );
+        let url = dingtalk_signed_url(
+            "https://oapi.dingtalk.com/robot/send?access_token=x",
+            "sec9",
+            1,
+        );
         assert!(url.contains("timestamp=1&sign="));
-        assert!(!url.contains('+') || url.contains("%2B"), "base64 的 + 必须 URL 编码");
+        assert!(
+            !url.contains('+') || url.contains("%2B"),
+            "base64 的 + 必须 URL 编码"
+        );
     }
 
     #[test]

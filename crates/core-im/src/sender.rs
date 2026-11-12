@@ -20,7 +20,11 @@ impl CardSender for NoopSender {
     }
 }
 
-async fn post_json(http: &reqwest::Client, url: &str, body: &serde_json::Value) -> Result<serde_json::Value> {
+async fn post_json(
+    http: &reqwest::Client,
+    url: &str,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value> {
     let resp = http
         .post(url)
         .json(body)
@@ -33,9 +37,7 @@ async fn post_json(http: &reqwest::Client, url: &str, body: &serde_json::Value) 
         .await
         .map_err(|e| DomainError::Db(format!("IM webhook 响应非 JSON: {e}")))?;
     if !status.is_success() {
-        return Err(DomainError::Db(format!(
-            "IM webhook HTTP {status}: {v}"
-        )));
+        return Err(DomainError::Db(format!("IM webhook HTTP {status}: {v}")));
     }
     Ok(v)
 }
