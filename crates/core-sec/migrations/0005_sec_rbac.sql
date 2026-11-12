@@ -33,4 +33,4 @@ INSERT INTO sec_role_perm(role_code, obj, act) VALUES
     ('viewer', 'docs', 'read')
 ON CONFLICT DO NOTHING;
 
-ALTER TABLE sec_user ADD COLUMN IF NOT EXISTS max_secret_level smallint NOT NULL DEFAULT 3;
+ALTER TABLE sec_user ADD COLUMN IF NOT EXISTS max_secret_level smallint NOT NULL DEFAULT 0 -- 缺省全不可见（fail-closed，终审 M4）;

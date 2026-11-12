@@ -259,14 +259,17 @@ pub async fn download_doc(
     Extension(user): Extension<AuthUser>,
     Path(obj_no): Path<String>,
 ) -> Result<Response, ApiError> {
-    // ABAC 密级维：越级 → 404（与 detail 同语义，防绕过下载）
-    if let Ok(d) = st.service.detail(&obj_no).await {
-        if d.object.secret_level > user.max_secret_level {
-            return Err(ApiError::new(
-                core_model::DomainError::ObjNotFound(format!("docs:{obj_no}")),
-                &tid.0,
-            ));
-        }
+    // ABAC 密级维：越级 → 404（与 detail 同语义；detail 错误直接传播，杜绝 fail-open）
+    let d = st
+        .service
+        .detail(&obj_no)
+        .await
+        .map_err(|e| ApiError::new(e, &tid.0))?;
+    if d.object.secret_level > user.max_secret_level {
+        return Err(ApiError::new(
+            core_model::DomainError::ObjNotFound(format!("docs:{obj_no}")),
+            &tid.0,
+        ));
     }
     let (name, stream, size) = st
         .service

@@ -36,7 +36,8 @@ pub fn build(state: AppState) -> Router {
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             require_perm("sec", "manage"),
-        ));
+        ))
+        .layer(axum::extract::DefaultBodyLimit::max(16 * 1024)); // M2：管理面不承受上传限额
 
     // M2（终审遗留）：auth 路由 16KB 体上限，不再承受 200MB 上传限额
     let auth = Router::new()

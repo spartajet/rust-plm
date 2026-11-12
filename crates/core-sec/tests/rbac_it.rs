@@ -170,3 +170,88 @@ async fn max_secret_level_stored_and_readable() {
     assert_eq!(c.sec.max_secret_level_of(u_admin).await.unwrap(), 3);
     c.drop_it().await;
 }
+
+// ==================== 终审修复钉子（C1/C2/I1/I2/I4） ====================
+
+#[tokio::test]
+async fn c1_enforcer_loaded_on_existing_db_restart() {
+    // 模拟重启：全新 SecService 实例 + 数据已存在（created=false 路径）→ 必须装载策略
+    let c = setup("c1").await;
+    let s2 = SecService::new(c.pool.clone(), "s".into());
+    let boot = s2.ensure_admin(Some("other-pw".into())).await.unwrap();
+    assert!(!boot.created);
+    assert!(
+        s2.enforce("admin", "docs", "write").await.unwrap(),
+        "重启（已有库）后必须装载策略（终审 C1）"
+    );
+    c.drop_it().await;
+}
+
+#[tokio::test]
+async fn c2_periodic_reload_propagates_cross_instance() {
+    let c = setup("c2").await;
+    let a = std::sync::Arc::new(SecService::new(c.pool.clone(), "s".into()));
+    a.ensure_admin(Some("pw".into())).await.unwrap();
+    let handle = a.spawn_policy_reloader(300).await;
+    let b = SecService::new(c.pool.clone(), "s".into());
+    b.ensure_admin(None).await.unwrap();
+    b.create_user("tmp", "pw123456", None, &["viewer"], 0)
+        .await
+        .unwrap();
+
+    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+    assert!(!a.enforce("tmp", "docs", "write").await.unwrap());
+
+    b.grant("tmp", "editor").await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+    assert!(
+        a.enforce("tmp", "docs", "write").await.unwrap(),
+        "周期重载必须把授权变更传播到其他实例（终审 C2）"
+    );
+    handle.abort();
+    c.drop_it().await;
+}
+
+#[tokio::test]
+async fn i1_i2_grant_validates_user_and_role() {
+    let c = setup("i12").await;
+    c.sec
+        .create_user("Ed", "pw123456", None, &["editor"], 0)
+        .await
+        .unwrap();
+
+    // I2：未知角色 → 400 MDL-SEC-ROLE-NOT-FOUND（非 FK 500）
+    let e = c.sec.grant("Ed", "ninja").await.unwrap_err();
+    assert_eq!(e.code(), "MDL-SEC-ROLE-NOT-FOUND");
+    // I1：不存在用户 → 400（拒绝幽灵绑定）
+    let e = c.sec.grant("ghost", "admin").await.unwrap_err();
+    assert_eq!(e.code(), "MDL-BAD-REQUEST");
+    // I1：大小写归一——grant 到 "ed"（库内存 "Ed"）必须生效于真实用户
+    c.sec.grant("ed", "admin").await.unwrap();
+    assert!(
+        c.sec.enforce("Ed", "sec", "manage").await.unwrap(),
+        "grant 必须落到规范用户名"
+    );
+    // revoke 同样归一
+    c.sec.revoke("ed", "admin").await.unwrap();
+    assert!(!c.sec.enforce("Ed", "sec", "manage").await.unwrap());
+    c.drop_it().await;
+}
+
+#[tokio::test]
+async fn i4_secret_level_range_validated() {
+    let c = setup("i4").await;
+    let e = c
+        .sec
+        .create_user("bad", "pw123456", None, &["viewer"], 33)
+        .await
+        .unwrap_err();
+    assert_eq!(e.code(), "MDL-BAD-REQUEST");
+    let e = c
+        .sec
+        .create_user("bad2", "pw123456", None, &["viewer"], -1)
+        .await
+        .unwrap_err();
+    assert_eq!(e.code(), "MDL-BAD-REQUEST");
+    c.drop_it().await;
+}
