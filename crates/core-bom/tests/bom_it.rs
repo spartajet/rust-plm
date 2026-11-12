@@ -623,8 +623,6 @@ async fn set_lines_rejected_when_parent_not_working() {
 
 // ==================== BOM 版本链（增量9 Task1：快照冻结 + as-of 展开） ====================
 
-use std::collections::HashMap as _HashMap;
-
 /// 建 live 边：root->a(2), a->b(3), root->b(1) —— b 经两条路径 qty=7
 async fn seed_deep(c: &Ctx) -> (Uuid, Uuid, Uuid) {
     let (root, a, b) = (c.node_ids[0], c.node_ids[1], c.node_ids[2]);
@@ -733,7 +731,6 @@ async fn snapshot_freezes_idempotent_and_asof_matches_live() {
         .await
         .unwrap();
     assert_eq!(one.len(), 2, "一层= a+b");
-    let _ = _HashMap::<Uuid, i64>::new();
     c.drop_it().await;
 }
 
@@ -809,5 +806,86 @@ async fn empty_bom_release_still_asof_expands_empty() {
         .await
         .unwrap();
     assert!(rows.is_empty());
+    c.drop_it().await;
+}
+
+#[tokio::test]
+async fn shared_subassembly_releases_are_independent() {
+    // 终审 C1 回归钉：子件 C 独立发布(major=1 冻结) → C 升版改下层 → 父件 A 发布。
+    // A 的 as-of 必须是 A 发布时点 live（leaf=2*9=18），C 的 as-of 仍是 C 自己发布时点（leaf=1）。
+    let c = setup("vc1").await;
+    let (a, sub, leaf) = (c.node_ids[0], c.node_ids[1], c.node_ids[2]);
+    c.store
+        .set_lines(
+            a,
+            vec![LineInput {
+                line_no: 1,
+                child: sub,
+                qty: 2,
+            }],
+        )
+        .await
+        .unwrap();
+    c.store
+        .set_lines(
+            sub,
+            vec![LineInput {
+                line_no: 1,
+                child: leaf,
+                qty: 1,
+            }],
+        )
+        .await
+        .unwrap();
+
+    // C 独立发布：冻结 (C,1) = leaf×1
+    let mut tx = c.pool.begin().await.unwrap();
+    c.store
+        .snapshot_live_edges_tx(&mut tx, sub, 1)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+
+    // C 升版工作区：line1 改 qty9
+    c.store
+        .set_lines(
+            sub,
+            vec![LineInput {
+                line_no: 1,
+                child: leaf,
+                qty: 9,
+            }],
+        )
+        .await
+        .unwrap();
+
+    // A 发布：快照须含 A 发布时点整棵子树（A→C×2 与 C→leaf×9）
+    let mut tx = c.pool.begin().await.unwrap();
+    let n = c.store.snapshot_live_edges_tx(&mut tx, a, 1).await.unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(
+        n, 2,
+        "A 冻结须抓到自身边+子件边（不受 C 已有 (C,1) 快照吞并）"
+    );
+
+    // A 的 as-of = A 发布时点：leaf = 2*9 = 18（修复前被静默吞成 2）
+    let asof_a = c.store.expand_asof(a, 1, ExpandMode::Full).await.unwrap();
+    let leaf_in_a = asof_a.iter().find(|r| r.child == leaf).unwrap();
+    assert_eq!(leaf_in_a.qty_total, 18, "A as-of 须为 A 发布时点 live");
+
+    // C 的 as-of 仍 = C 自己发布时点：leaf = 1（不被 A 发布污染）
+    let asof_c = c.store.expand_asof(sub, 1, ExpandMode::Full).await.unwrap();
+    let leaf_in_c = asof_c.iter().find(|r| r.child == leaf).unwrap();
+    assert_eq!(leaf_in_c.qty_total, 1, "C as-of 仍为 C 发布时点");
+
+    // 换号嵌合体场景：C line_no 换 2 后 A 再无动作——(C,1) 快照恒为旧号单行
+    let lines: Vec<(i32, i64)> = sqlx::query_as(
+        "SELECT line_no, qty FROM bom_edge_snapshot WHERE release_root=$1 AND major=1 ORDER BY line_no",
+    )
+    .bind(sub)
+    .fetch_all(&c.pool)
+    .await
+    .unwrap();
+    assert_eq!(lines, vec![(1, 1)], "C 的快照恒为发布时点形态");
     c.drop_it().await;
 }

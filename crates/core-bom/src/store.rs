@@ -236,25 +236,32 @@ impl BomStore {
     /// 发布冻结（增量9）：调用方事务内把 live 边集**整个子树**快照进 bom_edge_snapshot
     /// （bom_path 自包含 root 自行——含 root 直连边与全部下层子装配件边），
     /// 并落 bom_release 行（无 BOM 边也落——as-of 守卫依据）。
-    /// ON CONFLICT DO NOTHING 幂等：同 major 重入返回 0 新增边。
+    /// 幂等以 bom_release 行为准：同 (root, major) 重入返回 0（终审 C1——
+    /// 快照行按发布根键控，禁用行级 ON CONFLICT 吞冲突，否则子件/祖先发布共享键空间会静默错值）。
     pub async fn snapshot_live_edges_tx(
         &self,
         tx: &mut sqlx::PgConnection,
         parent: Uuid,
         major: i32,
     ) -> Result<u64> {
-        sqlx::query(
-            "INSERT INTO bom_release(parent, major) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-        )
-        .bind(parent)
-        .bind(major)
-        .execute(&mut *tx)
-        .await?;
+        let released: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM bom_release WHERE parent = $1 AND major = $2")
+                .bind(parent)
+                .bind(major)
+                .fetch_one(&mut *tx)
+                .await?;
+        if released > 0 {
+            return Ok(0);
+        }
+        sqlx::query("INSERT INTO bom_release(parent, major) VALUES ($1, $2)")
+            .bind(parent)
+            .bind(major)
+            .execute(&mut *tx)
+            .await?;
         let n = sqlx::query(
-            "INSERT INTO bom_edge_snapshot(parent, major, line_no, child, qty) \
-             SELECT e.parent, $2, e.line_no, e.child, e.qty FROM bom_edge e \
-             WHERE e.parent IN (SELECT descendant FROM bom_path WHERE ancestor = $1) \
-             ON CONFLICT (parent, major, line_no) DO NOTHING",
+            "INSERT INTO bom_edge_snapshot(release_root, major, parent, line_no, child, qty) \
+             SELECT $1, $2, e.parent, e.line_no, e.child, e.qty FROM bom_edge e \
+             WHERE e.parent IN (SELECT descendant FROM bom_path WHERE ancestor = $1)",
         )
         .bind(parent)
         .bind(major)
@@ -265,7 +272,7 @@ impl BomStore {
     }
 
     /// as-of 展开（增量9）：按发布快照重建 major=N 时点的 BOM 视图（递归 CTE，按需计算）。
-    /// major 未发布（bom_release 无行）→ MDL-BAD-REQUEST。
+    /// 视图域=该发布根冻结的子树行（release_root=$1）；major 未发布 → MDL-BAD-REQUEST。
     pub async fn expand_asof(
         &self,
         parent: Uuid,
@@ -286,16 +293,18 @@ impl BomStore {
                 let leaf_filter = if mode == ExpandMode::LeafOnly {
                     "AND NOT EXISTS ( \
                          SELECT 1 FROM bom_edge_snapshot e \
-                         WHERE e.parent = t.descendant AND e.major = $2)"
+                         WHERE e.release_root = $1 AND e.major = $2 AND e.parent = t.descendant)"
                 } else {
                     ""
                 };
                 let rows: Vec<ExpandRow> = sqlx::query_as(&format!(
                     "WITH RECURSIVE t(descendant, qty) AS ( \
-                         SELECT child, qty FROM bom_edge_snapshot WHERE parent = $1 AND major = $2 \
+                         SELECT child, qty FROM bom_edge_snapshot \
+                             WHERE release_root = $1 AND major = $2 AND parent = $1 \
                          UNION ALL \
                          SELECT e.child, t.qty * e.qty FROM bom_edge_snapshot e \
-                             JOIN t ON e.parent = t.descendant AND e.major = $2 \
+                             JOIN t ON e.release_root = $1 AND e.major = $2 \
+                                 AND e.parent = t.descendant \
                      ) SELECT t.descendant AS child, SUM(t.qty)::bigint AS qty_total FROM t \
                      WHERE t.descendant <> $1 {leaf_filter} \
                      GROUP BY t.descendant ORDER BY child"
@@ -309,7 +318,8 @@ impl BomStore {
             ExpandMode::OneLevel => {
                 let rows: Vec<ExpandRow> = sqlx::query_as(
                     "SELECT child, SUM(qty)::bigint AS qty_total \
-                     FROM bom_edge_snapshot WHERE parent = $1 AND major = $2 \
+                     FROM bom_edge_snapshot \
+                     WHERE release_root = $1 AND major = $2 AND parent = $1 \
                      GROUP BY child ORDER BY child",
                 )
                 .bind(parent)

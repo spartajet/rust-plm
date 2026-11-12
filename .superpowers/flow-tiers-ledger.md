@@ -42,3 +42,8 @@ Final: Ruling: e2e 挂死假 500 根因=本机 node.exe 环回 socket 间歇性 
 Final: Ruling: 架构级绕开=浏览器(chromium,稳)直连 API：后端加 tower-http CorsLayer::permissive(裁定:鉴权走 Bearer 头非 Cookie,CORS 不构成安全边界;前后端分离部署为正式支持路径)；e2e 以 VITE_API_BASE=http://127.0.0.1:18095 直连,vite 代理保留为可选(本机 localhost 解析为 ::1 单栈,后端仅绑 0.0.0.0,代理须显式 127.0.0.1)。
 Final: Ruling: Playwright 稳定性实证——修复前 1.0m 挂死/间歇失败,修复后 3/3 连跑 2/2 全绿(3.3-3.7s)。
 Final: minor (deferred): 旧本机 vite 进程曾占 5173(TaskStop 未杀子进程)——e2e 前置需清场(taskkill node+strictPort);README 已写 strictPort 直连配方。
+[增量9 终审修复轮台账] REQUEST_CHANGES: C1/I1/M1/M2
+Final: fixed C1 快照键冲突静默错值（reviewer 真库实证：子件 C 独立发布冻结 (C,1) 后升版改下层，父件 A 再发布时对 (C,1,*) 的写入被 ON CONFLICT DO NOTHING 静默吞掉 → as-of(A,1) 9 倍数量偏差/换号嵌合体）——修=快照行改按发布根键控 (release_root, major, parent, line_no)+幂等以 bom_release 行为准（行级禁 DO NOTHING）+回归钉 shared_subassembly_releases_are_independent（双发布次序独立性：A as-of=18 / C as-of=1）。
+Final: fixed I1 expand（live+?major=）ABAC 越级 404 专项 e2e 钉（越级 3 路径 404+admin 200）。
+Final: fixed M1 冗余 _HashMap 别名+烧导入死行清除；M2 返回值语义随 C1 修正（幂等重入返回 0，bom_release 守卫前置于插入）。
+Final: Ruling: 幂等语义教训——「行级 ON CONFLICT DO NOTHING」只适用键空间独占的表；键空间会被多方写入的表（此处=发布事件），幂等必须锚定事件级行（bom_release）而非数据行。

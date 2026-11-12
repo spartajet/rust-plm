@@ -1128,5 +1128,17 @@ async fn bom_version_chain_freeze_isolate_asof() {
     let (s, body2, _) = send(&ctx.app, expand(&ed, "DWG-BV-P", "?mode=onelevel&major=2")).await;
     assert_eq!(s, 200);
     assert_eq!(parse_nd(&body2), vec![(c2, 5)]);
+
+    // 终审 I1：expand（live 与 ?major=）ABAC 越级 404 不泄露存在性
+    sqlx::query("UPDATE cm_object SET secret_level = 2 WHERE obj_no = 'DWG-BV-P'")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    for q in ["?mode=full", "?mode=full&major=1", "?mode=onelevel&major=2"] {
+        let (s, _, _) = send(&ctx.app, expand(&ed, "DWG-BV-P", q)).await;
+        assert_eq!(s, 404, "越密级 expand{q} 必须 404");
+    }
+    let (s, _, _) = send(&ctx.app, expand(&admin, "DWG-BV-P", "?mode=full&major=1")).await;
+    assert_eq!(s, 200, "admin（上限内）不受影响");
     ctx.cleanup().await;
 }
