@@ -32,6 +32,9 @@ pub trait ObjectStore: Send + Sync {
     async fn create(&self, cmd: CreateCmd) -> Result<BizObject>;
     async fn get(&self, type_code: &str, obj_no: &str, major: i32, minor: i32)
         -> Result<BizObject>;
+    /// 取最新活版本（major/minor 降序第一）——升版后端点必须跟随最新版（增量8 M3' 清偿，
+    /// 与 LifecycleStore::transition 取版语义一致）。
+    async fn get_latest(&self, type_code: &str, obj_no: &str) -> Result<BizObject>;
     async fn update(
         &self,
         type_code: &str,
@@ -219,6 +222,23 @@ impl ObjectStore for PgObjectStore {
         }
     }
 
+    async fn get_latest(&self, type_code: &str, obj_no: &str) -> Result<BizObject> {
+        let td = self.registry.type_def(type_code)?;
+        let row: Option<ObjRow> = sqlx::query_as(&format!(
+            "SELECT {OBJ_COLS} FROM cm_object \
+             WHERE type_id=$1 AND obj_no=$2 AND deleted_at IS NULL \
+             ORDER BY major_ver DESC, minor_ver DESC LIMIT 1"
+        ))
+        .bind(td.id)
+        .bind(obj_no)
+        .fetch_optional(&self.pool)
+        .await?;
+        match row {
+            Some(r) => self.row_to_obj(&td, r).await,
+            None => Err(DomainError::ObjNotFound(format!("{type_code}:{obj_no}"))),
+        }
+    }
+
     async fn update(
         &self,
         type_code: &str,
@@ -237,7 +257,6 @@ impl ObjectStore for PgObjectStore {
                 cur.state
             )));
         }
-
         let mut merged = cur.attrs.clone();
         for (k, v) in patch {
             merged.insert(k.clone(), v.clone());

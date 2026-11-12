@@ -131,7 +131,8 @@ impl DocService {
         self.objects.query(q).await
     }
 
-    /// 修改 working 态对象属性（乐观锁；发布态由 ObjectStore 423 拒绝）
+    /// 修改 working 态对象属性（乐观锁；发布态由 ObjectStore 423 拒绝）。
+    /// 增量8 M3'：取最新版定位——升版后 (1,0) 硬编码会导致 404。
     pub async fn update_object(
         &self,
         obj_no: &str,
@@ -139,8 +140,9 @@ impl DocService {
         expect_rev: i32,
         actor: uuid::Uuid,
     ) -> Result<BizObject> {
+        let cur = self.objects.get_latest(Self::TYPE, obj_no).await?;
         self.objects
-            .update(Self::TYPE, obj_no, 1, 0, patch, expect_rev, actor)
+            .update(Self::TYPE, obj_no, cur.major, cur.minor, patch, expect_rev, actor)
             .await
     }
 
@@ -156,7 +158,7 @@ impl DocService {
     }
 
     pub async fn detail(&self, obj_no: &str) -> Result<DocDetail> {
-        let object = self.objects.get(Self::TYPE, obj_no, 1, 0).await?;
+        let object = self.objects.get_latest(Self::TYPE, obj_no).await?;
         let file = self.original_file(object.id).await?;
         Ok(DocDetail { object, file })
     }
@@ -166,7 +168,7 @@ impl DocService {
         &self,
         obj_no: &str,
     ) -> Result<(String, Box<dyn tokio::io::AsyncRead + Send + Unpin>, i64)> {
-        let object = self.objects.get(Self::TYPE, obj_no, 1, 0).await?;
+        let object = self.objects.get_latest(Self::TYPE, obj_no).await?;
         let file = self
             .original_file(object.id)
             .await?
