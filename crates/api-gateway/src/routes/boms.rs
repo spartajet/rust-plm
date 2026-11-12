@@ -69,6 +69,7 @@ pub struct ExpandQuery {
 pub async fn expand(
     State(st): State<AppState>,
     Extension(tid): Extension<crate::error::TraceId>,
+    Extension(user): Extension<AuthUser>,
     Path(obj_no): Path<String>,
     Query(q): Query<ExpandQuery>,
 ) -> Result<Response, ApiError> {
@@ -126,6 +127,7 @@ pub async fn expand(
 pub async fn where_used(
     State(st): State<AppState>,
     Extension(tid): Extension<crate::error::TraceId>,
+    Extension(user): Extension<AuthUser>,
     Path(obj_no): Path<String>,
 ) -> Result<Response, ApiError> {
     let obj = st
