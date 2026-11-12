@@ -32,6 +32,8 @@ pub struct AppState {
         crate::routes::infra::healthz,
         crate::routes::auth::login,
         crate::routes::auth::refresh,
+        crate::routes::meta::get_type,
+        crate::routes::meta::set_flow_tier,
     ),
     components(schemas(
         crate::routes::docs::FileInfoDto,

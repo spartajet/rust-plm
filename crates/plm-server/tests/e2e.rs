@@ -253,7 +253,7 @@ async fn oversize_rejected_no_201() {
 async fn healthz_degraded_when_db_unreachable() {
     // 终审 I1：DB ping 失败必须 503/degraded，而非恒 200。
     use common::migrated;
-    let (_good_pool, registry, _watcher, _root, db, admin_url) = migrated("degraded").await;
+    let (_good_pool, registry, watcher, _root, db, admin_url) = migrated("degraded").await;
     let bad: PgPool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(1)
         .connect_lazy("postgres://postgres:root@localhost:5432/no_such_db_e2e")
@@ -263,6 +263,7 @@ async fn healthz_degraded_when_db_unreachable() {
     assert_eq!(status, 503, "DB 不可达时 healthz 必须 503");
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(v["status"], "degraded");
+    watcher.abort(); // 终审 M7：不留活跃任务阻塞进程退出
 
     let admin = PgPool::connect(&admin_url).await.unwrap();
     sqlx::query(&format!("DROP DATABASE IF EXISTS \"{db}\" WITH (FORCE)"))

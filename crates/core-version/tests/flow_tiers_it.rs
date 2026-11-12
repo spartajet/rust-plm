@@ -331,3 +331,75 @@ async fn flow_tier_parse_and_default() {
     assert_eq!(o.state, "review", "未配置档位缺省 standard");
     c.drop_it().await;
 }
+
+// ==================== 终审修复钉子（C1/I1） ====================
+
+#[tokio::test]
+async fn c1_maker_checker_includes_submitter() {
+    // 终审 C1：第二级审批须异于提交人 **且** 复核人——提交人不得终审自己单据
+    let c = setup("c1mc").await;
+    c.set_tier("strict").await;
+    c.new_doc("DWG-C1-1").await; // 提交人 = upload 内部 actor=None → created_by NULL？
+
+    // 显式以 A 身份建/提交：upload 的 created_by 目前为 None（骨架 create 未带 actor），
+    // 改用 SQL 注入提交人痕迹模拟"提交人=A"
+    sqlx::query("UPDATE cm_object SET created_by = $1 WHERE obj_no = 'DWG-C1-1'")
+        .bind(A)
+        .execute(&c.pool)
+        .await
+        .unwrap();
+
+    // A 提交（updated_by=A）→ review
+    let o = c
+        .store
+        .transition("drawing", "DWG-C1-1", LifecycleEvent::Submit, A)
+        .await
+        .unwrap();
+    assert_eq!(o.state, "review");
+    // B 第一级 approve（updated_by=B）→ checked
+    let o = c
+        .store
+        .transition("drawing", "DWG-C1-1", LifecycleEvent::Approve, B)
+        .await
+        .unwrap();
+    assert_eq!(o.state, "checked");
+    // A（提交人，异于复核人 B）第二级 → 409 maker-checker（C1 钉）
+    let e = c
+        .store
+        .transition("drawing", "DWG-C1-1", LifecycleEvent::Approve, A)
+        .await
+        .unwrap_err();
+    assert_eq!(e.code(), "MDL-LCS-MAKER-CHECKER");
+    // C（第三人）→ released
+    let cc = Some(uuid::Uuid::from_u128(0xCC00));
+    let o = c
+        .store
+        .transition("drawing", "DWG-C1-1", LifecycleEvent::Approve, cc)
+        .await
+        .unwrap();
+    assert_eq!(o.state, "released");
+    c.drop_it().await;
+}
+
+#[tokio::test]
+async fn c1_actor_none_fail_closed_on_checked_approve() {
+    // 终审 M1 同批：checked+Approve 且 actor=None → fail-closed
+    let c = setup("nonact").await;
+    c.set_tier("strict").await;
+    c.new_doc("DWG-NONE-1").await;
+    c.store
+        .transition("drawing", "DWG-NONE-1", LifecycleEvent::Submit, A)
+        .await
+        .unwrap();
+    c.store
+        .transition("drawing", "DWG-NONE-1", LifecycleEvent::Approve, B)
+        .await
+        .unwrap();
+    let e = c
+        .store
+        .transition("drawing", "DWG-NONE-1", LifecycleEvent::Approve, None)
+        .await
+        .unwrap_err();
+    assert_eq!(e.code(), "MDL-LCS-MAKER-CHECKER");
+    c.drop_it().await;
+}

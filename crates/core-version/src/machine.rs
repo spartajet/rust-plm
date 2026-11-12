@@ -72,7 +72,7 @@ pub fn allowed(state: &str, ev: LifecycleEvent) -> Option<&'static str> {
 /// 档位化迁移表（增量5 / SMB-2）。
 /// 兜底语义：切档遗留的 review/checked 中间态在任意档位均允许 Approve→released / Reject→working（防卡死）。
 pub fn allowed_for(tier: FlowTier, state: &str, ev: LifecycleEvent) -> Option<&'static str> {
-    // 跨档兜底：中间态永不卡死（Reject 任意档回 working；Approve 目标态由档位决定，不走兜底）
+    // 跨档兜底：中间态永不卡死（Reject 任意档回 working；Approve 目标态由档位决定）
     match (state, ev) {
         ("review", LifecycleEvent::Reject) => return Some("working"),
         ("checked", LifecycleEvent::Reject) => return Some("working"),

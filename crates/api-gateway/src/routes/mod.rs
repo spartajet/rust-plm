@@ -7,7 +7,7 @@ pub mod meta;
 pub mod sec_users;
 pub mod webhooks;
 
-use crate::middleware::require_perm;
+use crate::middleware::{require_authn, require_perm};
 use crate::state::AppState;
 use axum::routing::{delete, get, post};
 use axum::Router;
@@ -71,8 +71,14 @@ pub fn build(state: AppState) -> Router {
         .route("/api/v1/auth/refresh", post(auth::refresh))
         .layer(axum::extract::DefaultBodyLimit::max(16 * 1024));
 
-    let meta = Router::new()
+    // GET 档位：认证即可（终审 I1）；PUT 改档位：docs:approve
+    let meta_get = Router::new()
         .route("/api/v1/meta/types/{code}", get(meta::get_type))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            require_authn,
+        ));
+    let meta_put = Router::new()
         .route(
             "/api/v1/meta/types/{code}/flow-tier",
             axum::routing::put(meta::set_flow_tier),
@@ -88,7 +94,8 @@ pub fn build(state: AppState) -> Router {
         .route("/api/docs", get(infra::scalar_ui));
 
     public
-        .merge(meta)
+        .merge(meta_get)
+        .merge(meta_put)
         .merge(auth)
         .merge(docs_rw)
         .merge(docs_r)

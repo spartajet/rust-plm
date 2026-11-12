@@ -63,6 +63,10 @@ pub async fn set_flow_tier(
     Path(code): Path<String>,
     Json(req): Json<SetFlowTierReq>,
 ) -> Result<StatusCode, ApiError> {
+    // 先 404（类型存在性）后 400（档位合法性）——终审 M5
+    st.registry
+        .type_def(&code)
+        .map_err(|e| ApiError::new(e, &tid.0))?;
     if core_version::FlowTier::parse(&req.tier).is_none() {
         return Err(ApiError::new(
             core_model::DomainError::BadRequest(format!(
@@ -72,10 +76,6 @@ pub async fn set_flow_tier(
             &tid.0,
         ));
     }
-    // 类型存在性（404）
-    st.registry
-        .type_def(&code)
-        .map_err(|e| ApiError::new(e, &tid.0))?;
     // UPDATE 触发 cm_meta_changed → TypeRegistry 热刷新（≤3s）
     sqlx::query(
         "UPDATE cm_type SET config = config || jsonb_build_object('flow_tier', $2), updated_at = now()          WHERE code = $1",
