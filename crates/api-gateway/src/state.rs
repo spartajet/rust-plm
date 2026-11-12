@@ -41,6 +41,8 @@ pub struct AppState {
         crate::routes::auth::LoginReq,
         crate::routes::auth::RefreshReq,
         crate::routes::auth::TokenPairDto,
+        crate::routes::webhooks::CreateWebhookReq,
+        crate::routes::webhooks::WebhookDto,
     ))
 )]
 pub struct ApiDocHolder;
