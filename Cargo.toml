@@ -25,6 +25,7 @@ utoipa = { version = "5", features = ["axum_extras", "uuid"] }
 jsonwebtoken = "9"
 casbin = { version = "2", default-features = false, features = ["runtime-tokio"] }
 argon2 = "0.5"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
 
 [profile.release]
 opt-level = 3

@@ -30,6 +30,10 @@ curl -X POST http://localhost:8080/api/v1/docs \
   -F 'attrs={"name":"支架","material":"Q235"}' \
   -F 'file=@支架.dwg'
 
+# Webhook 订阅（admin）：发布事件自动 HMAC 签名外投（失败退避→死信）
+curl -X POST http://localhost:8080/api/v1/sec/webhooks   -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json'   -d '{"url":"https://your-system.example/hook","topics":["doc.released"],"secret":"shared-hmac-key"}'
+# 接收端验证：X-RustPLM-Signature = HMAC-SHA256(secret, body)
+
 # 生命周期：提交→审批→发布（released 不可变；发布落快照+doc.released 事件）
 curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001/submit
 curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/api/v1/docs/DWG-001/approve
@@ -74,7 +78,7 @@ docs/adr/        架构决策记录
 
 ## Roadmap（版本规划见需求文档 §8）
 
-骨架 ✓ → 认证 ✓ → 授权(RBAC+密级) ✓ → 生命周期(提交/审批/发布/快照) ✓ → 事件外投 Webhook（core-events）→ 三档流程 → BOM 引擎→ 三档流程 → BOM 引擎（闭包表已验证 10 万行展开 42ms）→ 前端工作台（Vue3+EP）→ 钉钉/企微/飞书卡片审批。
+骨架 ✓ → 认证 ✓ → 授权(RBAC+密级) ✓ → 生命周期 ✓ → Webhook 外投 ✓ → 三档流程 → BOM 引擎（闭包表已验证 10 万行展开 42ms）→ 前端工作台 → IM 卡片审批→ 三档流程 → BOM 引擎（闭包表已验证 10 万行展开 42ms）→ 前端工作台（Vue3+EP）→ 钉钉/企微/飞书卡片审批。
 
 ## 许可
 

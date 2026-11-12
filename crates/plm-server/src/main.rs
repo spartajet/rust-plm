@@ -110,6 +110,13 @@ async fn main() -> Result<()> {
     ));
 
     let lifecycle = Arc::new(core_version::LifecycleStore::new(pool.clone()));
+    // 事件外投循环（ADR-0007；1s 轮询 + 退避/死信）
+    core_events::migrator()
+        .run(&pool)
+        .await
+        .context("core-events 迁移失败")?;
+    let dispatcher = Arc::new(core_events::EventDispatcher::new(pool.clone()));
+    let dispatcher_handle = dispatcher.spawn(1000);
     let state = api_gateway::AppState {
         registry: registry.clone(),
         service,
@@ -130,6 +137,7 @@ async fn main() -> Result<()> {
         .with_graceful_shutdown(shutdown_signal())
         .await;
     watcher.abort();
+    dispatcher_handle.abort();
     result.context("HTTP 服务异常退出")?;
     tracing::info!("RustPLM 已优雅停机");
     Ok(())

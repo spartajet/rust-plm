@@ -4,10 +4,11 @@ pub mod auth;
 pub mod docs;
 pub mod infra;
 pub mod sec_users;
+pub mod webhooks;
 
 use crate::middleware::require_perm;
 use crate::state::AppState;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::Router;
 
 pub fn build(state: AppState) -> Router {
@@ -48,6 +49,15 @@ pub fn build(state: AppState) -> Router {
             post(sec_users::grant_role).delete(sec_users::revoke_role),
         )
         .route("/api/v1/sec/roles", get(sec_users::list_roles))
+        .route(
+            "/api/v1/sec/webhooks",
+            post(webhooks::create_webhook).get(webhooks::list_webhooks),
+        )
+        .route(
+            "/api/v1/sec/webhooks/{id}",
+            delete(webhooks::delete_webhook),
+        )
+        .route("/api/v1/sec/webhooks/dead", get(webhooks::dead_events))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             require_perm("sec", "manage"),

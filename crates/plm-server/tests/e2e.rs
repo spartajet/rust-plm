@@ -543,3 +543,28 @@ async fn lifecycle_reject_back_to_working_editable() {
     let _ = body;
     ctx.cleanup().await;
 }
+
+#[tokio::test]
+async fn webhooks_editor_manage_403() {
+    // 增量4 I5：非 admin 管理 webhook → 403（sec:manage 门控与 sec/users 同层，已验；此钉补 webhooks 面板）
+    let ctx = TestCtx::setup("wh", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "vw", "vw-pass-123", &["viewer"], 0)
+        .await;
+    let vw = ctx.login_as("vw", "vw-pass-123").await;
+
+    let req = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/v1/sec/webhooks")
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {vw}"))
+        .body(axum::body::Body::from(
+            r#"{"url":"http://127.0.0.1:1/h","topics":["doc.released"],"secret":"k"}"#.to_string(),
+        ))
+        .unwrap();
+    let (s, body, _) = send(&ctx.app, req).await;
+    assert_eq!(s, 403);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["code"], "MDL-SEC-FORBIDDEN");
+    ctx.cleanup().await;
+}

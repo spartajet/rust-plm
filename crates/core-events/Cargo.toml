@@ -1,0 +1,28 @@
+[package]
+name = "core-events"
+version = "0.1.0"
+edition = "2021"
+description = "RustPLM 事件外投：Outbox 投递循环 + Webhook(HMAC) 订阅"
+
+[dependencies]
+tokio = { workspace = true }
+sqlx = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+reqwest = { workspace = true }
+hmac = "0.12"
+hex = { workspace = true }
+uuid = { workspace = true }
+sha2 = { workspace = true }
+core-model = { path = "../core-model" }
+
+[dev-dependencies]
+axum = { workspace = true }
+mod-doc = { path = "../mod-doc" }
+core-files = { path = "../core-files" }
+core-version = { path = "../core-version" }
+sha2 = { workspace = true }
+hmac = "0.12"
+tokio = { workspace = true, features = ["test-util"] }
