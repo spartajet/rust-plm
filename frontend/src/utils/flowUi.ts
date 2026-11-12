@@ -5,9 +5,11 @@ export interface FlowUi {
   approve: boolean;
   reject: boolean;
   obsolete: boolean;
+  /// 升版（仅 released；增量8）
+  revise: boolean;
 }
 
-const ALL_OFF: FlowUi = { submit: false, approve: false, reject: false, obsolete: false };
+const ALL_OFF: FlowUi = { submit: false, approve: false, reject: false, obsolete: false, revise: false };
 
 export function flowUi(state: string): FlowUi {
   switch (state) {
@@ -16,7 +18,7 @@ export function flowUi(state: string): FlowUi {
     case "review":
       return { ...ALL_OFF, approve: true, reject: true };
     case "released":
-      return { ...ALL_OFF, obsolete: true };
+      return { ...ALL_OFF, obsolete: true, revise: true };
     default:
       return { ...ALL_OFF };
   }

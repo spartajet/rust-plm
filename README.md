@@ -39,6 +39,11 @@ curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs
 curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/api/v1/docs/DWG-001/approve
 curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/api/v1/docs/DWG-001/obsolete
 
+# 升版（增量8）：released → 下一 major 的 working（v1.0→v2.0）；旧版历史=发布快照链
+curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001/revise
+# 版本历史：当前最新版 + 各次发布的不可变快照（含发布件哈希）
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001/versions
+
 # 列表（filter 等值过滤 / sort 排序 / page+size 分页）
 curl -g -H "Authorization: Bearer $TOKEN" \
   'http://localhost:8080/api/v1/docs?filter[material]=Q235&sort=-updated_at'
@@ -91,7 +96,7 @@ docs/adr/        架构决策记录
 
 ## Roadmap（版本规划见需求文档 §8）
 
-骨架 ✓ → 认证 ✓ → 授权 ✓ → 生命周期 ✓ → Webhook 外投 ✓ → 三档流程 ✓ → BOM 引擎 ✓ → 前端工作台 ✓（登录/列表/上传/详情/生命周期/BOM）→ IM 卡片审批 → 前端工作台深化（看板/密级/用户管理 UI）→ 三档流程 → BOM 引擎（闭包表已验证 10 万行展开 42ms）→ 前端工作台（Vue3+EP）→ 钉钉/企微/飞书卡片审批。
+骨架 ✓ → 认证 ✓ → 授权 ✓ → 生命周期 ✓ → Webhook 外投 ✓ → 三档流程 ✓ → BOM 引擎 ✓ → 前端工作台 ✓（登录/列表/上传/详情/生命周期/BOM）→ Revise 升版 ✓（released→下一 major；版本历史=发布快照链）→ BOM 版本链 → IM 卡片审批（钉钉/企微/飞书）→ 前端工作台深化（看板/密级/用户管理 UI）。
 
 ## 许可
 

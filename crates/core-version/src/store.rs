@@ -14,14 +14,27 @@ impl LifecycleStore {
         Self { pool }
     }
 
-    /// 迁移对象状态（按 type_code+obj_no 定位活版本 v1.0）。
-    /// released 时同事务：写快照 + 落 `doc.released` Outbox 行（增量4 外投）。
+    /// 迁移对象状态（按 type_code+obj_no 定位最新活版本）。
+    /// released 时同事务：写快照（含发布件 file_hash）+ 落 `doc.released` Outbox 行。
     pub async fn transition(
         &self,
         type_code: &str,
         obj_no: &str,
         ev: LifecycleEvent,
         actor: Option<Uuid>,
+    ) -> Result<core_model::BizObject> {
+        self.transition_with_file(type_code, obj_no, ev, actor, None)
+            .await
+    }
+
+    /// 带发布件上下文的迁移：approve 落快照时记录 file_hash（增量8——不可重建的历史数据先存）。
+    pub async fn transition_with_file(
+        &self,
+        type_code: &str,
+        obj_no: &str,
+        ev: LifecycleEvent,
+        actor: Option<Uuid>,
+        file_hash: Option<&str>,
     ) -> Result<core_model::BizObject> {
         let mut tx = self.pool.begin().await?;
 
@@ -95,6 +108,20 @@ impl LifecycleStore {
         }
 
         let updated_by = actor;
+        // Revise（增量8）：major+1 / minor=0 / iteration 归零重计；其余迁移仅推进 state。
+        // 旧状态均入 WHERE 守卫（终审 C2）——并发竞态输家得 409，而非静默覆盖。
+        let update_sql = if ev == LifecycleEvent::Revise {
+            "UPDATE cm_object SET major_ver = major_ver + 1, minor_ver = 0, iteration = 0, \
+                    state = $3, updated_at = now(), updated_by = $4 \
+             WHERE id = $1 AND state = $2 \
+             RETURNING id, type_id, obj_no, major_ver, minor_ver, iteration, state, \
+                       secret_level, owner, attrs, attrs_rev, created_at, updated_at, created_by, updated_by"
+        } else {
+            "UPDATE cm_object SET state = $3, updated_at = now(), updated_by = $4 \
+             WHERE id = $1 AND state = $2 \
+             RETURNING id, type_id, obj_no, major_ver, minor_ver, iteration, state, \
+                       secret_level, owner, attrs, attrs_rev, created_at, updated_at, created_by, updated_by"
+        };
         let obj = sqlx::query_as::<
             _,
             (
@@ -114,13 +141,7 @@ impl LifecycleStore {
                 Option<Uuid>,
                 Option<Uuid>,
             ),
-        >(
-            // 终审 C2：旧状态入 WHERE 守卫——并发迁移竞态输家得 409，而非静默覆盖
-            "UPDATE cm_object SET state = $3, updated_at = now(), updated_by = $4 \
-             WHERE id = $1 AND state = $2 \
-             RETURNING id, type_id, obj_no, major_ver, minor_ver, iteration, state, \
-                       secret_level, owner, attrs, attrs_rev, created_at, updated_at, created_by, updated_by",
-        )
+        >(update_sql)
         .bind(row.id)
         .bind(&row.state)
         .bind(new_state)
@@ -128,17 +149,14 @@ impl LifecycleStore {
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| {
-            DomainError::IllegalTransition(
-                row.state.clone(),
-                format!("{} (并发变更)", ev.as_str()),
-            )
+            DomainError::IllegalTransition(row.state.clone(), format!("{} (并发变更)", ev.as_str()))
         })?;
 
-        // released：同事务快照 + 事件
+        // released：同事务快照（含发布件哈希） + 事件
         if new_state == "released" {
             sqlx::query(
-                "INSERT INTO cm_obj_snapshot(obj_no, type_code, major_ver, minor_ver, state, attrs, created_by) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                "INSERT INTO cm_obj_snapshot(obj_no, type_code, major_ver, minor_ver, state, attrs, file_hash, created_by) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
             )
             .bind(&row.obj_no)
             .bind(type_code)
@@ -146,6 +164,7 @@ impl LifecycleStore {
             .bind(obj.4)
             .bind(new_state)
             .bind(&obj.9)
+            .bind(file_hash)
             .bind(updated_by)
             .execute(&mut *tx)
             .await?;
@@ -156,6 +175,19 @@ impl LifecycleStore {
                     "major": obj.3,
                     "minor": obj.4,
                     "released_at": chrono::Utc::now(),
+                }))
+                .execute(&mut *tx)
+                .await?;
+        }
+        // revise：同事务落 doc.revised（增量8——下游/IM 卡片感知升版）
+        if ev == LifecycleEvent::Revise {
+            sqlx::query("INSERT INTO event_outbox(topic, payload) VALUES ('doc.revised', $1)")
+                .bind(serde_json::json!({
+                    "type_code": type_code,
+                    "obj_no": row.obj_no,
+                    "old_major": row.major_ver,
+                    "new_major": obj.3,
+                    "revised_at": chrono::Utc::now(),
                 }))
                 .execute(&mut *tx)
                 .await?;

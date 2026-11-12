@@ -858,3 +858,109 @@ async fn bom_expand_whereused_and_permissions() {
 
     ctx.cleanup().await;
 }
+
+// ==================== Revise 升版（增量8 Review Focus #1/#5） ====================
+
+#[tokio::test]
+async fn revise_and_versions_via_api() {
+    let ctx = TestCtx::setup("rv", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "rved", "rved-pass-123", &["editor"], 0)
+        .await;
+    ctx.create_user_as_admin(&admin, "rvview", "rvview-pass-123", &["viewer"], 0)
+        .await;
+    let ed = ctx.login_as("rved", "rved-pass-123").await;
+    let view = ctx.login_as("rvview", "rvview-pass-123").await;
+
+    let lc = |t: &str, no: &str, act: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/{act}"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+
+    // ed 上传 → submit → admin approve → released v1.0
+    let (s, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&ed),
+            "DWG-RV-E1",
+            r#"{"name":"Rev件"}"#,
+            Some("r.dwg"),
+            FILE.to_vec(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201);
+    let (s, _, _) = send(&ctx.app, lc(&ed, "DWG-RV-E1", "submit")).await;
+    assert_eq!(s, 200);
+    let (s, _, _) = send(&ctx.app, lc(&admin, "DWG-RV-E1", "approve")).await;
+    assert_eq!(s, 200);
+
+    // versions：当前 v1.0 released + 1 份快照
+    let (s, body) = ctx.get_authed("/api/v1/docs/DWG-RV-E1/versions", &ed).await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["current"]["major"], 1);
+    assert_eq!(v["current"]["state"], "released");
+    assert_eq!(v["snapshots"].as_array().unwrap().len(), 1);
+    assert_eq!(v["snapshots"][0]["major"], 1);
+    assert!(
+        v["snapshots"][0]["file_hash"].is_string(),
+        "快照须带发布件哈希"
+    );
+
+    // viewer 只读：versions 200，revise 403（Review Focus #5）
+    let (s, _) = ctx
+        .get_authed("/api/v1/docs/DWG-RV-E1/versions", &view)
+        .await;
+    assert_eq!(s, 200);
+    let (s, body, _) = send(&ctx.app, lc(&view, "DWG-RV-E1", "revise")).await;
+    assert_eq!(s, 403);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["code"], "MDL-SEC-FORBIDDEN");
+
+    // ed revise → working v2.0
+    let (s, body, _) = send(&ctx.app, lc(&ed, "DWG-RV-E1", "revise")).await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["state"], "working");
+    assert_eq!(v["major"], 2);
+    assert_eq!(v["minor"], 0);
+
+    // 再 revise → 409
+    let (s, body, _) = send(&ctx.app, lc(&ed, "DWG-RV-E1", "revise")).await;
+    assert_eq!(s, 409);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["code"], "MDL-LCS-TRANSITION");
+
+    // M3' 端到端钉：升版后 detail 跟随 2.0
+    let (s, body) = ctx.get_authed("/api/v1/docs/DWG-RV-E1", &ed).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["object"]["major"], 2, "detail 必须取最新版");
+    assert_eq!(v["object"]["minor"], 0);
+
+    // versions：current 2.0 working + v1.0 快照链（revise 不写新快照）
+    let (s, body) = ctx.get_authed("/api/v1/docs/DWG-RV-E1/versions", &ed).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["current"]["major"], 2);
+    assert_eq!(v["current"]["state"], "working");
+    let snaps = v["snapshots"].as_array().unwrap();
+    assert_eq!(snaps.len(), 1, "revise 不新增快照");
+    assert_eq!(snaps[0]["state"], "released");
+
+    // ABAC 越级 404（不泄露存在性）：密级抬到 2，ed 上限 0
+    sqlx::query("UPDATE cm_object SET secret_level = 2 WHERE obj_no = 'DWG-RV-E1'")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (s, _) = ctx.get_authed("/api/v1/docs/DWG-RV-E1/versions", &ed).await;
+    assert_eq!(s, 404, "越密级 versions 必须 404");
+    let (s, _, _) = send(&ctx.app, lc(&ed, "DWG-RV-E1", "revise")).await;
+    assert_eq!(s, 404, "越密级 revise 必须 404");
+    ctx.cleanup().await;
+}

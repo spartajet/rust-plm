@@ -70,7 +70,7 @@ export async function uploadDoc(
   return res.data;
 }
 
-export type LifecycleAction = "submit" | "approve" | "reject" | "obsolete";
+export type LifecycleAction = "submit" | "approve" | "reject" | "obsolete" | "revise";
 
 export async function transition(
   http: AxiosInstance,
@@ -81,8 +81,10 @@ export async function transition(
   return res.data;
 }
 
-export async function downloadUrl(objNo: string): Promise<string> {
-  return `${import.meta.env.VITE_API_BASE ?? "http://localhost:8080"}/api/v1/boms/${objNo}`;
+export async function downloadFile(http: AxiosInstance, objNo: string): Promise<Blob> {
+  // blob 下载走带 Authorization 的共享 http 实例——window.open 新窗口无鉴权头必 401（增量8 终审 I3）
+  const res = await http.get(`/api/v1/docs/${objNo}/file`, { responseType: "blob" });
+  return res.data as Blob;
 }
 
 /// BOM 展开行（NDJSON 解析后）
@@ -99,6 +101,23 @@ export async function bomExpand(http: AxiosInstance, objNo: string, mode: "full"
     .split("\n")
     .filter((l) => l.trim())
     .map((l) => JSON.parse(l) as BomRow);
+}
+
+/// 版本历史快照行（增量8）
+export interface VersionSnapshot {
+  major: number;
+  minor: number;
+  state: string;
+  file_hash?: string | null;
+  created_at?: string | null;
+}
+
+export async function listVersions(
+  http: AxiosInstance,
+  objNo: string,
+): Promise<{ current: BizObject; snapshots: VersionSnapshot[] }> {
+  const res = await http.get(`/api/v1/docs/${objNo}/versions`);
+  return res.data;
 }
 
 /// NDJSON 行解析（纯函数可单测）

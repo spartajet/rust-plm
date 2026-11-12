@@ -16,5 +16,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    // Playwright 真链路 e2e 归 Playwright 跑（需真后端+vite dev），不进 vitest
+    exclude: ["**/node_modules/**", "tests/e2e/**"],
   },
 });

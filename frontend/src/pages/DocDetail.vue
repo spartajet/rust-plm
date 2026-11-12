@@ -4,7 +4,7 @@ import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { extractApiError } from "../api/http";
 import { http } from "../api/index";
-import { bomExpand, getDoc, transition, type BomRow, type DocResponse } from "../api/docs";
+import { bomExpand, downloadFile, getDoc, listVersions, transition, type BomRow, type DocResponse, type VersionSnapshot } from "../api/docs";
 import { flowUi, stateLabel, stateTagType } from "../utils/flowUi";
 import type { LifecycleAction } from "../api/docs";
 
@@ -14,6 +14,7 @@ const objNo = route.params.objNo as string;
 
 const doc = ref<DocResponse | null>(null);
 const bomRows = ref<BomRow[]>([]);
+const snapshots = ref<VersionSnapshot[]>([]);
 const loading = ref(false);
 const acting = ref(false);
 
@@ -24,6 +25,7 @@ async function load() {
   try {
     doc.value = await getDoc(http, objNo);
     bomRows.value = await bomExpand(http, objNo, "onelevel");
+    snapshots.value = (await listVersions(http, objNo)).snapshots;
   } catch (e) {
     ElMessage.error(extractApiError(e));
   } finally {
@@ -46,11 +48,18 @@ async function act(action: LifecycleAction) {
   }
 }
 
-function download() {
-  window.open(
-    `${import.meta.env.VITE_API_BASE ?? "http://localhost:8080"}/api/v1/docs/${objNo}/file`,
-    "_blank",
-  );
+async function download() {
+  try {
+    const blob = await downloadFile(http, objNo);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = doc.value?.file?.name ?? objNo;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    ElMessage.error(extractApiError(e));
+  }
 }
 
 function back() {
@@ -70,6 +79,9 @@ function back() {
           data-test="state-tag"
         >
           {{ stateLabel(doc.object.state) }}
+        </el-tag>
+        <el-tag v-if="doc" type="info" effect="plain" style="margin-left: 8px" data-test="ver-badge">
+          v{{ doc.object.major }}.{{ doc.object.minor }}
         </el-tag>
       </template>
     </el-page-header>
@@ -100,6 +112,9 @@ function back() {
         <el-button v-if="ui.obsolete" type="danger" data-test="act-obsolete" :loading="acting" @click="act('obsolete')">
           作废
         </el-button>
+        <el-button v-if="ui.revise" type="primary" plain data-test="act-revise" :loading="acting" @click="act('revise')">
+          升新版
+        </el-button>
         <el-button v-if="doc.file" @click="download">下载文件（{{ doc.file.name }}）</el-button>
       </div>
     </el-card>
@@ -115,6 +130,25 @@ function back() {
         </el-table-column>
       </el-table>
       <div v-if="bomRows.length === 0" style="color: #909399">无 BOM 行</div>
+    </el-card>
+
+    <el-card style="margin-top: 16px">
+      <template #header>版本历史（发布快照）</template>
+      <el-table :data="snapshots" size="small">
+        <el-table-column label="版本" width="90">
+          <template #default="{ row }">v{{ row.major }}.{{ row.minor }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="110">
+          <template #default="{ row }">{{ stateLabel(row.state) }}</template>
+        </el-table-column>
+        <el-table-column label="发布件哈希" min-width="200">
+          <template #default="{ row }">{{ row.file_hash ?? "-" }}</template>
+        </el-table-column>
+        <el-table-column label="时间" min-width="160">
+          <template #default="{ row }">{{ row.created_at ?? "-" }}</template>
+        </el-table-column>
+      </el-table>
+      <div v-if="snapshots.length === 0" style="color: #909399">尚无发布记录</div>
     </el-card>
   </div>
 </template>

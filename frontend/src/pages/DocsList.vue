@@ -98,6 +98,9 @@ function openDetail(row: BizObject) {
       <el-table-column label="名称" min-width="140">
         <template #default="{ row }">{{ row.attrs?.name ?? "-" }}</template>
       </el-table-column>
+      <el-table-column label="版本" width="80">
+        <template #default="{ row }">v{{ row.major }}.{{ row.minor }}</template>
+      </el-table-column>
       <el-table-column label="材料" min-width="100">
         <template #default="{ row }">{{ row.attrs?.material ?? "-" }}</template>
       </el-table-column>

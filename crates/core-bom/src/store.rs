@@ -76,6 +76,16 @@ impl BomStore {
             .bind(&node_ids)
             .execute(&mut *tx)
             .await?;
+        // 增量8 Task3：BOM 编辑仅限 working parent——锁后查态（锁定窗口内无 revise 竞态漏网）
+        let pstate: String = sqlx::query_scalar("SELECT state FROM cm_object WHERE id = $1")
+            .bind(parent)
+            .fetch_one(&mut *tx)
+            .await?;
+        if pstate != "working" {
+            return Err(DomainError::ObjStateForbidden(format!(
+                "bom parent state={pstate}"
+            )));
+        }
         for l in &lines {
             let reachable: i64 = sqlx::query_scalar(
                 "SELECT count(*) FROM bom_path WHERE ancestor = $1 AND descendant = $2",

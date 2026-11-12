@@ -12,6 +12,7 @@ pub enum LifecycleEvent {
     Reject,
     Release,
     Obsolete,
+    Revise,
 }
 
 impl LifecycleEvent {
@@ -22,6 +23,7 @@ impl LifecycleEvent {
             "reject" => Self::Reject,
             "release" => Self::Release,
             "obsolete" => Self::Obsolete,
+            "revise" => Self::Revise,
             _ => return None,
         })
     }
@@ -33,6 +35,7 @@ impl LifecycleEvent {
             Self::Reject => "reject",
             Self::Release => "release",
             Self::Obsolete => "obsolete",
+            Self::Revise => "revise",
         }
     }
 }
@@ -89,6 +92,7 @@ pub fn allowed_for(tier: FlowTier, state: &str, ev: LifecycleEvent) -> Option<&'
         },
         ("checked", LifecycleEvent::Approve) if tier == FlowTier::Strict => Some("released"),
         ("released", LifecycleEvent::Obsolete) => Some("obsolete"),
+        ("released", LifecycleEvent::Revise) => Some("working"), // 升版：三档通用重入（增量8）
         _ => None,
     }
 }
@@ -194,5 +198,36 @@ mod tests {
                 Some("obsolete")
             );
         }
+    }
+
+    // ---- Revise 升版（增量8） ----
+
+    #[test]
+    fn revise_released_to_working_all_tiers() {
+        // 升版是重入路径：三档通用 released→working；再发布走各档正常审批链
+        for t in [FlowTier::Minimal, FlowTier::Standard, FlowTier::Strict] {
+            assert_eq!(
+                allowed_for(t, "released", LifecycleEvent::Revise),
+                Some("working")
+            );
+        }
+    }
+
+    #[test]
+    fn revise_illegal_on_other_states() {
+        for s in ["working", "review", "checked", "obsolete"] {
+            assert_eq!(
+                allowed_for(FlowTier::Standard, s, LifecycleEvent::Revise),
+                None,
+                "{s} 上 Revise 必须非法"
+            );
+        }
+    }
+
+    #[test]
+    fn revise_illegal_maps_to_transition_error() {
+        // 非法升版走统一 409 TRANSITION 错误码（不新增错误码）
+        let e = transition("working", LifecycleEvent::Revise).unwrap_err();
+        assert_eq!(e.code(), "MDL-LCS-TRANSITION");
     }
 }

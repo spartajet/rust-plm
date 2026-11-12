@@ -46,8 +46,17 @@ test("full journey: login → upload → list → detail → lifecycle", async (
   await page.click('[data-test="act-approve"]');
   await expect(page.locator('[data-test="state-tag"]')).toHaveText("已发布", { timeout: 10_000 });
 
-  // 6) released 态：submit 按钮不再显示
+  // 6) released 态：submit 按钮不再显示；版本徽章 v1.0
   await expect(page.locator('[data-test="act-submit"]')).toHaveCount(0);
+  await expect(page.locator('[data-test="ver-badge"]')).toHaveText("v1.0");
+
+  // 7) 升版（增量8）：released → 升新版 → working v2.0（Review Focus #6）
+  await page.click('[data-test="act-revise"]');
+  await expect(page.locator('[data-test="state-tag"]')).toHaveText("工作中", { timeout: 10_000 });
+  await expect(page.locator('[data-test="ver-badge"]')).toHaveText("v2.0");
+  // 版本历史卡有 v1.0 发布快照
+  await expect(page.getByText("版本历史（发布快照）")).toBeVisible();
+  await expect(page.getByRole("cell", { name: "v1.0" })).toBeVisible();
 });
 
 test("guard: unauthenticated /docs redirects to login", async ({ page }) => {
