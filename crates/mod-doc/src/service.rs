@@ -146,7 +146,8 @@ impl DocService {
             .await
     }
 
-    /// 生命周期转发（网关 5 端点消费；权限在网关把关）
+    /// 生命周期转发（网关 6 端点消费；权限在网关把关）。
+    /// 增量8：approve 落快照时携带发布件哈希（快照 file_hash 数据面）。
     pub async fn transition(
         &self,
         store: &core_version::LifecycleStore,
@@ -154,13 +155,48 @@ impl DocService {
         obj_no: &str,
         actor: uuid::Uuid,
     ) -> Result<BizObject> {
-        store.transition(Self::TYPE, obj_no, ev, Some(actor)).await
+        let cur = self.objects.get_latest(Self::TYPE, obj_no).await?;
+        let file_hash = self.original_file(cur.id).await?.map(|f| f.hash);
+        store
+            .transition_with_file(Self::TYPE, obj_no, ev, Some(actor), file_hash.as_deref())
+            .await
     }
 
     pub async fn detail(&self, obj_no: &str) -> Result<DocDetail> {
         let object = self.objects.get_latest(Self::TYPE, obj_no).await?;
         let file = self.original_file(object.id).await?;
         Ok(DocDetail { object, file })
+    }
+
+    /// 版本历史（增量8）：当前最新版 + released 快照链（升版出口的数据面）
+    pub async fn versions(
+        &self,
+        obj_no: &str,
+    ) -> Result<(BizObject, Vec<crate::dto::VersionSnapshot>)> {
+        let object = self.objects.get_latest(Self::TYPE, obj_no).await?;
+        let rows: Vec<(i32, i32, String, Option<String>, Option<chrono::DateTime<chrono::Utc>>)> =
+            sqlx::query_as(
+                "SELECT major_ver, minor_ver, state, file_hash, created_at FROM cm_obj_snapshot \
+                 WHERE type_code = $1 AND obj_no = $2 \
+                 ORDER BY major_ver DESC, minor_ver DESC",
+            )
+            .bind(Self::TYPE)
+            .bind(obj_no)
+            .fetch_all(&self.pool)
+            .await?;
+        let snaps = rows
+            .into_iter()
+            .map(
+                |(major, minor, state, file_hash, created_at)| crate::dto::VersionSnapshot {
+                    major,
+                    minor,
+                    state,
+                    file_hash,
+                    created_at,
+                },
+            )
+            .collect();
+        Ok((object, snaps))
     }
 
     /// (原始文件名, 只读流, 字节大小)

@@ -413,3 +413,41 @@ lc_endpoint!(
     "/api/v1/docs/{obj_no}/obsolete",
     "作废"
 );
+lc_endpoint!(
+    revise_doc,
+    core_version::LifecycleEvent::Revise,
+    "/api/v1/docs/{obj_no}/revise",
+    "升版(released→下一 major working)"
+);
+
+/// GET /api/v1/docs/{obj_no}/versions — 版本历史（当前最新版 + released 快照链；增量8）
+#[utoipa::path(
+    get, path = "/api/v1/docs/{obj_no}/versions",
+    params(("obj_no" = String, Path)),
+    responses((status = 200, description = "当前版本+快照链"), (status = 404))
+)]
+pub async fn versions_doc(
+    State(st): State<AppState>,
+    Extension(tid): Extension<crate::error::TraceId>,
+    Extension(user): Extension<AuthUser>,
+    Path(obj_no): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    // ABAC 密级维：越级 → 404（不泄露存在性；detail 错误直接传播）
+    let d = st
+        .service
+        .detail(&obj_no)
+        .await
+        .map_err(|e| ApiError::new(e, &tid.0))?;
+    if d.object.secret_level > user.max_secret_level {
+        return Err(ApiError::new(
+            core_model::DomainError::ObjNotFound(format!("docs:{obj_no}")),
+            &tid.0,
+        ));
+    }
+    let (current, snapshots) = st
+        .service
+        .versions(&obj_no)
+        .await
+        .map_err(|e| ApiError::new(e, &tid.0))?;
+    Ok(Json(json!({ "current": current, "snapshots": snapshots })))
+}
