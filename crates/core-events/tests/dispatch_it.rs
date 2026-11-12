@@ -246,7 +246,8 @@ async fn retry_then_dead_letter() {
     .unwrap();
 
     let d = EventDispatcher::new(c.pool.clone()).with_backoff(vec![0, 0, 0]);
-    for _ in 0..3 {
+    // 首发 + 3 次重试（MAX_ATTEMPTS=4）
+    for _ in 0..4 {
         d.tick().await.unwrap();
     }
     let (st, attempts): (i16, i32) =
@@ -254,8 +255,8 @@ async fn retry_then_dead_letter() {
             .fetch_one(&c.pool)
             .await
             .unwrap();
-    assert_eq!(st, 2, "3 次失败后必须死信");
-    assert_eq!(attempts, 3);
+    assert_eq!(st, 2, "4 次尝试全败后必须死信");
+    assert_eq!(attempts, 4);
     // 死信不再投
     d.tick().await.unwrap();
     let attempts2: i32 =
@@ -263,7 +264,7 @@ async fn retry_then_dead_letter() {
             .fetch_one(&c.pool)
             .await
             .unwrap();
-    assert_eq!(attempts2, 3);
+    assert_eq!(attempts2, 4, "死信行不再被 tick 处理");
     c.drop_it().await;
 }
 
@@ -290,5 +291,29 @@ async fn topic_filter_only_matching_subs() {
         hits.inner.lock().unwrap().is_empty(),
         "topic 不匹配不得投递"
     );
+    c.drop_it().await;
+}
+
+#[tokio::test]
+async fn c2_backoff_future_events_skipped_by_tick() {
+    // 终审 C2：退避中的事件（next_retry_at 在未来）必须被 tick 跳过
+    let c = setup("c2b").await;
+    c.release_doc("DWG-C2-1").await;
+    // 手动置为"刚失败一次，退避到 1 小时后"
+    sqlx::query("UPDATE event_outbox SET attempts = 1, next_retry_at = now() + interval '1 hour'")
+        .execute(&c.pool)
+        .await
+        .unwrap();
+
+    let d = EventDispatcher::new(c.pool.clone()).with_backoff(vec![60, 300, 1800]);
+    let delivered = d.tick().await.unwrap();
+    assert_eq!(delivered, 0, "未到期事件不得被 tick 处理");
+    let (attempts, st): (i32, i16) =
+        sqlx::query_as("SELECT attempts, status FROM event_outbox WHERE topic='doc.released'")
+            .fetch_one(&c.pool)
+            .await
+            .unwrap();
+    assert_eq!(attempts, 1, "退避期 attempts 不变");
+    assert_eq!(st, 0, "退避期保持 pending");
     c.drop_it().await;
 }
