@@ -21,6 +21,10 @@ pub struct AppState {
     pub lifecycle: Arc<core_version::LifecycleStore>,
     /// BOM 引擎（增量6）
     pub bom: Arc<core_bom::BomStore>,
+    /// IM 回调 HMAC 密钥（增量10；空串=端点 503 关闭——未配置即不可用）
+    pub im_secret: String,
+    /// IM id → PLM username 映射（增量10）
+    pub im_user_map: std::collections::HashMap<String, String>,
 }
 
 /// 发布冻结注入（增量9 BOM 版本链）：released 同事务快照 BOM 子树。

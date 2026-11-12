@@ -127,6 +127,13 @@ impl TestCtx {
             sec,
             lifecycle,
             bom,
+            im_secret: "im-test-secret".into(),
+            im_user_map: [
+                ("im-admin".to_string(), "admin".to_string()),
+                ("im-editor".to_string(), "imapp".to_string()),
+            ]
+            .into_iter()
+            .collect(),
         });
 
         Self {
@@ -312,5 +319,7 @@ pub fn degraded_app(
         sec,
         lifecycle,
         bom,
+        im_secret: String::new(),
+        im_user_map: Default::default(),
     })
 }

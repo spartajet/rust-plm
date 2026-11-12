@@ -3,6 +3,7 @@
 pub mod auth;
 pub mod boms;
 pub mod docs;
+pub mod im;
 pub mod infra;
 pub mod meta;
 pub mod sec_users;
@@ -111,7 +112,10 @@ pub fn build(state: AppState) -> Router {
     let public = Router::new()
         .route("/healthz", get(infra::healthz))
         .route("/api/docs/openapi.json", get(infra::openapi_json))
-        .route("/api/docs", get(infra::scalar_ui));
+        .route("/api/docs", get(infra::scalar_ui))
+        // IM 动作回调（增量10）：免 Bearer，HMAC 验签层内把关；16KB 限
+        .route("/api/v1/im/actions", post(im::im_action))
+        .layer(axum::extract::DefaultBodyLimit::max(16 * 1024));
 
     public
         .merge(meta_get)

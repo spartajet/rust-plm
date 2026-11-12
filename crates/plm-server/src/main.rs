@@ -21,18 +21,38 @@ struct Config {
     admin_password: Option<String>,
     /// 缺省：data_dir/jwt.key 文件复用
     jwt_secret: Option<String>,
+    /// IM 集成（增量10）：none|dingtalk|wecom|feishu
+    #[serde(default)]
+    im_provider: String,
+    #[serde(default)]
+    im_webhook: String,
+    #[serde(default)]
+    im_secret: String,
+    /// 详情页链接模板（{obj_no} 占位）
+    #[serde(default)]
+    im_doc_url_template: String,
+    /// IM id→PLM username 映射 JSON（如 {"im-ding-1":"zhangsan"}）
+    #[serde(default)]
+    im_user_map: String,
 }
 
 impl Config {
+    #[allow(clippy::field_reassign_with_default)]
     fn load() -> Result<Self> {
-        let defaults = Self {
+        let mut defaults = Self {
             database_url: String::new(),
             data_dir: PathBuf::from("data"),
             http_port: 8080,
             max_upload: 200 * 1024 * 1024,
             admin_password: None,
             jwt_secret: None,
+            im_provider: String::new(),
+            im_webhook: String::new(),
+            im_secret: String::new(),
+            im_doc_url_template: String::new(),
+            im_user_map: String::new(),
         };
+        let _ = &mut defaults;
         let cfg: Config = Figment::from(Serialized::defaults(defaults))
             .merge(Env::raw().map(|k| k.as_str().to_lowercase().into()))
             .merge(Env::prefixed("PLM_"))
@@ -119,6 +139,30 @@ async fn main() -> Result<()> {
         pool.clone(),
         Some(api_gateway::bom_release_hook(bom.clone())),
     ));
+
+    // IM 集成（增量10）：迁移 + 卡片推送轮询 + 回调上下文
+    core_im::migrator()
+        .run(&pool)
+        .await
+        .context("core-im 迁移失败")?;
+    let sender = core_im::sender_for(
+        &cfg.im_provider,
+        &cfg.im_webhook,
+        &cfg.im_secret,
+        reqwest::Client::new(),
+    );
+    let pusher = Arc::new(core_im::CardPusher::new(
+        pool.clone(),
+        sender,
+        cfg.im_doc_url_template.clone(),
+    ));
+    pusher.spawn(1000);
+    let im_user_map: std::collections::HashMap<String, String> = if cfg.im_user_map.trim().is_empty()
+    {
+        Default::default()
+    } else {
+        serde_json::from_str(&cfg.im_user_map).context("PLM_IM_USER_MAP 须为 JSON 对象")?
+    };
     // 事件外投循环（ADR-0007；1s 轮询 + 退避/死信）
     core_events::migrator()
         .run(&pool)
@@ -134,6 +178,8 @@ async fn main() -> Result<()> {
         sec,
         lifecycle,
         bom,
+        im_secret: cfg.im_secret.clone(),
+        im_user_map,
     };
     let app = api_gateway::router(state);
 
