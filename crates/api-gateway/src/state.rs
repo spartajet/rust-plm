@@ -32,6 +32,8 @@ pub struct AppState {
         crate::routes::infra::healthz,
         crate::routes::auth::login,
         crate::routes::auth::refresh,
+        crate::routes::meta::get_type,
+        crate::routes::meta::set_flow_tier,
     ),
     components(schemas(
         crate::routes::docs::FileInfoDto,
@@ -43,6 +45,8 @@ pub struct AppState {
         crate::routes::auth::TokenPairDto,
         crate::routes::webhooks::CreateWebhookReq,
         crate::routes::webhooks::WebhookDto,
+        crate::routes::meta::TypeMeta,
+        crate::routes::meta::SetFlowTierReq,
     ))
 )]
 pub struct ApiDocHolder;

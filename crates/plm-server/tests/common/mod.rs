@@ -15,7 +15,10 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct TestCtx {
+    #[allow(dead_code)] // app 供后续直连用例扩展；当前 e2e 经 oneshot 持副本
     pub app: axum::Router,
+    pub registry: Arc<TypeRegistry>,
+    pub watcher: tokio::task::JoinHandle<()>,
     pub files_root: PathBuf,
     pub pool: PgPool,
     db: String,
@@ -50,7 +53,16 @@ fn swap_db(url: &str, db: &str) -> String {
 }
 
 /// 建唯一迁移库 → (好池, registry, files_root, db, admin_url)。两种 setup 共用。
-pub async fn migrated(hint: &str) -> (PgPool, Arc<TypeRegistry>, PathBuf, String, String) {
+pub async fn migrated(
+    hint: &str,
+) -> (
+    PgPool,
+    Arc<TypeRegistry>,
+    tokio::task::JoinHandle<()>,
+    PathBuf,
+    String,
+    String,
+) {
     let admin_url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
         panic!("TEST_DATABASE_URL 未设置（例：postgres://postgres:root@localhost:5432/postgres）")
     });
@@ -77,14 +89,16 @@ pub async fn migrated(hint: &str) -> (PgPool, Arc<TypeRegistry>, PathBuf, String
     core_sec::migrator().run(&pool).await.unwrap();
     core_version::migrator().run(&pool).await.unwrap();
     let registry = TypeRegistry::load(pool.clone()).await.unwrap();
+    // NOTIFY 即时 + 1s 兜底的热刷新；handle 交由 cleanup abort（否则坏池任务阻塞测试进程退出）
+    let watcher = registry.spawn_watcher(1).await;
     let files_root = std::env::temp_dir().join(format!("plmsrv-{db}"));
-    (pool, registry, files_root, db, admin_url)
+    (pool, registry, watcher, files_root, db, admin_url)
 }
 
 impl TestCtx {
     /// max_upload 字节上限（oversize 用例传小值）。含 admin 引导（密码 test-admin-pw）。
     pub async fn setup(hint: &str, max_upload: u64) -> Self {
-        let (pool, registry, files_root, db, admin_url) = migrated(hint).await;
+        let (pool, registry, watcher, files_root, db, admin_url) = migrated(hint).await;
         let files = Arc::new(LocalFileStore::new(&files_root));
         let hooks = Arc::new(HookRegistry::new());
         let objects = Arc::new(PgObjectStore::new(pool.clone(), registry.clone(), hooks));
@@ -100,7 +114,7 @@ impl TestCtx {
             .unwrap();
         let lifecycle = Arc::new(LifecycleStore::new(pool.clone()));
         let app = api_gateway::router(AppState {
-            registry,
+            registry: registry.clone(),
             service,
             pool: pool.clone(),
             max_upload,
@@ -110,6 +124,8 @@ impl TestCtx {
 
         Self {
             app,
+            registry,
+            watcher,
             files_root,
             db,
             admin_url,
@@ -190,7 +206,13 @@ impl TestCtx {
         (s, b)
     }
 
+    #[allow(dead_code)] // diag/正式钉子共享（watcher 生效断言）
+    pub fn registry_version(&self) -> u64 {
+        self.registry.version()
+    }
+
     pub async fn cleanup(self) {
+        self.watcher.abort();
         self.pool.close().await;
         let admin = PgPoolOptions::new()
             .max_connections(1)

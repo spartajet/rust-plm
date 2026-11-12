@@ -1,5 +1,5 @@
-//! 授权中间件：require_perm = 认证(Bearer→401) + 授权(enforce→403) + 密级回填。
-//! 豁免路由不挂本中间件（/healthz、/api/docs*、/api/v1/auth/*）。
+//! 中间件：require_auth（纯认证 Bearer→401）、require_perm（认证+授权→403 + 密级回填）。
+//! 豁免路由不挂（/healthz、/api/docs*、/api/v1/auth/*）。
 
 use crate::error::{ApiError, TraceId};
 use axum::extract::State;
@@ -76,4 +76,36 @@ pub fn require_perm(
             perm_check(&st, &trace, req, next, obj, act).await
         })
     }
+}
+
+/// 纯认证（不 enforce 角色）：计划语义"认证即可"端点用（终审 I1）
+pub async fn require_authn(
+    State(st): State<crate::state::AppState>,
+    tid: Option<axum::Extension<TraceId>>,
+    mut req: axum::extract::Request,
+    next: Next,
+) -> Result<Response, ApiError> {
+    let trace: String = tid
+        .map(|t| t.0 .0)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let deny = |msg: &'static str| {
+        ApiError::new(core_model::DomainError::SecUnauthorized, &trace).with_message(msg)
+    };
+    let raw = req
+        .headers()
+        .get(AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| deny("缺少 Authorization 头"))?;
+    let token =
+        core_sec::strip_bearer(raw).map_err(|_| deny("Authorization 必须为 Bearer <token>"))?;
+    let claims = st
+        .sec
+        .parse_access(token)
+        .map_err(|e| ApiError::new(e, &trace))?;
+    req.extensions_mut().insert(AuthUser {
+        id: claims.sub,
+        username: claims.username,
+        max_secret_level: 0,
+    });
+    Ok(next.run(req).await)
 }
