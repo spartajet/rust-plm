@@ -233,6 +233,18 @@ impl BomStore {
         Ok(rows)
     }
 
+    /// as-of 反查（增量14）：发布快照中 child 被哪些 parent 使用——按发布事件 (release_root, major) 分组聚合。
+    /// 历史事实来源=bom_edge_snapshot（不可变），live 边不参与。
+    pub async fn where_used_asof(&self, child: Uuid) -> Result<Vec<(Uuid, i32, Uuid, i64)>> {
+        let rows: Vec<(Uuid, i32, Uuid, i64)> = sqlx::query_as(
+            "SELECT release_root, major, parent, SUM(qty)::bigint FROM bom_edge_snapshot              WHERE child = $1              GROUP BY release_root, major, parent              ORDER BY release_root, major, parent",
+        )
+        .bind(child)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
     /// 发布冻结（增量9）：调用方事务内把 live 边集**整个子树**快照进 bom_edge_snapshot
     /// （bom_path 自包含 root 自行——含 root 直连边与全部下层子装配件边），
     /// 并落 bom_release 行（无 BOM 边也落——as-of 守卫依据）。

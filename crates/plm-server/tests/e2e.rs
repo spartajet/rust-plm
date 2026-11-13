@@ -1302,7 +1302,8 @@ async fn sec_users_list_requires_manage_and_aggregates_roles() {
     let (s, body) = ctx.get_authed("/api/v1/sec/users", &admin).await;
     assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let items = v.as_array().expect("顶层数组");
+    let items = v["items"].as_array().expect("items 数组");
+    assert!(v["page"] == 1 && v["size"] == 50, "分页信封");
     assert!(items.len() >= 3, "admin+editor+viewer 至少 3 用户");
     let find = |name: &str| {
         items
@@ -1323,7 +1324,7 @@ async fn sec_users_list_requires_manage_and_aggregates_roles() {
     let (s, body) = ctx.get_authed("/api/v1/sec/users", &admin).await;
     assert_eq!(s, 200);
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let e2 = v
+    let e2 = v["items"]
         .as_array()
         .unwrap()
         .iter()
@@ -1358,7 +1359,7 @@ async fn sec_users_list_requires_manage_and_aggregates_roles() {
         let (s, body) = ctx.get_authed("/api/v1/sec/users", &admin).await;
         assert_eq!(s, 200);
         let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        let e3 = v
+        let e3 = v["items"]
             .as_array()
             .unwrap()
             .iter()
@@ -1551,6 +1552,13 @@ async fn dead_events_pagination_and_strong_validation() {
     assert_eq!(s, 200);
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(v["items"].as_array().unwrap().len(), 0);
+    // 终审 R2：极端 page 防 M1 回退（u32::MAX × 200 不得溢出/5xx）
+    let (s, body) = ctx
+        .get_authed("/api/v1/sec/webhooks/dead?page=4294967295&size=200", &admin)
+        .await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["items"].as_array().unwrap().len(), 0);
     ctx.cleanup().await;
 }
 
@@ -1573,7 +1581,7 @@ async fn sec_users_search_fuzzy_filter() {
         .await;
     assert_eq!(s, 200);
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let names: Vec<&str> = v
+    let names: Vec<&str> = v["items"]
         .as_array()
         .unwrap()
         .iter()
@@ -1587,6 +1595,156 @@ async fn sec_users_search_fuzzy_filter() {
         .await;
     assert_eq!(s, 200);
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(v.as_array().unwrap().len(), 0);
+    assert_eq!(v["items"].as_array().unwrap().len(), 0);
+
+    // 增量14：分页 page=2/size=2 + clamp
+    let (s, body) = ctx
+        .get_authed("/api/v1/sec/users?page=2&size=2", &admin)
+        .await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["page"], 2);
+    assert_eq!(v["size"], 2);
+    assert_eq!(v["total"], 4);
+    assert_eq!(v["items"].as_array().unwrap().len(), 2);
+    ctx.cleanup().await;
+}
+
+// ==================== 增量14：where-used as-of（Review Focus #2/#3） ====================
+
+#[tokio::test]
+async fn where_used_asof_via_api() {
+    async fn id_of(ctx: &TestCtx, token: &str, no: &str) -> String {
+        let (s, body) = ctx.get_authed(&format!("/api/v1/docs/{no}"), token).await;
+        assert_eq!(s, 200);
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        v["object"]["id"].as_str().unwrap().to_string()
+    }
+    async fn set_lines(ctx: &TestCtx, token: &str, lines: String) -> (u16, bytes::Bytes) {
+        let req = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/boms/DWG-WU-A/lines")
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(lines))
+            .unwrap();
+        let (s, b, _) = send(&ctx.app, req).await;
+        (s, b)
+    }
+    async fn lifecycle(ctx: &TestCtx, token: &str, act: &str) -> u16 {
+        let req = axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/DWG-WU-A/{act}"))
+            .header("authorization", format!("Bearer {token}"))
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let (s, _, _) = send(&ctx.app, req).await;
+        s
+    }
+
+    let ctx = TestCtx::setup("wua", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    for no in ["DWG-WU-A", "DWG-WU-C"] {
+        let (s, _, _) = send(
+            &ctx.app,
+            post_docs_multipart(
+                Some(&admin),
+                no,
+                r#"{"name":"N"}"#,
+                Some("w.dwg"),
+                FILE.to_vec(),
+            ),
+        )
+        .await;
+        assert_eq!(s, 201, "{no}");
+    }
+    let (aid, cid) = (
+        id_of(&ctx, &admin, "DWG-WU-A").await,
+        id_of(&ctx, &admin, "DWG-WU-C").await,
+    );
+    let (s, b) = set_lines(
+        &ctx,
+        &admin,
+        format!(r#"[{{"line_no":1,"child":"{cid}","qty":2}}]"#),
+    )
+    .await;
+    assert_eq!(s, 204, "{}", String::from_utf8_lossy(&b));
+    for act in ["submit", "approve", "revise"] {
+        assert_eq!(lifecycle(&ctx, &admin, act).await, 200);
+    }
+    let (s, b) = set_lines(
+        &ctx,
+        &admin,
+        format!(r#"[{{"line_no":1,"child":"{cid}","qty":9}}]"#),
+    )
+    .await;
+    assert_eq!(s, 204, "{}", String::from_utf8_lossy(&b));
+    // v2 发布 → 冻结 (A,2) 快照
+    for act in ["submit", "approve"] {
+        assert_eq!(lifecycle(&ctx, &admin, act).await, 200);
+    }
+    let _ = aid;
+
+    // live：ancestor 字段兼容
+    let (s, body) = ctx
+        .get_authed("/api/v1/boms/DWG-WU-C/where-used", &admin)
+        .await;
+    assert_eq!(s, 200);
+    assert!(body.windows(8).any(|w| w == b"ancestor"), "live 字段名兼容");
+    // asof：两发布事件各一行，含回填 obj_no
+    let (s, body) = ctx
+        .get_authed("/api/v1/boms/DWG-WU-C/where-used?asof=1", &admin)
+        .await;
+    assert_eq!(s, 200, "{}", String::from_utf8_lossy(&body));
+    let text = String::from_utf8_lossy(&body);
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert_eq!(lines.len(), 2, "两发布事件各一行: {text}");
+    let rows: Vec<serde_json::Value> = lines
+        .iter()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert!(rows.iter().any(|r| r["release_root_no"] == "DWG-WU-A"
+        && r["major"] == 1
+        && r["parent_no"] == "DWG-WU-A"
+        && r["qty_total"] == 2));
+    assert!(rows.iter().any(|r| r["release_root_no"] == "DWG-WU-A"
+        && r["major"] == 2
+        && r["parent_no"] == "DWG-WU-A"
+        && r["qty_total"] == 9));
+
+    // 终审 C1：越密级 parent 不得经反查泄露（child 低密级合法，parent 抬密级 5）
+    ctx.create_user_as_admin(&admin, "wued", "wued-pass-123", &["editor"], 0)
+        .await;
+    let ed = ctx.login_as("wued", "wued-pass-123").await;
+    sqlx::query("UPDATE cm_object SET secret_level = 5 WHERE obj_no = 'DWG-WU-A'")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    // ed 对 parent（密级5）基础可见性=404（模型语义基线）
+    let (s, _) = ctx.get_authed("/api/v1/docs/DWG-WU-A", &ed).await;
+    assert_eq!(s, 404, "前置基线：越密级 parent detail 404");
+    // 反查（live 与 asof）不得泄露 parent 的存在性/件号
+    let (s, body) = ctx
+        .get_authed("/api/v1/boms/DWG-WU-C/where-used?asof=1", &ed)
+        .await;
+    assert_eq!(s, 200, "child 合法，反查 200");
+    let text = String::from_utf8_lossy(&body);
+    assert!(
+        !text.contains("DWG-WU-A"),
+        "越密级 parent 件号不得出现: {text}"
+    );
+    // child 自身越级 → 404（I1：两形态钉）
+    sqlx::query("UPDATE cm_object SET secret_level = 5 WHERE obj_no = 'DWG-WU-C'")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (s, _) = ctx
+        .get_authed("/api/v1/boms/DWG-WU-C/where-used", &ed)
+        .await;
+    assert_eq!(s, 404, "越密级 child live 反查必须 404");
+    let (s, _) = ctx
+        .get_authed("/api/v1/boms/DWG-WU-C/where-used?asof=1", &ed)
+        .await;
+    assert_eq!(s, 404, "越密级 child asof 反查必须 404");
     ctx.cleanup().await;
 }

@@ -63,6 +63,8 @@ curl -g -H "Authorization: Bearer $TOKEN" \
 curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json'   http://localhost:8080/api/v1/boms/DWG-001/lines   -d '[{"line_no":1,"child":"<子对象id>","qty":2}]'
 curl -g -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/v1/boms/DWG-001/expand?mode=full'
 curl -g -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/v1/boms/<子对象id>/where-used'
+# 历史反查（增量14）：该件曾被用进哪些已发布 BOM（按发布事件分组，回填对象号）
+curl -g -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/v1/boms/<子对象id>/where-used?asof=1'
 
 # BOM 版本链（增量9）：发布即冻结子树快照；?major=N 按发布时点 as-of 展开
 curl -g -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/v1/boms/DWG-001/expand?mode=full&major=1'

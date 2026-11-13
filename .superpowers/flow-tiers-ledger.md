@@ -95,3 +95,14 @@ Final: fixed 附带发现：plm-server e2e harness 一直缺 core-events 迁移(
 Final: minor (deferred): where-used 历史化/BOM 边版本化深化；IM 相关三债(凭证联调/卡内按钮/重放防御)按用户指令暂缓。
 Final: 对账更正（复审 R1）：I1/I2 修复说明曾记「https://.. 等 false-accept 关闭」——实证为假：host_ok("https://..")=true（".." 非空含点，按字面规则通过）；同类残角 https://x?a=1.b（query 未剥离）。这些残角在**已诚实声明的规则内**（host 段非空含点=400 文案语义）、sec:manage 门控、失败可见（DNS 失败→退避→死信落 error 闭环）——代码不改，但规则内接受角如实记档，不得记「已关闭」（增量8 I3 对账原则）。
 Final: minor (deferred): 极端分页 e2e 钉（page=4294967295&size=200 → 200/空集，防 M1 回退）；im_it.rs 文件名与 outbox 索引钉名不符实（外观）。
+[增量14 where-used 历史化 追加台账]
+Final: Task1-3 完成——core-bom where_used_asof(bom_edge_snapshot 按 release_root/major/parent 分组 SUM)/网关 ?asof=1(JOIN cm_object 回填 release_root_no/parent_no,live 字段兼容)/前端详情"被谁使用"卡/list_users 分页(page/size clamp 200 信封,UserAdmin 分页条)/webhook dead 极端分页钉(u32::MAX, M1 防回退)。后端138+前端24+e2e24+Playwright 7/7。
+Final: Ruling: as-of 反查语义=直接父件粒度（parent 列为直接父，release_root/major 为发布上下文）——历史事实源=不可变快照表（增量9 裁定复用），零新迁移。
+Final: minor (deferred): UserAdmin 搜索防抖 timer 未在 unmount 清理（外观）；where-used asof 前端卡未做分页（快照反查量级小）。
+[增量14 终审修复轮台账] REQUEST_CHANGES: C1/I1/I2/I3/M1-M4
+Final: fixed C1 as-of 反查密级泄露（reviewer 真库实证：低密级用户经 ?asof=1 反查拿到绝密父件的件号/引用关系/数量——"越级 404 不泄露存在性"红线被绕过，且暴露面从 live 不透明 UUID 升级为可读 obj_no）——修=store 纯聚合 + 网关批量查 cm_object(id,obj_no,secret_level) 行级过滤（root 与 parent 其一越级即整行丢弃，fail-closed 三处：meta 缺行/filter_map 缺号均丢弃）+ 回填 obj_no；ABAC 职责归网关、store 纯聚合（M2 收敛闭环）。reviewer 独立探针五场景实证（含 repo 钉未覆盖的"其一越级"分支）。
+Final: fixed I1 越级 404 两形态钉（live/asof）+ C1 泄露钉（基线 404/反查不含件号）。
+Final: fixed I2 裁定替代翻页钉——UserAdmin 搜索联动分页条（fill→防抖→"共 1 条"+恰 1 行；zh-cn locale 文案适配）；前端 size=50 翻页需 51 用户造数昂贵，翻页交互后置 minor deferred。
+Final: fixed I3 wuTab 死变量删除 + asof 单视图裁定（live 反查 UUID 不透明语义弱，"被谁使用"卡仅 asof 视图）入账。
+Final: fixed M1 死三元清除/M3 utoipa asof=1 文案/M4 wuRows 独立 try 降级（load 重写：关键路径失败早退，非关键卡独立兜底）。
+Final: minor (deferred): live 反查仍返回越级祖先的不透明 ancestor UUID（不可经 API 解析——若求对称可后续给 live 分支同样过滤）；UserAdmin 搜索防抖 timer 未 unmount 清理；ids 收集重复项（ANY 下无害）。

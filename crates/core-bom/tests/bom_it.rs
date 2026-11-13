@@ -889,3 +889,88 @@ async fn shared_subassembly_releases_are_independent() {
     assert_eq!(lines, vec![(1, 1)], "C 的快照恒为发布时点形态");
     c.drop_it().await;
 }
+
+// ==================== 增量14：where-used 历史化（as-of 快照反查） ====================
+
+#[tokio::test]
+async fn where_used_asof_groups_by_release_event() {
+    // Review Focus #1：C 被 A、B 双父引用；A/B 各自发布 → as-of 反查按发布事件分组聚合
+    let c = setup("wu1").await;
+    let (a, b, cc) = (c.node_ids[0], c.node_ids[1], c.node_ids[2]);
+
+    // A→C×2 与 B→C×3（B 还多行引用 C：line2 C×1 → 同父聚合 3+1=4）
+    c.store
+        .set_lines(
+            a,
+            vec![LineInput {
+                line_no: 1,
+                child: cc,
+                qty: 2,
+            }],
+        )
+        .await
+        .unwrap();
+    c.store
+        .set_lines(
+            b,
+            vec![
+                LineInput {
+                    line_no: 1,
+                    child: cc,
+                    qty: 3,
+                },
+                LineInput {
+                    line_no: 2,
+                    child: cc,
+                    qty: 1,
+                },
+            ],
+        )
+        .await
+        .unwrap();
+
+    // A 发布(major=1) → 冻结 A 视角
+    let mut tx = c.pool.begin().await.unwrap();
+    c.store.snapshot_live_edges_tx(&mut tx, a, 1).await.unwrap();
+    tx.commit().await.unwrap();
+    // B 发布(major=1) → 冻结 B 视角
+    let mut tx = c.pool.begin().await.unwrap();
+    c.store.snapshot_live_edges_tx(&mut tx, b, 1).await.unwrap();
+    tx.commit().await.unwrap();
+    // A 升版改 C×7 → A 发布 major=2
+    c.store
+        .set_lines(
+            a,
+            vec![LineInput {
+                line_no: 1,
+                child: cc,
+                qty: 7,
+            }],
+        )
+        .await
+        .unwrap();
+    let mut tx = c.pool.begin().await.unwrap();
+    c.store.snapshot_live_edges_tx(&mut tx, a, 2).await.unwrap();
+    tx.commit().await.unwrap();
+
+    let rows: Vec<(Uuid, i32, Uuid, i64)> = c.store.where_used_asof(cc).await.unwrap();
+    // 三个发布事件各一行：parent=直接父件（A→C 边的 parent 是 A 自身）
+    // (root=A, major=1, parent=A, 2) (root=A, major=2, parent=A, 7) (root=B, major=1, parent=B, 4)
+    assert_eq!(rows.len(), 3, "三发布事件各一行: {rows:?}");
+    assert!(rows.contains(&(a, 1, a, 2)));
+    assert!(rows.contains(&(a, 2, a, 7)));
+    assert!(
+        rows.contains(&(b, 1, b, 4)),
+        "B 双行引用须聚合成 3+1=4: {rows:?}"
+    );
+    c.drop_it().await;
+}
+
+#[tokio::test]
+async fn where_used_asof_empty_for_never_used() {
+    let c = setup("wu2").await;
+    let lonely = c.node_ids[9];
+    let rows: Vec<(Uuid, i32, Uuid, i64)> = c.store.where_used_asof(lonely).await.unwrap();
+    assert!(rows.is_empty());
+    c.drop_it().await;
+}

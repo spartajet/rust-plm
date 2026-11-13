@@ -4,7 +4,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { extractApiError } from "../api/http";
 import { http } from "../api/index";
-import { bomExpand, downloadFile, getDoc, listVersions, transition, type BomRow, type DocResponse, type VersionSnapshot } from "../api/docs";
+import { bomExpand, downloadFile, getDoc, listVersions, whereUsedAsof, transition, type BomRow, type DocResponse, type VersionSnapshot, type WhereUsedAsofRow } from "../api/docs";
 import { useAuthStore } from "../stores/auth";
 import { flowUi, stateLabel, stateTagType } from "../utils/flowUi";
 import type { LifecycleAction } from "../api/docs";
@@ -16,6 +16,7 @@ const objNo = route.params.objNo as string;
 const doc = ref<DocResponse | null>(null);
 const bomRows = ref<BomRow[]>([]);
 const snapshots = ref<VersionSnapshot[]>([]);
+const wuRows = ref<WhereUsedAsofRow[]>([]);
 const loading = ref(false);
 const acting = ref(false);
 // BOM 版本切换（增量11）：0=live；N=发布快照 major=N as-of
@@ -39,9 +40,16 @@ async function load() {
     snapshots.value = (await listVersions(http, objNo)).snapshots;
   } catch (e) {
     ElMessage.error(extractApiError(e));
-  } finally {
     loading.value = false;
+    return;
   }
+  // 被谁使用=非关键卡：失败独立降级空态（终审 M4），不拖垮详情主视图
+  try {
+    wuRows.value = await whereUsedAsof(http, objNo);
+  } catch {
+    wuRows.value = [];
+  }
+  loading.value = false;
 }
 
 async function reloadBom() {
@@ -169,6 +177,25 @@ function back() {
         </el-table-column>
       </el-table>
       <div v-if="bomRows.length === 0" style="color: #909399">无 BOM 行</div>
+    </el-card>
+
+    <el-card style="margin-top: 16px">
+      <template #header>被谁使用（发布快照反查）</template>
+      <el-table :data="wuRows" size="small" data-test="wu-table">
+        <el-table-column label="用于 BOM" min-width="160">
+          <template #default="{ row }">{{ row.parent_no }}</template>
+        </el-table-column>
+        <el-table-column label="发布版本" width="110">
+          <template #default="{ row }">v{{ row.major }}.0</template>
+        </el-table-column>
+        <el-table-column label="所属发布" min-width="160">
+          <template #default="{ row }">{{ row.release_root_no }}</template>
+        </el-table-column>
+        <el-table-column label="数量" width="90">
+          <template #default="{ row }">{{ row.qty_total }}</template>
+        </el-table-column>
+      </el-table>
+      <div v-if="wuRows.length === 0" style="color: #909399">尚未被任何已发布 BOM 使用</div>
     </el-card>
 
     <el-card style="margin-top: 16px">
