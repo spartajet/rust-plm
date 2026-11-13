@@ -96,6 +96,10 @@ pub fn build(state: AppState) -> Router {
     // GET 档位：认证即可（终审 I1）；PUT 改档位：docs:approve
     let meta_get = Router::new()
         .route("/api/v1/meta/types/{code}", get(meta::get_type))
+        .route(
+            "/api/v1/meta/types/{code}/cod-preview",
+            get(meta::cod_preview),
+        )
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             require_authn,

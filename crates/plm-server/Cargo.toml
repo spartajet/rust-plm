@@ -18,6 +18,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 figment = { workspace = true }
 anyhow = "1"
+chrono = { workspace = true }
 uuid = { workspace = true }
 core-model = { path = "../core-model" }
 async-trait = { workspace = true }

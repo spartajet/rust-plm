@@ -27,6 +27,7 @@ const upObjNo = ref("");
 const upName = ref("");
 const upMaterial = ref("");
 const upFile = ref<File | null>(null);
+const upAuto = ref(false);
 const uploading = ref(false);
 
 async function load() {
@@ -63,8 +64,16 @@ function onFileChange(f: File | undefined) {
 }
 
 async function doUpload() {
-  if (!upObjNo.value || !upFile.value) {
-    ElMessage.warning("需填写图号并选择文件");
+  if (!upAuto.value && !upObjNo.value) {
+    ElMessage.warning("需填写图号（或勾选自动编码）");
+    return;
+  }
+  if (upAuto.value && upObjNo.value) {
+    ElMessage.warning("自动编码时请留空图号");
+    return;
+  }
+  if (!upFile.value) {
+    ElMessage.warning("请选择文件");
     return;
   }
   // 客户端预校验（增量12：增量7 M2 清偿）
@@ -77,7 +86,8 @@ async function doUpload() {
   uploading.value = true;
   try {
     await uploadDoc(http, {
-      obj_no: upObjNo.value,
+      obj_no: upAuto.value ? "" : upObjNo.value,
+      auto_code: upAuto.value,
       attrs: { name: upName.value || upObjNo.value, material: upMaterial.value },
       file: upFile.value,
     });
@@ -128,7 +138,7 @@ function openDetail(row: BizObject) {
       <el-button @click="load">刷新</el-button>
     </div>
 
-    <el-table v-loading="loading" :data="items" @row-click="openDetail">
+    <el-table v-loading="loading" :data="items" @row-click="openDetail" data-test="docs-table">
       <el-table-column prop="obj_no" label="图号" min-width="140" />
       <el-table-column label="名称" min-width="140">
         <template #default="{ row }">{{ row.attrs?.name ?? "-" }}</template>
@@ -171,8 +181,11 @@ function openDetail(row: BizObject) {
 
     <el-dialog v-model="uploadVisible" title="上传图纸" width="480px">
       <el-form label-width="80px">
+        <el-form-item label="自动编码">
+          <el-switch v-model="upAuto" data-test="upload-auto" />
+        </el-form-item>
         <el-form-item label="图号">
-          <el-input v-model="upObjNo" data-test="upload-objno" placeholder="DWG-001" />
+          <el-input v-model="upObjNo" data-test="upload-objno" placeholder="DWG-001" :disabled="upAuto" />
         </el-form-item>
         <el-form-item label="名称">
           <el-input v-model="upName" data-test="upload-name" placeholder="支架" />

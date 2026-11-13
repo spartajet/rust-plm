@@ -247,6 +247,28 @@ test("user admin: create user and grant role", async ({ page }) => {
 
 // ==================== 增量12：M8 显隐 / URL 回写 ====================
 
+test("auto coding: switch disables obj input; unconfigured rule surfaces backend 400", async ({ page }) => {
+  await page.goto("/login");
+  await page.fill('[data-test="username"]', "admin");
+  await page.fill('[data-test="password"]', ADMIN_PW);
+  await page.click('[data-test="login-btn"]');
+  await page.waitForURL("/");
+  await page.goto("/docs");
+  await page.click("text=上传图纸");
+  // 勾选自动编码 → 图号输入禁用（Review Focus #5；COD 码生成由后端 e2e 钉——规则须 SQL 预置）
+  await page.click('[data-test="upload-auto"]');
+  await expect(page.locator('[data-test="upload-objno"]')).toBeDisabled();
+  await page.fill('[data-test="upload-name"]', "自动编码件");
+  await page.setInputFiles('[data-test="upload-file"]', {
+    name: "auto.dwg",
+    mimeType: "application/octet-stream",
+    buffer: Buffer.from("%AUTO"),
+  });
+  // 未配规则类型上 auto_code → 后端 400（前端 toast 错误消息）
+  await page.click('[data-test="upload-submit"]');
+  await expect(page.getByText("未配置编码规则")).toBeVisible({ timeout: 10_000 });
+});
+
 test("role visibility: editor sees upload, viewer does not; neither sees admin menu", async ({ page }) => {
   await page.goto("/login");
   await page.fill('[data-test="username"]', "admin");

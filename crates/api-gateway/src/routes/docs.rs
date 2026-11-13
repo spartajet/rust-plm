@@ -54,6 +54,7 @@ pub async fn upload_doc(
 ) -> Result<(StatusCode, Json<DocResponse>), ApiError> {
     let mut obj_no: Option<String> = None;
     let mut attrs: Option<AttrMap> = None;
+    let mut auto_code = false;
     // staged: (name, mime, hash, size) —— file 字段在循环内即时流式落盘（Field 不能跨迭代持有）
     let mut staged: Option<(Option<String>, Option<String>, String, i64)> = None;
     let map_mp_err = |e: axum::extract::multipart::MultipartError| {
@@ -101,6 +102,13 @@ pub async fn upload_doc(
                     attrs = Some(m);
                 }
             }
+            "auto_code" => {
+                let v = field
+                    .text()
+                    .await
+                    .map_err(|e| ApiError::new(map_mp_err(e), &tid.0))?;
+                auto_code = v.trim() == "1";
+            }
             "file" => {
                 if staged.is_some() {
                     return Err(ApiError::new(core_model::DomainError::FileMulti, &tid.0));
@@ -120,12 +128,13 @@ pub async fn upload_doc(
         }
     }
 
-    let obj_no = obj_no.filter(|s| !s.trim().is_empty()).ok_or_else(|| {
-        ApiError::new(
+    let obj_no = obj_no.filter(|s| !s.trim().is_empty()).unwrap_or_default();
+    if obj_no.trim().is_empty() && !auto_code {
+        return Err(ApiError::new(
             core_model::DomainError::FieldRequired("obj_no".into()),
             &tid.0,
-        )
-    })?;
+        ));
+    }
     let (file_name, mime, hash, size) = staged.ok_or_else(|| {
         ApiError::new(
             core_model::DomainError::FieldRequired("file".into()),

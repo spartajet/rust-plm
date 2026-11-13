@@ -150,6 +150,20 @@ impl ObjectStore for PgObjectStore {
         let td = self.registry.type_def(&cmd.type_code)?;
         let mut attrs = cmd.attrs;
 
+        // COD 自动赋码（增量16，PRD COD-01/02/03）：obj_no 空 → 按类型规则取号；
+        // 类型无规则 → 400 明确报错（不静默）。
+        let mut obj_no = cmd.obj_no;
+        if obj_no.trim().is_empty() {
+            let rule = crate::cod::CodRule::from_config(&td.config).ok_or_else(|| {
+                DomainError::BadRequest(format!(
+                    "类型 {} 未配置编码规则（cod_rule），且未提供 obj_no",
+                    cmd.type_code
+                ))
+            })?;
+            let key = rule.date_key_now();
+            obj_no = crate::cod::next_code(&self.pool, &cmd.type_code, &rule, &key).await?;
+        }
+
         // 编号唯一性预检（返回语义化错误；并发兜底靠唯一索引）。
         // 增量8 终审 C1：不得按 (1,0) 查——就地升版后唯一活行可能是 (2,0)，
         // 版本过滤会击穿预检产生双活行、同号永久卡死。软删复用语义不变（deleted_at 过滤保留）。
@@ -158,13 +172,13 @@ impl ObjectStore for PgObjectStore {
              AND deleted_at IS NULL LIMIT 1",
         )
         .bind(td.id)
-        .bind(&cmd.obj_no)
+        .bind(&obj_no)
         .fetch_optional(&self.pool)
         .await?;
         if dup.is_some() {
             return Err(DomainError::ObjNoDuplicate(format!(
                 "{}:{}",
-                cmd.type_code, cmd.obj_no
+                cmd.type_code, obj_no
             )));
         }
 
@@ -173,7 +187,7 @@ impl ObjectStore for PgObjectStore {
         // save_before 钩子（拒绝则中止；空注册表为 no-op）
         let ctx = crate::HookContext {
             type_code: td.code.clone(),
-            obj_no: cmd.obj_no.clone(),
+            obj_no: obj_no.clone(),
             state: "working".into(),
             attrs: attrs.clone(),
             actor: cmd.owner.unwrap_or_default(),
@@ -189,7 +203,7 @@ impl ObjectStore for PgObjectStore {
              VALUES ($1, $2, $3::jsonb, $4, $5, $5, $5) RETURNING {OBJ_COLS}"
         ))
         .bind(td.id)
-        .bind(&cmd.obj_no)
+        .bind(&obj_no)
         .bind(serde_json::Value::Object(attrs))
         .bind(cmd.secret_level)
         .bind(cmd.owner)

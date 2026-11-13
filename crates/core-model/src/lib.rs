@@ -7,6 +7,7 @@
 //! - 在线提升列迁移（Promoter：ALTER→分批回填→索引→版本失效，Spike V-1 实测 2-4ms DDL）
 //! - 业务钩子总线（HookRegistry：save_before/submit_before/release_before）
 
+pub mod cod;
 pub mod error;
 pub mod hooks;
 pub mod promoter;

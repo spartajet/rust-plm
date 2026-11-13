@@ -63,6 +63,7 @@ pub fn bom_release_hook(bom: Arc<core_bom::BomStore>) -> Arc<dyn core_version::R
         crate::routes::auth::refresh,
         crate::routes::meta::get_type,
         crate::routes::meta::set_flow_tier,
+        crate::routes::meta::cod_preview,
     ),
     components(schemas(
         crate::routes::docs::FileInfoDto,
