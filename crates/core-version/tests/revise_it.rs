@@ -768,7 +768,11 @@ async fn released_and_revised_payloads_carry_actor() {
     .fetch_one(&c.pool)
     .await
     .unwrap();
-    assert_eq!(rel_actor.as_deref(), Some(actor.to_string().as_str()), "released 须带 actor");
+    assert_eq!(
+        rel_actor.as_deref(),
+        Some(actor.to_string().as_str()),
+        "released 须带 actor"
+    );
 
     let rev_actor: Option<String> = sqlx::query_scalar(
         "SELECT payload->>'actor' FROM event_outbox WHERE topic='doc.revised' AND payload->>'obj_no'='DWG-PAY-1'",
@@ -776,6 +780,10 @@ async fn released_and_revised_payloads_carry_actor() {
     .fetch_one(&c.pool)
     .await
     .unwrap();
-    assert_eq!(rev_actor.as_deref(), Some(actor.to_string().as_str()), "revised 须带 actor");
+    assert_eq!(
+        rev_actor.as_deref(),
+        Some(actor.to_string().as_str()),
+        "revised 须带 actor"
+    );
     c.drop_it().await;
 }

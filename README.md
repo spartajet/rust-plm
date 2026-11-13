@@ -30,9 +30,11 @@ curl -X POST http://localhost:8080/api/v1/docs \
   -F 'attrs={"name":"支架","material":"Q235"}' \
   -F 'file=@支架.dwg'
 
-# Webhook 订阅（admin）：发布事件自动 HMAC 签名外投（失败退避→死信）
+# Webhook 订阅（admin）：评审/发布事件自动 HMAC 签名外投（失败退避→死信分页）
+# url 须 http(s)://、secret ≥8 字符、topics ∈ doc.released/revised/submitted/checked（增量13 强校验）
 curl -X POST http://localhost:8080/api/v1/sec/webhooks   -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json'   -d '{"url":"https://your-system.example/hook","topics":["doc.released"],"secret":"shared-hmac-key"}'
 # 接收端验证：X-RustPLM-Signature = HMAC-SHA256(secret, body)
+# 死信排查：GET /api/v1/sec/webhooks/dead?page=1&size=50（含 attempts/error）
 
 # 生命周期：提交→审批→发布（released 不可变；发布落快照+doc.released 事件）
 curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001/submit
@@ -41,7 +43,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/api/v
 
 # 升版（增量8）：released → 下一 major 的 working（v1.0→v2.0）；旧版历史=发布快照链
 curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001/revise
-# 版本历史：当前最新版 + 各次发布的不可变快照（含发布件哈希）
+# 版本历史：当前最新版 + 各次发布的不可变快照（含发布件哈希）；迁移注册表见 docs/migrations.md
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001/versions
 
 # IM 卡片审批（增量10）：评审进入群机器人推卡（钉钉加签/企微/飞书）；卡内动作经回调回流
