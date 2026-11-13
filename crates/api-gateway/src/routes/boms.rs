@@ -176,7 +176,7 @@ pub async fn where_used(
         .await
         .map_err(|e| ApiError::new(core_model::DomainError::Db(e.to_string()), &tid.0))?;
         rows.iter()
-            .map(|(root, major, root_no, parent_no, qty)| {
+            .map(|(_root, major, root_no, parent_no, qty)| {
                 json!({"release_root_no": root_no, "major": major, "parent_no": parent_no, "qty_total": qty})
                     .to_string()
             })
