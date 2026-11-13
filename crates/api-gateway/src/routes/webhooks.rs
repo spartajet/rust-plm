@@ -89,7 +89,7 @@ pub async fn create_webhook(
     }
     let repo = WebhookRepo::new(st.pool.clone());
     let id = repo
-        .create(&url_trimmed, &req.topics, &secret_trimmed)
+        .create(url_trimmed, &req.topics, secret_trimmed)
         .await
         .map_err(|e| ApiError::new(e, &tid.0))?;
     Ok((
