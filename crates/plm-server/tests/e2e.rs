@@ -1485,6 +1485,16 @@ async fn dead_events_pagination_and_strong_validation() {
         let v: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
         assert_eq!(v["code"], "MDL-BAD-REQUEST");
     }
+    // 终审 I1 边界钉：曾致 panic 的畸形输入 → 400（非 5xx/断连）
+    for body in [
+        r#"{"url":"http://","topics":["doc.released"],"secret":"longsecret1"}"#,
+        r#"{"url":"http://中","topics":["doc.released"],"secret":"longsecret1"}"#,
+        r#"{"url":"https://localhost/hook","topics":["doc.released"],"secret":"longsecret1"}"#,
+    ] {
+        let (s, _, _) = send(&ctx.app, create_wh(body, &admin)).await;
+        assert_eq!(s, 400, "畸形输入必须 400: {body}");
+    }
+
     // 合法样本 → 201
     let (s, _, _) = send(
         &ctx.app,

@@ -45,29 +45,33 @@ pub async fn create_webhook(
         "doc.submitted",
         "doc.checked",
     ];
-    if req.url.trim().is_empty() || req.topics.is_empty() || req.secret.trim().is_empty() {
+    // 终审 I1/I2 重写：strip_prefix 取余部（不裸字节下标——http:// 仅 7 字节/多字节字符会越界 panic），
+    // host 段（余部至首个 '/'）必须含 '.'——语义=域名限定（终审 I2 false-accept 关闭）
+    let url_trimmed = req.url.trim();
+    let secret_trimmed = req.secret.trim();
+    if url_trimmed.is_empty() || req.topics.is_empty() || secret_trimmed.is_empty() {
         return Err(ApiError::new(
             core_model::DomainError::BadRequest("url/topics/secret 必填".into()),
             &tid.0,
         ));
     }
-    let url_ok = (req.url.starts_with("https://") || req.url.starts_with("http://"))
-        && req.url[8..].contains('.')
-        || (req.url.starts_with("http://") && req.url[7..].contains('.'));
-    let url_ok = url_ok
-        || (req.url.starts_with("https://")
-            && req.url["https://".len()..]
-                .split('/')
-                .next()
-                .unwrap_or("")
-                .contains('.'));
-    if !url_ok {
+    let host_ok = match url_trimmed
+        .strip_prefix("https://")
+        .or_else(|| url_trimmed.strip_prefix("http://"))
+    {
+        Some(rest) => {
+            let host = rest.split('/').next().unwrap_or("");
+            !host.is_empty() && host.contains('.')
+        }
+        None => false,
+    };
+    if !host_ok {
         return Err(ApiError::new(
-            core_model::DomainError::BadRequest("url 须为 http(s):// 且含域名".into()),
+            core_model::DomainError::BadRequest("url 须为 http(s):// 且 host 为含点的域名".into()),
             &tid.0,
         ));
     }
-    if req.secret.len() < 8 {
+    if secret_trimmed.chars().count() < 8 {
         return Err(ApiError::new(
             core_model::DomainError::BadRequest("secret 须 ≥ 8 字符（HMAC 密钥强度下限）".into()),
             &tid.0,
@@ -85,14 +89,14 @@ pub async fn create_webhook(
     }
     let repo = WebhookRepo::new(st.pool.clone());
     let id = repo
-        .create(&req.url, &req.topics, &req.secret)
+        .create(&url_trimmed, &req.topics, &secret_trimmed)
         .await
         .map_err(|e| ApiError::new(e, &tid.0))?;
     Ok((
         StatusCode::CREATED,
         Json(WebhookDto {
             id,
-            url: req.url,
+            url: url_trimmed.to_string(),
             topics: req.topics,
         }),
     ))
@@ -159,7 +163,7 @@ pub async fn dead_events(
         "SELECT id, topic, payload, attempts, error FROM event_outbox          WHERE status = 2 ORDER BY id DESC LIMIT $1 OFFSET $2",
     )
     .bind(size as i64)
-    .bind(i64::from((page - 1) * size))
+    .bind(i64::from(page - 1) * i64::from(size))
     .fetch_all(&st.pool)
     .await
     .map_err(|e| ApiError::new(core_model::DomainError::Db(e.to_string()), &tid.0))?;
