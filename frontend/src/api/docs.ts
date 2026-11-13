@@ -100,8 +100,11 @@ export async function bomExpand(
   major?: number,
 ): Promise<BomRow[]> {
   // major=N → 发布快照 as-of 展开（增量9 BOM 版本链）；缺省=live
+  // responseType:"text"——NDJSON 单行时是合法 JSON，axios 默认 json 模式会解析成对象
+  // 导致 String(res.data)="[object Object]"、展开结果为空（增量11 e2e 实证）
   const res = await http.get(
     `/api/v1/boms/${objNo}/expand?mode=${mode}${major !== undefined ? `&major=${major}` : ""}`,
+    { responseType: "text" },
   );
   const text = String(res.data ?? "");
   if (!text.trim()) return [];

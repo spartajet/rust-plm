@@ -138,3 +138,20 @@ pub async fn list_roles(
             .collect(),
     ))
 }
+
+/// GET /api/v1/sec/users（sec:manage）——用户列表（角色聚合；增量11 用户管理面）
+#[utoipa::path(
+    get, path = "/api/v1/sec/users",
+    responses((status = 200, description = "用户数组（username/max_secret_level/roles/created_at）"), (status = 403))
+)]
+pub async fn list_users(
+    State(st): State<AppState>,
+    Extension(tid): Extension<crate::error::TraceId>,
+) -> Result<Json<Vec<core_sec::SecUserSummary>>, ApiError> {
+    let users = st
+        .sec
+        .list_users()
+        .await
+        .map_err(|e| ApiError::new(e, &tid.0))?;
+    Ok(Json(users))
+}

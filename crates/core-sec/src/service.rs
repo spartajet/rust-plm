@@ -35,6 +35,15 @@ pub struct AuthUser {
     pub max_secret_level: i16,
 }
 
+/// 用户列表行（增量11 用户管理面）
+#[derive(Debug, Clone, sqlx::FromRow, Serialize)]
+pub struct SecUserSummary {
+    pub username: String,
+    pub max_secret_level: i16,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub roles: serde_json::Value,
+}
+
 fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
@@ -308,6 +317,16 @@ impl SecService {
             .fetch_optional(&self.pool)
             .await?
             .ok_or(DomainError::SecUnauthorized)
+    }
+
+    /// 用户列表（增量11 用户管理面：角色聚合；仅 sec:manage 端点消费）
+    pub async fn list_users(&self) -> Result<Vec<SecUserSummary>> {
+        let rows: Vec<SecUserSummary> = sqlx::query_as(
+            "SELECT u.username, u.max_secret_level, u.created_at,                     COALESCE(json_agg(r.role_code ORDER BY r.role_code) FILTER (WHERE r.role_code IS NOT NULL), '[]'::json) AS roles              FROM sec_user u              LEFT JOIN sec_user_role r ON r.username = u.username              GROUP BY u.username, u.max_secret_level, u.created_at              ORDER BY u.username",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
     }
 
     /// 签发任意 claims（内部 + 测试 + 后续密码重置令牌）

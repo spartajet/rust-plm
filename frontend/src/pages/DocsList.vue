@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ElMessage } from "element-plus";
 import { onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { extractApiError } from "../api/http";
 import { http } from "../api/index";
 import { listDocs, uploadDoc, type BizObject, type ListParams } from "../api/docs";
 import { stateLabel, stateTagType } from "../utils/flowUi";
 
+const route = useRoute();
 const router = useRouter();
 
 const items = ref<BizObject[]>([]);
@@ -14,6 +15,8 @@ const total = ref(0);
 const page = ref(1);
 const size = ref(20);
 const material = ref("");
+// 看板联动：/docs?state=xxx 初始化状态筛选（增量11）
+const state = ref((route.query.state as string) ?? "");
 const loading = ref(false);
 
 const uploadVisible = ref(false);
@@ -28,6 +31,7 @@ async function load() {
   try {
     const p: ListParams = { page: page.value, size: size.value };
     if (material.value) p.material = material.value;
+    if (state.value) p.state = state.value;
     const res = await listDocs(http, p);
     items.value = res.items;
     total.value = res.total;
@@ -39,6 +43,11 @@ async function load() {
 }
 
 onMounted(load);
+
+function onStateChange() {
+  page.value = 1;
+  load();
+}
 
 function openUpload() {
   uploadVisible.value = true;
@@ -89,6 +98,20 @@ function openDetail(row: BizObject) {
         clearable
         @change="load"
       />
+      <el-select
+        v-model="state"
+        placeholder="按状态筛选"
+        clearable
+        style="width: 140px"
+        data-test="state-filter"
+        @change="onStateChange"
+      >
+        <el-option label="工作中" value="working" />
+        <el-option label="审核中" value="review" />
+        <el-option label="待复核" value="checked" />
+        <el-option label="已发布" value="released" />
+        <el-option label="已作废" value="obsolete" />
+      </el-select>
       <el-button type="primary" @click="openUpload">上传图纸</el-button>
       <el-button @click="load">刷新</el-button>
     </div>
@@ -103,6 +126,17 @@ function openDetail(row: BizObject) {
       </el-table-column>
       <el-table-column label="材料" min-width="100">
         <template #default="{ row }">{{ row.attrs?.material ?? "-" }}</template>
+      </el-table-column>
+      <el-table-column label="密级" width="80">
+        <template #default="{ row }">
+          <el-tag
+            :type="row.secret_level >= 3 ? 'danger' : row.secret_level === 2 ? 'warning' : 'info'"
+            effect="plain"
+            size="small"
+          >
+            {{ row.secret_level }}
+          </el-tag>
+        </template>
       </el-table-column>
       <el-table-column label="状态" width="100">
         <template #default="{ row }">

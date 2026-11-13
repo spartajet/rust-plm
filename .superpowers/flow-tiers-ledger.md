@@ -60,3 +60,16 @@ Final: fixed M3 pusher.spawn 移至 core_events 迁移后（冷库首启首 tick
 Final: minor (deferred): M2 HMAC 回调无重放防御（签名仅覆盖 body，无 timestamp/nonce——被截获的合法 approve 可在 revise→submit 新回合重放）——契约先行可接受，真实 IM 网关联调时按平台签名语义补时效性。
 Final: minor (deferred): M4 provider=none 时 NoopSender 把未发送卡记 status=1/sent 假账（纯记账语义；真实部署应配 provider 或后续引入 status=skipped）。
 Final: minor (deferred): 反连接每 1s tick 对 event_outbox 按 topic 过滤扫描（topic 无索引）——SMB 量级毫秒级无碍；outbox 长期增长后加部分索引 ON event_outbox(topic) WHERE topic IN (IM 主题) 或定期归档（终审复审建议入账）。
+[增量11 前端工作台深化 追加台账]
+Final: Task1-4 完成——flowUi checked(M2 清偿)/看板 5 态计数(点击卡联动列表 state 筛选)/列表密级列/详情 BOM 版本切换(live+发布快照 as-of 下拉)/用户管理页(建号+角色 tag 点击授予/回收)+后端 GET /sec/users(list_users, json_agg 角色聚合, sec:manage 门控)。
+Final: Ruling: 看板计数复用 list filter[state] 的 total（4+1 次 size=1 请求）——SMB 量级零后端聚合端点；计划原文"4 卡"为笔误，checked 是本增量主语之一，改 5 卡并在此记账。
+Final: Ruling: e2e 造数走 page.evaluate 内 browser fetch（chromium 直连 API）——本机 node 环回 RST 的既有裁定延伸到 Playwright request 层（playwright request 由 node 进程发起，同样受影响）。
+Final: Ruling: board 计数断言依赖单 worker 声明顺序（journey→guard→board→bomver→useradmin）与各测试造数留痕——Playwright 默认顺序执行成立；并行化（workers>1）会破坏计数断言，此时须改隔离 DB 或放弃精确计数。
+Final: minor (deferred): 菜单/按钮不按角色显隐（M8 既有债）；用户管理无分页/搜索；角色授予仅 3 固定角色 tag 点击交互（大量角色时需下拉）；密级色阶未做配置化。
+[增量11 终审修复轮台账] REQUEST_CHANGES: I1/I2/M1-M4
+Final: fixed I1 board total 断言子串 regex 多位数假 PASS——改 word-boundary（教训：python 生成 TS 时转义层级少算一层，`` 写成退格字符致 regex 永假；改用 Edit 工具直写并 log 实证 49=="Total 49"）。
+Final: fixed I2 board 卡片计数裸 innerText NaN 竞态（初渲染 "-"）——review/working 卡统一 toHaveText(/\d+/) 重试等待模式。
+Final: fixed M1 stateTagType checked 漏分支（default 红色）——补 warning 与 review 同色。
+Final: fixed M3 list_users roles=[] 分支钉——e2e revoke 全角色后断言 []。
+Final: fixed M4 reloadBom 失败残留旧行——请求前清空。
+Final: minor (deferred): M2 DocsList state 筛选与 URL 不回写（刷新跳回旧筛选）——纯外观债。

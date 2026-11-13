@@ -187,6 +187,18 @@ impl TestCtx {
         v["access_token"].as_str().unwrap().to_string()
     }
 
+    /// admin 给用户追加角色（增量11：用户管理钉）
+    pub async fn grant_role_as_admin(&self, admin_token: &str, username: &str, role: &str) {
+        let req = axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/sec/users/{username}/roles/{role}"))
+            .header("authorization", format!("Bearer {admin_token}"))
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let (status, b, _) = send(&self.app, req).await;
+        assert_eq!(status, 204, "授权必须成功: {}", String::from_utf8_lossy(&b));
+    }
+
     /// 以 admin 登录并返回 access token（e2e 全链用）
     pub async fn login(&self) -> String {
         let req = axum::http::Request::builder()

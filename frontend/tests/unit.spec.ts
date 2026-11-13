@@ -3,13 +3,16 @@ import { flowUi, stateLabel } from "../src/utils/flowUi";
 import { guardTarget } from "../src/router/index";
 import { buildListQuery, parseNdjson } from "../src/api/docs";
 
-// Review Focus #2：flowUi 全状态穷举（增量8 +revise 维度）
+// Review Focus #2/#1：flowUi 全状态穷举（增量8 +revise 维度；增量11 +checked 态——strict 二级）
 describe("flowUi", () => {
   it("working: submit+obsolete only", () => {
     expect(flowUi("working")).toEqual({ submit: true, approve: false, reject: false, obsolete: true, revise: false });
   });
   it("review: approve+reject only", () => {
     expect(flowUi("review")).toEqual({ submit: false, approve: true, reject: true, obsolete: false, revise: false });
+  });
+  it("checked: approve+reject only (strict 二级，M2 清偿)", () => {
+    expect(flowUi("checked")).toEqual({ submit: false, approve: true, reject: true, obsolete: false, revise: false });
   });
   it("released: obsolete+revise only", () => {
     expect(flowUi("released")).toEqual({ submit: false, approve: false, reject: false, obsolete: true, revise: true });
@@ -23,6 +26,7 @@ describe("flowUi", () => {
   it("labels", () => {
     expect(stateLabel("working")).toBe("工作中");
     expect(stateLabel("released")).toBe("已发布");
+    expect(stateLabel("checked")).toBe("待复核");
     expect(stateLabel("x")).toBe("x");
   });
 });

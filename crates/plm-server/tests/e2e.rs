@@ -1284,3 +1284,100 @@ async fn im_actions_fail_closed_when_unconfigured() {
         .await
         .unwrap();
 }
+
+// ==================== 用户管理 list_users（增量11 Review Focus #5） ====================
+
+#[tokio::test]
+async fn sec_users_list_requires_manage_and_aggregates_roles() {
+    let ctx = TestCtx::setup("secu", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "secued", "secued-pass-123", &["editor"], 0)
+        .await;
+    ctx.create_user_as_admin(&admin, "secuview", "secuview-pass-123", &["viewer"], 0)
+        .await;
+    let ed = ctx.login_as("secued", "secued-pass-123").await;
+    let view = ctx.login_as("secuview", "secuview-pass-123").await;
+
+    // admin：200 + 角色聚合正确
+    let (s, body) = ctx.get_authed("/api/v1/sec/users", &admin).await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let items = v.as_array().expect("顶层数组");
+    assert!(items.len() >= 3, "admin+editor+viewer 至少 3 用户");
+    let find = |name: &str| {
+        items
+            .iter()
+            .find(|u| u["username"] == name)
+            .unwrap()
+            .clone()
+    };
+    let a = find("admin");
+    assert_eq!(a["roles"].as_array().unwrap().len(), 1);
+    assert_eq!(a["roles"][0], "admin");
+    let e = find("secued");
+    assert_eq!(e["roles"][0], "editor");
+    assert!(e["max_secret_level"].is_i64());
+    assert!(e["created_at"].is_string());
+    // 多角色聚合（editor+viewer 双角色）
+    ctx.grant_role_as_admin(&admin, "secued", "viewer").await;
+    let (s, body) = ctx.get_authed("/api/v1/sec/users", &admin).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let e2 = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|u| u["username"] == "secued")
+        .unwrap()
+        .clone();
+    let roles: Vec<&str> = e2["roles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r.as_str().unwrap())
+        .collect();
+    assert!(
+        roles.contains(&"editor") && roles.contains(&"viewer"),
+        "roles={roles:?}"
+    );
+
+    // 终审 M3：回收全部角色 → roles=[] 分支（COALESCE 空数组）
+    {
+        let req = |r: &str| {
+            axum::http::Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/v1/sec/users/secued/roles/{r}"))
+                .header("authorization", format!("Bearer {admin}"))
+                .body(axum::body::Body::empty())
+                .unwrap()
+        };
+        for r in ["editor", "viewer"] {
+            let (s, _, _) = send(&ctx.app, req(r)).await;
+            assert_eq!(s, 204, "revoke {r}");
+        }
+        let (s, body) = ctx.get_authed("/api/v1/sec/users", &admin).await;
+        assert_eq!(s, 200);
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let e3 = v
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|u| u["username"] == "secued")
+            .unwrap()
+            .clone();
+        assert_eq!(
+            e3["roles"].as_array().unwrap().len(),
+            0,
+            "无角色用户 roles 必须为 []"
+        );
+    }
+
+    // editor/viewer：403（sec:manage 门控）
+    for t in [&ed, &view] {
+        let (s, rbody) = ctx.get_authed("/api/v1/sec/users", t).await;
+        assert_eq!(s, 403);
+        let v: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
+        assert_eq!(v["code"], "MDL-SEC-FORBIDDEN");
+    }
+    ctx.cleanup().await;
+}
