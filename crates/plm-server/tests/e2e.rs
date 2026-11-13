@@ -1883,3 +1883,97 @@ async fn cod_auto_code_and_preview() {
     );
     ctx.cleanup().await;
 }
+
+// ==================== 增量17：PART 物料（Review Focus #1/#2/#3/#5） ====================
+
+#[tokio::test]
+async fn parts_create_duplicates_tree_and_permissions() {
+    let ctx = TestCtx::setup("parts", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "ptview", "ptview-pass-123", &["viewer"], 0)
+        .await;
+    let view = ctx.login_as("ptview", "ptview-pass-123").await;
+
+    let post_part = |t: &str, body: String| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/parts")
+            .header("authorization", format!("Bearer {t}"))
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body))
+            .unwrap()
+    };
+
+    // 创建：分类赋码（ZZ 与 JGJ 独立流水）
+    let (s, body, _) = send(
+        &ctx.app,
+        post_part(
+            &admin,
+            r#"{"class_code":"CLS-ZZ","attrs":{"name":"支座A","material":"Q235"}}"#.into(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["obj_no"], "WL-ZZ-00001");
+    let (s, body, _) = send(
+        &ctx.app,
+        post_part(
+            &admin,
+            r#"{"class_code":"CLS-ZZ-JGJ","attrs":{"name":"螺栓B","material":"304"}}"#.into(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201);
+    let v2: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v2["obj_no"], "WL-ZZ-JGJ-00001");
+
+    // 查重：同名相似命中（admin）
+    let (s, body) = ctx
+        .get_authed("/api/v1/parts/duplicates?name=支座", &admin)
+        .await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(v
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["obj_no"] == "WL-ZZ-00001"));
+
+    // viewer：无 docs:write → 创建 403；列表 200（docs:read）
+    let (s, rbody, _) = send(
+        &ctx.app,
+        post_part(
+            &view,
+            r#"{"class_code":"CLS-ZZ","attrs":{"name":"x"}}"#.into(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 403);
+    let v: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
+    assert_eq!(v["code"], "MDL-SEC-FORBIDDEN");
+    let (s, body) = ctx.get_authed("/api/v1/parts", &view).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 2);
+
+    // ABAC：抬密级 → viewer 列表不见
+    sqlx::query("UPDATE cm_object SET secret_level = 2 WHERE obj_no = 'WL-ZZ-00001'")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (s, body) = ctx.get_authed("/api/v1/parts", &view).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 1, "越密级物料不得出现在 viewer 列表");
+
+    // 分类树
+    let (s, body) = ctx.get_authed("/api/v1/classes", &admin).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let roots = v.as_array().unwrap();
+    assert!(roots
+        .iter()
+        .any(|n| n["code"] == "CLS-ZZ" && n["children"].as_array().unwrap().len() == 2));
+    ctx.cleanup().await;
+}

@@ -129,12 +129,18 @@ async fn main() -> Result<()> {
     let service = Arc::new(mod_doc::DocService::new(
         pool.clone(),
         registry.clone(),
-        objects,
+        objects.clone(),
         files,
     ));
 
     let bom = Arc::new(core_bom::BomStore::new(pool.clone()));
     // 发布冻结注入（增量9 BOM 版本链）：released 同事务快照 BOM 子树（装配共用实现见 api-gateway::bom_release_hook）
+    // 物料服务（增量17 PART）：迁移 + 编排
+    mod_part::migrator()
+        .run(&pool)
+        .await
+        .context("mod-part 迁移失败")?;
+    let parts = Arc::new(mod_part::PartService::new(pool.clone(), objects.clone()));
     let lifecycle = Arc::new(core_version::LifecycleStore::new_with_hook(
         pool.clone(),
         Some(api_gateway::bom_release_hook(bom.clone())),
@@ -179,6 +185,7 @@ async fn main() -> Result<()> {
         sec,
         lifecycle,
         bom,
+        parts,
         im_secret: cfg.im_secret.clone(),
         im_user_map,
     };

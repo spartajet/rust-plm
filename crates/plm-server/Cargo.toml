@@ -29,6 +29,7 @@ core-version = { path = "../core-version" }
 core-events = { path = "../core-events" }
 core-bom = { path = "../core-bom" }
 core-im = { path = "../core-im" }
+mod-part = { path = "../mod-part" }
 reqwest = { workspace = true }
 api-gateway = { path = "../api-gateway" }
 

@@ -35,7 +35,11 @@ async fn setup(hint: &str) -> (Arc<PartService>, PgPool, String, String) {
         .await
         .unwrap();
     admin.close().await;
-    let prefix = admin_url.rsplit_once('/').map(|(p, _)| p).unwrap().to_string();
+    let prefix = admin_url
+        .rsplit_once('/')
+        .map(|(p, _)| p)
+        .unwrap()
+        .to_string();
     let pool = PgPoolOptions::new()
         .max_connections(6)
         .connect(&format!("{prefix}/{db}"))
@@ -83,7 +87,10 @@ async fn create_assigns_class_scoped_codes() {
     let r2 = svc
         .create(
             "CLS-ZZ",
-            serde_json::json!({"name":"支座2"}).as_object().unwrap().clone(),
+            serde_json::json!({"name":"支座2"})
+                .as_object()
+                .unwrap()
+                .clone(),
             None,
         )
         .await
@@ -93,7 +100,10 @@ async fn create_assigns_class_scoped_codes() {
     let r3 = svc
         .create(
             "CLS-ZZ-JGJ",
-            serde_json::json!({"name":"螺栓"}).as_object().unwrap().clone(),
+            serde_json::json!({"name":"螺栓"})
+                .as_object()
+                .unwrap()
+                .clone(),
             None,
         )
         .await
@@ -160,7 +170,10 @@ async fn class_tree_nests_children() {
     assert!(tree.len() >= 2, "两个根: {tree:?}");
     let zz = tree.iter().find(|n| n.code == "CLS-ZZ").unwrap();
     assert_eq!(zz.children.len(), 2, "两个子分类");
-    assert!(zz.children.iter().any(|c| c.code == "CLS-ZZ-JGJ" && c.has_rule));
+    assert!(zz
+        .children
+        .iter()
+        .any(|c| c.code == "CLS-ZZ-JGJ" && c.has_rule));
     pool.close().await;
     drop_db(&admin_url, &db).await;
 }

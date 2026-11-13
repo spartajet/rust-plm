@@ -79,8 +79,11 @@ impl PartService {
             })
             .collect();
         // id → 下标
-        let idx: std::collections::HashMap<Uuid, usize> =
-            flat.iter().enumerate().map(|(i, (n, _))| (n.id, i)).collect();
+        let idx: std::collections::HashMap<Uuid, usize> = flat
+            .iter()
+            .enumerate()
+            .map(|(i, (n, _))| (n.id, i))
+            .collect();
         // 倒序挂子（子先处理完再被父收集——depth 任意）
         for i in (0..flat.len()).rev() {
             let parent_id = flat[i].1;
@@ -141,7 +144,10 @@ impl PartService {
                     .and_then(|v| v.as_str())
                     .unwrap_or_default()
                     .to_string(),
-                material: attrs.get("material").and_then(|v| v.as_str()).map(String::from),
+                material: attrs
+                    .get("material")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
             })
             .collect())
     }
@@ -184,9 +190,18 @@ impl PartService {
 
         // attrs 回填分类上下文
         let mut attrs = attrs;
-        attrs.insert("class_id".into(), serde_json::Value::String(class.id.to_string()));
-        attrs.insert("class_code".into(), serde_json::Value::String(class.code.clone()));
-        attrs.insert("class_name".into(), serde_json::Value::String(class.name.clone()));
+        attrs.insert(
+            "class_id".into(),
+            serde_json::Value::String(class.id.to_string()),
+        );
+        attrs.insert(
+            "class_code".into(),
+            serde_json::Value::String(class.code.clone()),
+        );
+        attrs.insert(
+            "class_name".into(),
+            serde_json::Value::String(class.name.clone()),
+        );
 
         let cmd = CreateCmd {
             type_code: Self::TYPE.into(),
@@ -199,7 +214,10 @@ impl PartService {
 
         let duplicates = self
             .duplicates(
-                obj.attrs.get("name").and_then(|v| v.as_str()).unwrap_or_default(),
+                obj.attrs
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default(),
                 obj.attrs.get("material").and_then(|v| v.as_str()),
             )
             .await?
@@ -222,11 +240,17 @@ impl PartService {
         size: u32,
         max_secret: i16,
     ) -> Result<(Vec<core_model::types::BizObject>, u64), core_model::DomainError> {
-        let mut conds = vec![
-            Cond { attr: "secret_level".into(), op: Op::Le, value: serde_json::json!(max_secret) },
-        ];
+        let mut conds = vec![Cond {
+            attr: "secret_level".into(),
+            op: Op::Le,
+            value: serde_json::json!(max_secret),
+        }];
         if let Some(n) = name_filter.filter(|n| !n.trim().is_empty()) {
-            conds.push(Cond { attr: "name".into(), op: Op::Eq, value: serde_json::json!(n) });
+            conds.push(Cond {
+                attr: "name".into(),
+                op: Op::Eq,
+                value: serde_json::json!(n),
+            });
         }
         let q = ObjectQuery {
             type_code: Self::TYPE.into(),

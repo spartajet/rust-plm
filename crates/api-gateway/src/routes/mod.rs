@@ -6,6 +6,7 @@ pub mod docs;
 pub mod im;
 pub mod infra;
 pub mod meta;
+pub mod parts;
 pub mod sec_users;
 pub mod webhooks;
 
@@ -18,6 +19,7 @@ pub fn build(state: AppState) -> Router {
     // 鉴权（谁）→ 授权（能做什么）两层
     let docs_rw = Router::new()
         .route("/api/v1/docs", post(docs::upload_doc))
+        .route("/api/v1/parts", post(parts::create_part))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             require_perm("docs", "write"),
@@ -100,6 +102,10 @@ pub fn build(state: AppState) -> Router {
             "/api/v1/meta/types/{code}/cod-preview",
             get(meta::cod_preview),
         )
+        .route("/api/v1/parts/duplicates", get(parts::duplicates))
+        .route("/api/v1/classes", get(parts::class_tree))
+        // 物料创建走 docs:write（SMB 简化裁定）；路由层在 docs_rw 组后单独挂权限层
+        .route("/api/v1/parts", get(parts::list_parts))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             require_authn,
