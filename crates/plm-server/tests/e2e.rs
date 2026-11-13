@@ -1819,7 +1819,7 @@ async fn cod_auto_code_and_preview() {
             (
                 "attrs",
                 None,
-                format!(r#"{{"name":"自动码件"}}"#).into_bytes(),
+                r#"{"name":"自动码件"}"#.to_string().into_bytes(),
             ),
             ("file", Some("c.dwg"), FILE.to_vec()),
             ("auto_code", None, b"1".to_vec()),
@@ -1854,7 +1854,7 @@ async fn cod_auto_code_and_preview() {
             (
                 "attrs",
                 None,
-                format!(r#"{{"name":"无规则件"}}"#).into_bytes(),
+                r#"{"name":"无规则件"}"#.to_string().into_bytes(),
             ),
             ("file", Some("c.dwg"), FILE.to_vec()),
             ("auto_code", None, b"1".to_vec()),
