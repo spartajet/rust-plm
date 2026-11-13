@@ -106,3 +106,8 @@ Final: fixed I2 裁定替代翻页钉——UserAdmin 搜索联动分页条（fil
 Final: fixed I3 wuTab 死变量删除 + asof 单视图裁定（live 反查 UUID 不透明语义弱，"被谁使用"卡仅 asof 视图）入账。
 Final: fixed M1 死三元清除/M3 utoipa asof=1 文案/M4 wuRows 独立 try 降级（load 重写：关键路径失败早退，非关键卡独立兜底）。
 Final: minor (deferred): live 反查仍返回越级祖先的不透明 ancestor UUID（不可经 API 解析——若求对称可后续给 live 分支同样过滤）；UserAdmin 搜索防抖 timer 未 unmount 清理；ids 收集重复项（ANY 下无害）。
+[增量15 live 反查对称过滤 追加台账]
+Final: Task1-2 完成——live 分支镜像 asof 模式（store 纯聚合→网关批量查 cm_object→ancestor 越密级整行丢弃→回填 ancestor_no，NDJSON 键 ancestor/qty_total 兼容保留）；前端"被谁使用"卡双视图（当前被用 live ancestor_no / 历史发布快照 asof）；UserAdmin 防抖 timer onUnmounted 清理（增量14 M4 关联债清偿）。
+Final: Ruling: live/asof 反查语义完全对称（同 ABAC 行级过滤+obj_no 回填）——终审 R2 建议落地；store 纯聚合边界不变。
+Final: 教训：python heredoc 生成含 `
+` 字面量的 TS 代码会真实换行破坏模板串（第二次）——含转义的代码片段一律 Edit 工具直写。
