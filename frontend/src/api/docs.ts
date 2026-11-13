@@ -114,6 +114,25 @@ export async function bomExpand(
     .map((l) => JSON.parse(l) as BomRow);
 }
 
+/// as-of 历史反查行（增量14：发布快照中 child 被谁使用）
+export interface WhereUsedAsofRow {
+  release_root_no: string;
+  major: number;
+  parent_no: string;
+  qty_total: number;
+}
+
+export async function whereUsedAsof(http: AxiosInstance, objNo: string): Promise<WhereUsedAsofRow[]> {
+  // responseType text——NDJSON（同 bomExpand 的单行 JSON 陷阱）
+  const res = await http.get(`/api/v1/boms/${objNo}/where-used?asof=1`, { responseType: "text" });
+  const text = String(res.data ?? "");
+  if (!text.trim()) return [];
+  return text
+    .split("\n")
+    .filter((l) => l.trim())
+    .map((l) => JSON.parse(l) as WhereUsedAsofRow);
+}
+
 /// 版本历史快照行（增量8）
 export interface VersionSnapshot {
   major: number;

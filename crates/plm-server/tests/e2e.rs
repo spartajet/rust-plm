@@ -1590,3 +1590,75 @@ async fn sec_users_search_fuzzy_filter() {
     assert_eq!(v.as_array().unwrap().len(), 0);
     ctx.cleanup().await;
 }
+
+// ==================== 增量14：where-used as-of（Review Focus #2/#3） ====================
+
+#[tokio::test]
+async fn where_used_asof_via_api() {
+    async fn id_of(ctx: &TestCtx, token: &str, no: &str) -> String {
+        let (s, body) = ctx.get_authed(&format!("/api/v1/docs/{no}"), token).await;
+        assert_eq!(s, 200);
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        v["object"]["id"].as_str().unwrap().to_string()
+    }
+    async fn set_lines(ctx: &TestCtx, token: &str, lines: String) -> (u16, bytes::Bytes) {
+        let req = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/boms/DWG-WU-A/lines")
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(lines))
+            .unwrap();
+        let (s, b, _) = send(&ctx.app, req).await;
+        (s, b)
+    }
+    async fn lifecycle(ctx: &TestCtx, token: &str, act: &str) -> u16 {
+        let req = axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/DWG-WU-A/{act}"))
+            .header("authorization", format!("Bearer {token}"))
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let (s, _, _) = send(&ctx.app, req).await;
+        s
+    }
+
+    let ctx = TestCtx::setup("wua", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    for no in ["DWG-WU-A", "DWG-WU-C"] {
+        let (s, _, _) = send(
+            &ctx.app,
+            post_docs_multipart(Some(&admin), no, r#"{"name":"N"}"#, Some("w.dwg"), FILE.to_vec()),
+        )
+        .await;
+        assert_eq!(s, 201, "{no}");
+    }
+    let (aid, cid) = (id_of(&ctx, &admin, "DWG-WU-A").await, id_of(&ctx, &admin, "DWG-WU-C").await);
+    let (s, b) = set_lines(&ctx, &admin, format!(r#"[{{"line_no":1,"child":"{cid}","qty":2}}]"#)).await;
+    assert_eq!(s, 204, "{}", String::from_utf8_lossy(&b));
+    for act in ["submit", "approve", "revise"] {
+        assert_eq!(lifecycle(&ctx, &admin, act).await, 200);
+    }
+    let (s, b) = set_lines(&ctx, &admin, format!(r#"[{{"line_no":1,"child":"{cid}","qty":9}}]"#)).await;
+    assert_eq!(s, 204, "{}", String::from_utf8_lossy(&b));
+    // v2 发布 → 冻结 (A,2) 快照
+    for act in ["submit", "approve"] {
+        assert_eq!(lifecycle(&ctx, &admin, act).await, 200);
+    }
+    let _ = aid;
+
+    // live：ancestor 字段兼容
+    let (s, body) = ctx.get_authed("/api/v1/boms/DWG-WU-C/where-used", &admin).await;
+    assert_eq!(s, 200);
+    assert!(body.windows(8).any(|w| w == b"ancestor"), "live 字段名兼容");
+    // asof：两发布事件各一行，含回填 obj_no
+    let (s, body) = ctx.get_authed("/api/v1/boms/DWG-WU-C/where-used?asof=1", &admin).await;
+    assert_eq!(s, 200, "{}", String::from_utf8_lossy(&body));
+    let text = String::from_utf8_lossy(&body);
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert_eq!(lines.len(), 2, "两发布事件各一行: {text}");
+    let rows: Vec<serde_json::Value> = lines.iter().map(|l| serde_json::from_str(l).unwrap()).collect();
+    assert!(rows.iter().any(|r| r["release_root_no"] == "DWG-WU-A" && r["major"] == 1 && r["parent_no"] == "DWG-WU-A" && r["qty_total"] == 2));
+    assert!(rows.iter().any(|r| r["release_root_no"] == "DWG-WU-A" && r["major"] == 2 && r["parent_no"] == "DWG-WU-A" && r["qty_total"] == 9));
+    ctx.cleanup().await;
+}

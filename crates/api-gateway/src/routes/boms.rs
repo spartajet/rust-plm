@@ -128,17 +128,25 @@ pub async fn expand(
     Ok(res)
 }
 
+#[derive(Deserialize)]
+pub struct WhereUsedQuery {
+    /// as-of 历史反查（增量14）：按发布快照分组（release_root/major），回填 obj_no
+    asof: Option<String>,
+}
+
 /// GET /api/v1/boms/{obj_no}/where-used — 反查（NDJSON 流式）
+/// 缺省=live（{ancestor, qty_total}）；`?asof=1`=发布快照历史（{release_root_no, major, parent_no, qty_total}）
 #[utoipa::path(
     get, path = "/api/v1/boms/{obj_no}/where-used",
-    params(("obj_no" = String, Path)),
-    responses((status = 200, description = "NDJSON: {ancestor, qty_total} 行流"))
+    params(("obj_no" = String, Path), ("asof" = String, Query, description = "as=1 → 发布快照历史反查")),
+    responses((status = 200, description = "NDJSON 行流"))
 )]
 pub async fn where_used(
     State(st): State<AppState>,
     Extension(tid): Extension<crate::error::TraceId>,
     Extension(user): Extension<AuthUser>,
     Path(obj_no): Path<String>,
+    Query(q): Query<WhereUsedQuery>,
 ) -> Result<Response, ApiError> {
     let obj = st
         .service
@@ -152,16 +160,40 @@ pub async fn where_used(
             &tid.0,
         ));
     }
-    let rows = st
-        .bom
-        .where_used(obj.object.id)
+    let ndjson = if q.asof.as_deref() == Some("1") {
+        // as-of：发布快照反查 + JOIN 回填对象号（root/parent）
+        let rows: Vec<(uuid::Uuid, i32, String, String, i64)> = sqlx::query_as(
+            "SELECT s.release_root, s.major, ru.obj_no, pu.obj_no, s.sum_qty \
+             FROM (SELECT release_root, major, parent, SUM(qty)::bigint AS sum_qty \
+                   FROM bom_edge_snapshot WHERE child = $1 \
+                   GROUP BY release_root, major, parent) s \
+             JOIN cm_object ru ON ru.id = s.release_root \
+             JOIN cm_object pu ON pu.id = s.parent \
+             ORDER BY s.release_root, s.major, s.parent",
+        )
+        .bind(obj.object.id)
+        .fetch_all(&st.pool)
         .await
-        .map_err(|e| ApiError::new(e, &tid.0))?;
-    let body: Vec<String> = rows
-        .iter()
-        .map(|(a, q)| json!({"ancestor": a, "qty_total": q}).to_string())
-        .collect();
-    let ndjson = body.join("\n");
+        .map_err(|e| ApiError::new(core_model::DomainError::Db(e.to_string()), &tid.0))?;
+        rows.iter()
+            .map(|(root, major, root_no, parent_no, qty)| {
+                json!({"release_root_no": root_no, "major": major, "parent_no": parent_no, "qty_total": qty})
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        // live（现状，字段名兼容不破坏既有消费）
+        let rows = st
+            .bom
+            .where_used(obj.object.id)
+            .await
+            .map_err(|e| ApiError::new(e, &tid.0))?;
+        rows.iter()
+            .map(|(a, q)| json!({"ancestor": a, "qty_total": q}).to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
     let mut res = (StatusCode::OK, ndjson).into_response();
     res.headers_mut().insert(
         header::CONTENT_TYPE,
