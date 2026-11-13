@@ -196,12 +196,7 @@ impl TestCtx {
             .body(axum::body::Body::empty())
             .unwrap();
         let (status, b, _) = send(&self.app, req).await;
-        assert_eq!(
-            status,
-            204,
-            "授权必须成功: {}",
-            String::from_utf8_lossy(&b)
-        );
+        assert_eq!(status, 204, "授权必须成功: {}", String::from_utf8_lossy(&b));
     }
 
     /// 以 admin 登录并返回 access token（e2e 全链用）

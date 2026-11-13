@@ -1304,7 +1304,13 @@ async fn sec_users_list_requires_manage_and_aggregates_roles() {
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let items = v.as_array().expect("顶层数组");
     assert!(items.len() >= 3, "admin+editor+viewer 至少 3 用户");
-    let find = |name: &str| items.iter().find(|u| u["username"] == name).unwrap().clone();
+    let find = |name: &str| {
+        items
+            .iter()
+            .find(|u| u["username"] == name)
+            .unwrap()
+            .clone()
+    };
     let a = find("admin");
     assert_eq!(a["roles"].as_array().unwrap().len(), 1);
     assert_eq!(a["roles"][0], "admin");
@@ -1317,9 +1323,23 @@ async fn sec_users_list_requires_manage_and_aggregates_roles() {
     let (s, body) = ctx.get_authed("/api/v1/sec/users", &admin).await;
     assert_eq!(s, 200);
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let e2 = v.as_array().unwrap().iter().find(|u| u["username"] == "secued").unwrap().clone();
-    let roles: Vec<&str> = e2["roles"].as_array().unwrap().iter().map(|r| r.as_str().unwrap()).collect();
-    assert!(roles.contains(&"editor") && roles.contains(&"viewer"), "roles={roles:?}");
+    let e2 = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|u| u["username"] == "secued")
+        .unwrap()
+        .clone();
+    let roles: Vec<&str> = e2["roles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r.as_str().unwrap())
+        .collect();
+    assert!(
+        roles.contains(&"editor") && roles.contains(&"viewer"),
+        "roles={roles:?}"
+    );
 
     // editor/viewer：403（sec:manage 门控）
     for t in [&ed, &view] {

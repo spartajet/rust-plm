@@ -138,7 +138,7 @@ function back() {
       </div>
     </el-card>
 
-    <el-card style="margin-top: 16px">
+    <el-card style="margin-top: 16px" data-test="bom-card">
       <template #header>
         <div style="display: flex; align-items: center; gap: 12px">
           <span>BOM（一级明细）</span>
