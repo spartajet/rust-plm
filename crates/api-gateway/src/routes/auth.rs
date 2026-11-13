@@ -25,10 +25,13 @@ pub struct TokenPairDto {
     pub access_token: String,
     pub refresh_token: String,
     pub expires_in: i64,
+    /// 用户角色（增量12：前端显隐能力映射）
+    pub roles: Vec<String>,
 }
 
 fn dto(p: TokenPair) -> TokenPairDto {
     TokenPairDto {
+        roles: p.roles,
         access_token: p.access_token,
         refresh_token: p.refresh_token,
         expires_in: p.expires_in,

@@ -78,6 +78,7 @@ cd frontend && npm install
 # 浏览器直连 API（后端 CORS 已放开；本机 node 环回不稳时绕开 vite 代理）
 VITE_API_BASE=http://127.0.0.1:18095 npx vite --port 5173 --host 127.0.0.1
 # 打开 http://127.0.0.1:5173 → 登录 admin → 看板/图纸列表(密级列)/详情(生命周期+BOM 版本切换+升版+版本历史)/用户管理(建号+角色授予/回收)
+# 界面按角色显隐（admin=全量 / editor=无用户管理+审批 / viewer=只读）；会话 401 自动 refresh 换发重放；中文界面
 ```
 
 # 本地开发（无 Docker）

@@ -22,7 +22,7 @@ async function submit() {
   loading.value = true;
   try {
     const pair = await apiLogin(http, username.value, password.value);
-    auth.setSession(pair.access_token, username.value);
+    auth.setSession(pair.access_token, username.value, pair.refresh_token, pair.roles);
     router.push("/");
   } catch (e) {
     ElMessage.error(extractApiError(e));

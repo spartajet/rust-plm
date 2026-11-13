@@ -4,6 +4,7 @@ export interface TokenPair {
   access_token: string;
   refresh_token: string;
   expires_in: number;
+  roles: string[];
 }
 
 export async function login(http: AxiosInstance, username: string, password: string): Promise<TokenPair> {

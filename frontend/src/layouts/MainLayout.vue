@@ -20,7 +20,7 @@ function logout() {
       <el-menu router :default-active="$route.path" background-color="#001529" text-color="#fff">
         <el-menu-item index="/">工作台</el-menu-item>
         <el-menu-item index="/docs">图纸</el-menu-item>
-        <el-menu-item index="/admin/users">用户管理</el-menu-item>
+        <el-menu-item v-if="auth.canManageSec" index="/admin/users">用户管理</el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>
