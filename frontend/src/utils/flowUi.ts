@@ -44,6 +44,7 @@ export function stateTagType(state: string): "info" | "warning" | "success" | "d
     case "working":
       return "info";
     case "review":
+    case "checked": // strict 二级待复核（增量11：与 review 同警示色，不作废勿红）
       return "warning";
     case "released":
       return "success";

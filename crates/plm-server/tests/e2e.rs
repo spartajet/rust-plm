@@ -1341,6 +1341,37 @@ async fn sec_users_list_requires_manage_and_aggregates_roles() {
         "roles={roles:?}"
     );
 
+    // 终审 M3：回收全部角色 → roles=[] 分支（COALESCE 空数组）
+    {
+        let req = |r: &str| {
+            axum::http::Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/v1/sec/users/secued/roles/{r}"))
+                .header("authorization", format!("Bearer {admin}"))
+                .body(axum::body::Body::empty())
+                .unwrap()
+        };
+        for r in ["editor", "viewer"] {
+            let (s, _, _) = send(&ctx.app, req(r)).await;
+            assert_eq!(s, 204, "revoke {r}");
+        }
+        let (s, body) = ctx.get_authed("/api/v1/sec/users", &admin).await;
+        assert_eq!(s, 200);
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let e3 = v
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|u| u["username"] == "secued")
+            .unwrap()
+            .clone();
+        assert_eq!(
+            e3["roles"].as_array().unwrap().len(),
+            0,
+            "无角色用户 roles 必须为 []"
+        );
+    }
+
     // editor/viewer：403（sec:manage 门控）
     for t in [&ed, &view] {
         let (s, rbody) = ctx.get_authed("/api/v1/sec/users", t).await;

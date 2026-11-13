@@ -115,17 +115,24 @@ test("board: per-state counts match and click links to filtered list", async ({ 
   // 基线+1 相对断言（跨 run 残留免疫）：upload/submit 前后各读一次计数
   // （造数段已在 goto 前完成 upload+submit，这里以 goto 后首次读数为基线无意义——
   //   故改为：断言 review ≥1 且点击 working 卡片联动（绝对计数仅验证联动，不验数据库全局态））
-  const reviewCount = await page.locator('[data-test="board-count-review"]').innerText();
-  expect(Number(reviewCount)).toBeGreaterThanOrEqual(1);
-  await expect(page.locator('[data-test="board-count-working"]')).toHaveText(/\d+/, { timeout: 15_000 });
+  // 计数就绪等待（初渲染为 "-"，I2：裸 innerText 会 NaN）
+  const reviewCard = page.locator('[data-test="board-count-review"]');
+  await expect(reviewCard).toHaveText(/\d+/, { timeout: 15_000 });
+  const reviewCount = Number(await reviewCard.innerText());
+  expect(reviewCount).toBeGreaterThanOrEqual(1);
+  const workingCard = page.locator('[data-test="board-count-working"]');
+  await expect(workingCard).toHaveText(/\d+/, { timeout: 15_000 });
 
   // 点击卡片 → /docs?state=working → 列表行数与卡片计数一致（联动正确性；残留免疫）
-  const workingCount = Number(await page.locator('[data-test="board-count-working"]').innerText());
+  const workingCount = Number(await workingCard.innerText());
   await page.click('[data-test="board-working"]');
   await page.waitForURL("**/docs?state=working");
   // 断言分页 total 与卡片计数一致（列表 size=20 截断行数——total 才是全量）
-  // locale 默认英文（M9 债），直接断言 .el-pagination__total 数值
-  await expect(page.locator(".el-pagination__total")).toHaveText(new RegExp(`${workingCount}`), { timeout: 10_000 });
+  // toHaveText(regex) 是全串匹配；取文本后 word-boundary 比较（I1：子串在多位数间假 PASS）
+  const totalEl = page.locator(".el-pagination__total");
+  await expect(totalEl).toHaveText(/\d+/, { timeout: 10_000 });
+  const totalText = await totalEl.innerText();
+  expect(new RegExp(`\\b${workingCount}\\b`).test(totalText)).toBe(true);
 });
 
 test("bom version switch: live vs major=1 snapshot on detail page", async ({ page }) => {

@@ -43,6 +43,7 @@ async function load() {
 }
 
 async function reloadBom() {
+  bomRows.value = []; // 切换失败时不得残留上一版行（终审 M4）
   try {
     bomRows.value = await bomExpand(http, objNo, "onelevel", bomMajor.value || undefined);
   } catch (e) {
