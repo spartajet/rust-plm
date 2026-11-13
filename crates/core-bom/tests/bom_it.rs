@@ -900,15 +900,30 @@ async fn where_used_asof_groups_by_release_event() {
 
     // A→C×2 与 B→C×3（B 还多行引用 C：line2 C×1 → 同父聚合 3+1=4）
     c.store
-        .set_lines(a, vec![LineInput { line_no: 1, child: cc, qty: 2 }])
+        .set_lines(
+            a,
+            vec![LineInput {
+                line_no: 1,
+                child: cc,
+                qty: 2,
+            }],
+        )
         .await
         .unwrap();
     c.store
         .set_lines(
             b,
             vec![
-                LineInput { line_no: 1, child: cc, qty: 3 },
-                LineInput { line_no: 2, child: cc, qty: 1 },
+                LineInput {
+                    line_no: 1,
+                    child: cc,
+                    qty: 3,
+                },
+                LineInput {
+                    line_no: 2,
+                    child: cc,
+                    qty: 1,
+                },
             ],
         )
         .await
@@ -924,7 +939,14 @@ async fn where_used_asof_groups_by_release_event() {
     tx.commit().await.unwrap();
     // A 升版改 C×7 → A 发布 major=2
     c.store
-        .set_lines(a, vec![LineInput { line_no: 1, child: cc, qty: 7 }])
+        .set_lines(
+            a,
+            vec![LineInput {
+                line_no: 1,
+                child: cc,
+                qty: 7,
+            }],
+        )
         .await
         .unwrap();
     let mut tx = c.pool.begin().await.unwrap();
@@ -937,7 +959,10 @@ async fn where_used_asof_groups_by_release_event() {
     assert_eq!(rows.len(), 3, "三发布事件各一行: {rows:?}");
     assert!(rows.contains(&(a, 1, a, 2)));
     assert!(rows.contains(&(a, 2, a, 7)));
-    assert!(rows.contains(&(b, 1, b, 4)), "B 双行引用须聚合成 3+1=4: {rows:?}");
+    assert!(
+        rows.contains(&(b, 1, b, 4)),
+        "B 双行引用须聚合成 3+1=4: {rows:?}"
+    );
     c.drop_it().await;
 }
 

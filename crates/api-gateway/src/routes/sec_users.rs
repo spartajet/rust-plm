@@ -140,28 +140,37 @@ pub async fn list_roles(
     ))
 }
 
-/// 用户列表查询参数（增量13：username 模糊过滤）
+/// 用户列表查询参数（增量13 搜索 + 增量14 分页）
 #[derive(Deserialize)]
 pub struct UsersQuery {
     /// username 模糊过滤（增量13）
     search: Option<String>,
+    page: Option<u32>,
+    size: Option<u32>,
 }
 
 /// GET /api/v1/sec/users（sec:manage）——用户列表（角色聚合；增量11 用户管理面）
 #[utoipa::path(
     get, path = "/api/v1/sec/users",
-    params(("search" = String, Query, description = "username 模糊过滤")),
-    responses((status = 200, description = "用户数组（username/max_secret_level/roles/created_at）"), (status = 403))
+    params(("search" = String, Query, description = "username 模糊过滤"), ("page" = u32, Query), ("size" = u32, Query, description = "缺省 50，上限 200")),
+    responses((status = 200, description = "{items,total,page,size}；items 含 username/max_secret_level/roles/created_at"), (status = 403))
 )]
 pub async fn list_users(
     State(st): State<AppState>,
     Extension(tid): Extension<crate::error::TraceId>,
     Query(q): Query<UsersQuery>,
-) -> Result<Json<Vec<core_sec::SecUserSummary>>, ApiError> {
-    let users = st
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let page = q.page.unwrap_or(1).max(1);
+    let size = q.size.unwrap_or(50).clamp(1, 200);
+    let (items, total) = st
         .sec
-        .list_users(q.search.as_deref())
+        .list_users(q.search.as_deref(), page, size)
         .await
         .map_err(|e| ApiError::new(e, &tid.0))?;
-    Ok(Json(users))
+    Ok(Json(serde_json::json!({
+        "items": items,
+        "total": total,
+        "page": page,
+        "size": size,
+    })))
 }

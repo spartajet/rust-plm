@@ -1302,7 +1302,8 @@ async fn sec_users_list_requires_manage_and_aggregates_roles() {
     let (s, body) = ctx.get_authed("/api/v1/sec/users", &admin).await;
     assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let items = v.as_array().expect("顶层数组");
+    let items = v["items"].as_array().expect("items 数组");
+    assert!(v["page"] == 1 && v["size"] == 50, "分页信封");
     assert!(items.len() >= 3, "admin+editor+viewer 至少 3 用户");
     let find = |name: &str| {
         items
@@ -1323,7 +1324,7 @@ async fn sec_users_list_requires_manage_and_aggregates_roles() {
     let (s, body) = ctx.get_authed("/api/v1/sec/users", &admin).await;
     assert_eq!(s, 200);
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let e2 = v
+    let e2 = v["items"]
         .as_array()
         .unwrap()
         .iter()
@@ -1358,7 +1359,7 @@ async fn sec_users_list_requires_manage_and_aggregates_roles() {
         let (s, body) = ctx.get_authed("/api/v1/sec/users", &admin).await;
         assert_eq!(s, 200);
         let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        let e3 = v
+        let e3 = v["items"]
             .as_array()
             .unwrap()
             .iter()
@@ -1551,6 +1552,13 @@ async fn dead_events_pagination_and_strong_validation() {
     assert_eq!(s, 200);
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(v["items"].as_array().unwrap().len(), 0);
+    // 终审 R2：极端 page 防 M1 回退（u32::MAX × 200 不得溢出/5xx）
+    let (s, body) = ctx
+        .get_authed("/api/v1/sec/webhooks/dead?page=4294967295&size=200", &admin)
+        .await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["items"].as_array().unwrap().len(), 0);
     ctx.cleanup().await;
 }
 
@@ -1573,7 +1581,7 @@ async fn sec_users_search_fuzzy_filter() {
         .await;
     assert_eq!(s, 200);
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let names: Vec<&str> = v
+    let names: Vec<&str> = v["items"]
         .as_array()
         .unwrap()
         .iter()
@@ -1587,7 +1595,18 @@ async fn sec_users_search_fuzzy_filter() {
         .await;
     assert_eq!(s, 200);
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(v.as_array().unwrap().len(), 0);
+    assert_eq!(v["items"].as_array().unwrap().len(), 0);
+
+    // 增量14：分页 page=2/size=2 + clamp
+    let (s, body) = ctx
+        .get_authed("/api/v1/sec/users?page=2&size=2", &admin)
+        .await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["page"], 2);
+    assert_eq!(v["size"], 2);
+    assert_eq!(v["total"], 4);
+    assert_eq!(v["items"].as_array().unwrap().len(), 2);
     ctx.cleanup().await;
 }
 
@@ -1628,18 +1647,37 @@ async fn where_used_asof_via_api() {
     for no in ["DWG-WU-A", "DWG-WU-C"] {
         let (s, _, _) = send(
             &ctx.app,
-            post_docs_multipart(Some(&admin), no, r#"{"name":"N"}"#, Some("w.dwg"), FILE.to_vec()),
+            post_docs_multipart(
+                Some(&admin),
+                no,
+                r#"{"name":"N"}"#,
+                Some("w.dwg"),
+                FILE.to_vec(),
+            ),
         )
         .await;
         assert_eq!(s, 201, "{no}");
     }
-    let (aid, cid) = (id_of(&ctx, &admin, "DWG-WU-A").await, id_of(&ctx, &admin, "DWG-WU-C").await);
-    let (s, b) = set_lines(&ctx, &admin, format!(r#"[{{"line_no":1,"child":"{cid}","qty":2}}]"#)).await;
+    let (aid, cid) = (
+        id_of(&ctx, &admin, "DWG-WU-A").await,
+        id_of(&ctx, &admin, "DWG-WU-C").await,
+    );
+    let (s, b) = set_lines(
+        &ctx,
+        &admin,
+        format!(r#"[{{"line_no":1,"child":"{cid}","qty":2}}]"#),
+    )
+    .await;
     assert_eq!(s, 204, "{}", String::from_utf8_lossy(&b));
     for act in ["submit", "approve", "revise"] {
         assert_eq!(lifecycle(&ctx, &admin, act).await, 200);
     }
-    let (s, b) = set_lines(&ctx, &admin, format!(r#"[{{"line_no":1,"child":"{cid}","qty":9}}]"#)).await;
+    let (s, b) = set_lines(
+        &ctx,
+        &admin,
+        format!(r#"[{{"line_no":1,"child":"{cid}","qty":9}}]"#),
+    )
+    .await;
     assert_eq!(s, 204, "{}", String::from_utf8_lossy(&b));
     // v2 发布 → 冻结 (A,2) 快照
     for act in ["submit", "approve"] {
@@ -1648,17 +1686,30 @@ async fn where_used_asof_via_api() {
     let _ = aid;
 
     // live：ancestor 字段兼容
-    let (s, body) = ctx.get_authed("/api/v1/boms/DWG-WU-C/where-used", &admin).await;
+    let (s, body) = ctx
+        .get_authed("/api/v1/boms/DWG-WU-C/where-used", &admin)
+        .await;
     assert_eq!(s, 200);
     assert!(body.windows(8).any(|w| w == b"ancestor"), "live 字段名兼容");
     // asof：两发布事件各一行，含回填 obj_no
-    let (s, body) = ctx.get_authed("/api/v1/boms/DWG-WU-C/where-used?asof=1", &admin).await;
+    let (s, body) = ctx
+        .get_authed("/api/v1/boms/DWG-WU-C/where-used?asof=1", &admin)
+        .await;
     assert_eq!(s, 200, "{}", String::from_utf8_lossy(&body));
     let text = String::from_utf8_lossy(&body);
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
     assert_eq!(lines.len(), 2, "两发布事件各一行: {text}");
-    let rows: Vec<serde_json::Value> = lines.iter().map(|l| serde_json::from_str(l).unwrap()).collect();
-    assert!(rows.iter().any(|r| r["release_root_no"] == "DWG-WU-A" && r["major"] == 1 && r["parent_no"] == "DWG-WU-A" && r["qty_total"] == 2));
-    assert!(rows.iter().any(|r| r["release_root_no"] == "DWG-WU-A" && r["major"] == 2 && r["parent_no"] == "DWG-WU-A" && r["qty_total"] == 9));
+    let rows: Vec<serde_json::Value> = lines
+        .iter()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert!(rows.iter().any(|r| r["release_root_no"] == "DWG-WU-A"
+        && r["major"] == 1
+        && r["parent_no"] == "DWG-WU-A"
+        && r["qty_total"] == 2));
+    assert!(rows.iter().any(|r| r["release_root_no"] == "DWG-WU-A"
+        && r["major"] == 2
+        && r["parent_no"] == "DWG-WU-A"
+        && r["qty_total"] == 9));
     ctx.cleanup().await;
 }

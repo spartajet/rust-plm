@@ -8,6 +8,9 @@ import { createUser, grantRole, listRoles, listUsers, revokeRole, type SecRole, 
 
 const users = ref<SecUser[]>([]);
 const roles = ref<SecRole[]>([]);
+const total = ref(0);
+const page = ref(1);
+const size = ref(50);
 const loading = ref(false);
 const search = ref("");
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -15,7 +18,10 @@ let searchTimer: ReturnType<typeof setTimeout> | null = null;
 // 搜索防抖 300ms（增量13）
 watch(search, () => {
   if (searchTimer) clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => load(), 300);
+  searchTimer = setTimeout(() => {
+    page.value = 1;
+    load();
+  }, 300);
 });
 
 const dlgVisible = ref(false);
@@ -28,7 +34,9 @@ const submitting = ref(false);
 async function load() {
   loading.value = true;
   try {
-    users.value = await listUsers(http, search.value);
+    const res = await listUsers(http, search.value, page.value, size.value);
+    users.value = res.items;
+    total.value = res.total;
     roles.value = await listRoles(http);
   } catch (e) {
     ElMessage.error(extractApiError(e));
@@ -94,7 +102,7 @@ async function toggleRole(user: SecUser, role: string, has: boolean) {
       <el-button data-test="reload-users" @click="load">刷新</el-button>
     </div>
 
-    <el-table v-loading="loading" :data="users">
+    <el-table v-loading="loading" :data="users" data-test="user-table">
       <el-table-column prop="username" label="用户名" min-width="140" />
       <el-table-column label="密级上限" width="100">
         <template #default="{ row }">{{ row.max_secret_level }}</template>
@@ -118,6 +126,15 @@ async function toggleRole(user: SecUser, role: string, has: boolean) {
         <template #default="{ row }">{{ row.created_at ?? "-" }}</template>
       </el-table-column>
     </el-table>
+
+    <el-pagination
+      v-model:current-page="page"
+      v-model:page-size="size"
+      layout="total, prev, pager, next"
+      :total="total"
+      style="margin-top: 12px"
+      @current-change="load"
+    />
 
     <el-dialog v-model="dlgVisible" title="新建用户" width="440px">
       <el-form label-width="90px">
