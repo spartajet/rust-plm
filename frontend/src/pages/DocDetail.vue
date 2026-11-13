@@ -4,7 +4,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { extractApiError } from "../api/http";
 import { http } from "../api/index";
-import { bomExpand, downloadFile, getDoc, listVersions, whereUsedAsof, transition, type BomRow, type DocResponse, type VersionSnapshot, type WhereUsedAsofRow } from "../api/docs";
+import { bomExpand, downloadFile, getDoc, listVersions, whereUsedAsof, whereUsedLive, transition, type BomRow, type DocResponse, type VersionSnapshot, type WhereUsedAsofRow, type WhereUsedLiveRow } from "../api/docs";
 import { useAuthStore } from "../stores/auth";
 import { flowUi, stateLabel, stateTagType } from "../utils/flowUi";
 import type { LifecycleAction } from "../api/docs";
@@ -17,6 +17,7 @@ const doc = ref<DocResponse | null>(null);
 const bomRows = ref<BomRow[]>([]);
 const snapshots = ref<VersionSnapshot[]>([]);
 const wuRows = ref<WhereUsedAsofRow[]>([]);
+const wuLive = ref<WhereUsedLiveRow[]>([]);
 const loading = ref(false);
 const acting = ref(false);
 // BOM 版本切换（增量11）：0=live；N=发布快照 major=N as-of
@@ -48,6 +49,11 @@ async function load() {
     wuRows.value = await whereUsedAsof(http, objNo);
   } catch {
     wuRows.value = [];
+  }
+  try {
+    wuLive.value = await whereUsedLive(http, objNo);
+  } catch {
+    wuLive.value = [];
   }
   loading.value = false;
 }
@@ -180,8 +186,19 @@ function back() {
     </el-card>
 
     <el-card style="margin-top: 16px">
-      <template #header>被谁使用（发布快照反查）</template>
-      <el-table :data="wuRows" size="small" data-test="wu-table">
+      <template #header>被谁使用</template>
+      <el-divider content-position="left">当前被用（live）</el-divider>
+      <el-table :data="wuLive" size="small" data-test="wu-live-table">
+        <el-table-column label="用于 BOM" min-width="160">
+          <template #default="{ row }">{{ row.ancestor_no }}</template>
+        </el-table-column>
+        <el-table-column label="数量" width="90">
+          <template #default="{ row }">{{ row.qty_total }}</template>
+        </el-table-column>
+      </el-table>
+      <div v-if="wuLive.length === 0" style="color: #909399">当前未被任何 BOM 使用</div>
+      <el-divider content-position="left">历史发布快照（as-of）</el-divider>
+      <el-table :data="wuRows" size="small" data-test="wu-asof-table">
         <el-table-column label="用于 BOM" min-width="160">
           <template #default="{ row }">{{ row.parent_no }}</template>
         </el-table-column>

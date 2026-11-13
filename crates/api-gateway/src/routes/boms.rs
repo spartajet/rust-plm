@@ -207,14 +207,33 @@ pub async fn where_used(
             .collect::<Vec<_>>()
             .join("\n")
     } else {
-        // live（现状，字段名兼容不破坏既有消费）
+        // live（增量15 对称过滤：ancestor 越密级=整行丢弃，存在性隐藏；镜像 asof 模式）
+        // 字段兼容：保留 ancestor/qty_total，新增 ancestor_no（件号回填）
         let rows = st
             .bom
             .where_used(obj.object.id)
             .await
             .map_err(|e| ApiError::new(e, &tid.0))?;
+        let ids: Vec<uuid::Uuid> = rows.iter().map(|(a, _)| *a).collect();
+        let meta: std::collections::HashMap<uuid::Uuid, (String, i16)> = if ids.is_empty() {
+            Default::default()
+        } else {
+            let m: Vec<(uuid::Uuid, String, i16)> =
+                sqlx::query_as("SELECT id, obj_no, secret_level FROM cm_object WHERE id = ANY($1)")
+                    .bind(&ids)
+                    .fetch_all(&st.pool)
+                    .await
+                    .map_err(|e| {
+                        ApiError::new(core_model::DomainError::Db(e.to_string()), &tid.0)
+                    })?;
+            m.into_iter().map(|(id, no, sl)| (id, (no, sl))).collect()
+        };
         rows.iter()
-            .map(|(a, q)| json!({"ancestor": a, "qty_total": q}).to_string())
+            .filter(|(a, _)| meta.get(a).map(|(_, sl)| *sl <= user.max_secret_level) == Some(true))
+            .filter_map(|(a, q)| {
+                let ancestor_no = meta.get(a).map(|(no, _)| no.clone())?;
+                Some(json!({"ancestor": a, "ancestor_no": ancestor_no, "qty_total": q}).to_string())
+            })
             .collect::<Vec<_>>()
             .join("\n")
     };

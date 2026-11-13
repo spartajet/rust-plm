@@ -106,3 +106,14 @@ Final: fixed I2 裁定替代翻页钉——UserAdmin 搜索联动分页条（fil
 Final: fixed I3 wuTab 死变量删除 + asof 单视图裁定（live 反查 UUID 不透明语义弱，"被谁使用"卡仅 asof 视图）入账。
 Final: fixed M1 死三元清除/M3 utoipa asof=1 文案/M4 wuRows 独立 try 降级（load 重写：关键路径失败早退，非关键卡独立兜底）。
 Final: minor (deferred): live 反查仍返回越级祖先的不透明 ancestor UUID（不可经 API 解析——若求对称可后续给 live 分支同样过滤）；UserAdmin 搜索防抖 timer 未 unmount 清理；ids 收集重复项（ANY 下无害）。
+[增量15 live 反查对称过滤 追加台账]
+Final: Task1-2 完成——live 分支镜像 asof 模式（store 纯聚合→网关批量查 cm_object→ancestor 越密级整行丢弃→回填 ancestor_no，NDJSON 键 ancestor/qty_total 兼容保留）；前端"被谁使用"卡双视图（当前被用 live ancestor_no / 历史发布快照 asof）；UserAdmin 防抖 timer onUnmounted 清理（增量14 M4 关联债清偿）。
+Final: Ruling: live/asof 反查语义完全对称（同 ABAC 行级过滤+obj_no 回填）——终审 R2 建议落地；store 纯聚合边界不变。
+Final: 教训：python heredoc 生成含 `
+` 字面量的 TS 代码会真实换行破坏模板串（第二次）——含转义的代码片段一律 Edit 工具直写。
+[增量15 终审修复轮台账]
+Final: fixed C1 live 段死接线（终审实证：whereUsedLive 导入零调用——我重写 load() 时漏掉 live 取数，wuLive 恒空且无门禁可拦=RF3 钉缺失的直接后果）——补 load() 独立 try 取数；教训：声明交付的 UI 数据流必须走通到取数调用，vue-tsc 对未消费导入不报错（tsconfig 无 noUnusedLocals）。
+Final: fixed I1 Playwright 双视图钉补齐——C2 视角：wu-live-table 恰 1 行含父件号（ancestor_no 值级断言，真实依赖 C1 修复）+wu-asof-table 1 行（原断言 2 行是我误数发布事件——测试流程仅发布 v1，已修正并注释）。
+Final: fixed M1 e2e 注释密级 5→3 订正（3=恰为 admin 上限的边界语义，代码本就是 3）。
+Final: 对账更正（复审 A1）：修复声明「M2 timer 包装改普通 let」为假——代码未动；本轮真改（普通 let+onUnmounted 清理），原项 Nit 级已闭环。
+Final: minor (deferred): live NDJSON 断言为子串级（无 JSON 级解析，asof 分支有）——低风险备忘。

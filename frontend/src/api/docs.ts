@@ -133,6 +133,23 @@ export async function whereUsedAsof(http: AxiosInstance, objNo: string): Promise
     .map((l) => JSON.parse(l) as WhereUsedAsofRow);
 }
 
+/// live 反查行（增量15：对称过滤+ancestor_no 回填——与 asof 同构）
+export interface WhereUsedLiveRow {
+  ancestor: string;
+  ancestor_no: string;
+  qty_total: number;
+}
+
+export async function whereUsedLive(http: AxiosInstance, objNo: string): Promise<WhereUsedLiveRow[]> {
+  const res = await http.get(`/api/v1/boms/${objNo}/where-used`, { responseType: "text" });
+  const text = String(res.data ?? "");
+  if (!text.trim()) return [];
+  return text
+    .split("\n")
+    .filter((l) => l.trim())
+    .map((l) => JSON.parse(l) as WhereUsedLiveRow);
+}
+
 /// 版本历史快照行（增量8）
 export interface VersionSnapshot {
   major: number;

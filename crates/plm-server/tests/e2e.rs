@@ -1712,15 +1712,15 @@ async fn where_used_asof_via_api() {
         && r["parent_no"] == "DWG-WU-A"
         && r["qty_total"] == 9));
 
-    // 终审 C1：越密级 parent 不得经反查泄露（child 低密级合法，parent 抬密级 5）
+    // 终审 C1：越密级 parent 不得经反查泄露（child 低密级合法，parent 抬密级 3=恰为 admin 上限的边界）
     ctx.create_user_as_admin(&admin, "wued", "wued-pass-123", &["editor"], 0)
         .await;
     let ed = ctx.login_as("wued", "wued-pass-123").await;
-    sqlx::query("UPDATE cm_object SET secret_level = 5 WHERE obj_no = 'DWG-WU-A'")
+    sqlx::query("UPDATE cm_object SET secret_level = 3 WHERE obj_no = 'DWG-WU-A'")
         .execute(&ctx.pool)
         .await
         .unwrap();
-    // ed 对 parent（密级5）基础可见性=404（模型语义基线）
+    // ed 对 parent（密级3）基础可见性=404（模型语义基线；ed 上限 0）
     let (s, _) = ctx.get_authed("/api/v1/docs/DWG-WU-A", &ed).await;
     assert_eq!(s, 404, "前置基线：越密级 parent detail 404");
     // 反查（live 与 asof）不得泄露 parent 的存在性/件号
@@ -1746,5 +1746,37 @@ async fn where_used_asof_via_api() {
         .get_authed("/api/v1/boms/DWG-WU-C/where-used?asof=1", &ed)
         .await;
     assert_eq!(s, 404, "越密级 child asof 反查必须 404");
+
+    // ===== 增量15：live 对称过滤 + ancestor_no（终审 R2 镜像） =====
+    // 复位：child 回密级 0；parent 保持密级 3（越密级 ancestor，恰为 admin 上限的边界）
+    sqlx::query("UPDATE cm_object SET secret_level = 0 WHERE obj_no = 'DWG-WU-C'")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    // ed 视角 live 反查：ancestor(A, 密级3) 整行丢弃（对称过滤；ed 上限 0）
+    let (s, body) = ctx
+        .get_authed("/api/v1/boms/DWG-WU-C/where-used", &ed)
+        .await;
+    assert_eq!(s, 200, "child 合法，live 反查 200");
+    let text = String::from_utf8_lossy(&body);
+    assert!(
+        !text.contains(aid.as_str()),
+        "越密级 ancestor UUID 不得出现（对称过滤）: {text}"
+    );
+    assert!(
+        !text.contains("DWG-WU-A"),
+        "越密级 ancestor 件号不得出现: {text}"
+    );
+    // admin 视角：可见且带 ancestor_no 回填（件号而非仅 UUID）
+    let (s, body) = ctx
+        .get_authed("/api/v1/boms/DWG-WU-C/where-used", &admin)
+        .await;
+    assert_eq!(s, 200);
+    let text = String::from_utf8_lossy(&body);
+    assert!(text.contains(aid.as_str()), "admin 可见 ancestor UUID");
+    assert!(
+        text.contains("ancestor_no") && text.contains("DWG-WU-A"),
+        "ancestor_no 回填件号: {text}"
+    );
     ctx.cleanup().await;
 }

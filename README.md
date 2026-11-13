@@ -64,6 +64,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/jso
 curl -g -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/v1/boms/DWG-001/expand?mode=full'
 curl -g -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/v1/boms/<子对象id>/where-used'
 # 历史反查（增量14）：该件曾被用进哪些已发布 BOM（按发布事件分组，回填对象号）
+# live 反查对称语义（增量15）：越密级 ancestor 行级过滤 + ancestor_no 件号回填
 curl -g -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/v1/boms/<子对象id>/where-used?asof=1'
 
 # BOM 版本链（增量9）：发布即冻结子树快照；?major=N 按发布时点 as-of 展开
