@@ -19,6 +19,7 @@
 | 0011 | core-bom | 0011_bom_version_chain.sql | bom_release/bom_edge_snapshot（发布根键控，终审 C1） |
 | 0012 | core-im | 0012_im_card.sql | im_card_log（IM 卡片订阅日志） |
 | 0013 | core-events | 0013_outbox_topic_idx.sql | event_outbox topic 部分索引 + error 列 |
+| 0014 | core-model | 0014_cod_counter.sql | cod_counter 取号计数器（COD-02 并发无重号） |
 
 ## Outbox payload 契约（增量13 定版）
 

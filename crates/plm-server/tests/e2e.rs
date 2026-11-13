@@ -1837,7 +1837,13 @@ async fn cod_auto_code_and_preview() {
     assert_eq!(s, 201, "body={}", String::from_utf8_lossy(&rbody));
     let v: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
     let obj_no = v["object"]["obj_no"].as_str().unwrap().to_string();
-    assert!(obj_no.starts_with("DWG-"), "自动码={obj_no}");
+    // 终审 I1：精确到 seq——preview 不烧号（若回归烧号，此处会是 -0004）
+    let today = chrono::Utc::now().format("%Y%m%d").to_string();
+    assert_eq!(
+        obj_no,
+        format!("DWG-{today}-0001"),
+        "preview 后首个 create 必须仍为 0001"
+    );
 
     // 无规则类型（bomtest 未建——用 second 类型验证 400）：
     // mod_doc::DocService 只认 drawing；改走 mod 层…… 网关层用另一个类型不可行——

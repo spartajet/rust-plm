@@ -52,11 +52,7 @@ async fn setup(hint: &str, rule_json: &str) -> (PgPool, std::path::PathBuf, Stri
         .execute(&pool)
         .await
         .unwrap();
-    let registry = TypeRegistry::load(pool.clone()).await.unwrap();
-    let root = std::env::temp_dir().join(format!("cod-{db}"));
-    let hooks = Arc::new(HookRegistry::new());
-    let _store = PgObjectStore::new(pool.clone(), registry.clone(), hooks);
-    (pool, root, admin_url, db)
+    (pool, admin_url, db)
 }
 
 // ---------- 纯函数：规则渲染 ----------
@@ -89,13 +85,18 @@ fn rule_parse_from_config_json() {
     // 缺 cod_rule 键 → None（类型不参与自动赋码）
     assert!(CodRule::from_config(&serde_json::json!({"prefix":"X"})).is_none());
     assert!(CodRule::from_config(&serde_json::json!({})).is_none());
+    // 终审 I2：date_fmt 白名单——非法值按未配置处理（不 panic）
+    assert!(CodRule::from_config(
+        &serde_json::json!({"cod_rule":{"prefix":"X","date_fmt":"%Q","seq_digits":4}})
+    )
+    .is_none());
 }
 
 // ---------- 集成：计数器/并发/日期滚动/create 纵切 ----------
 
 #[tokio::test]
 async fn concurrent_next_code_no_duplicates() {
-    let (pool, _, admin_url, db) = setup(
+    let (pool, admin_url, db) = setup(
         "cc",
         r#"{"cod_rule":{"prefix":"DWG-","date_fmt":"yyyyMMdd","seq_digits":4}}"#,
     )
@@ -138,7 +139,7 @@ async fn concurrent_next_code_no_duplicates() {
 #[tokio::test]
 async fn date_key_rolls_over_next_day() {
     // Review Focus #2：日期段滚动——次日 key 重起 0001
-    let (pool, _, admin_url, db) = setup(
+    let (pool, admin_url, db) = setup(
         "roll",
         r#"{"cod_rule":{"prefix":"DWG-","date_fmt":"yyyyMMdd","seq_digits":4}}"#,
     )
@@ -176,7 +177,7 @@ async fn date_key_rolls_over_next_day() {
 #[tokio::test]
 async fn create_auto_codes_when_obj_no_empty() {
     // Review Focus #3：create 纵切——obj_no 空 → 按类型规则赋码
-    let (pool, _, admin_url, db) = setup(
+    let (pool, admin_url, db) = setup(
         "ac",
         r#"{"cod_rule":{"prefix":"DWG-","date_fmt":"yyyyMMdd","seq_digits":4}}"#,
     )
@@ -222,7 +223,7 @@ async fn create_auto_codes_when_obj_no_empty() {
 
 #[tokio::test]
 async fn create_auto_code_without_rule_is_error() {
-    let (pool, _, admin_url, db) = setup("nr", "{}").await;
+    let (pool, admin_url, db) = setup("nr", "{}").await;
     let registry = TypeRegistry::load(pool.clone()).await.unwrap();
     let hooks = std::sync::Arc::new(HookRegistry::new());
     let store = PgObjectStore::new(pool.clone(), registry.clone(), hooks);
@@ -247,5 +248,3 @@ async fn create_auto_code_without_rule_is_error() {
         .unwrap();
     admin.close().await;
 }
-
-use std::sync::Arc;

@@ -18,9 +18,16 @@ pub struct CodRule {
 impl CodRule {
     pub fn from_config(v: &serde_json::Value) -> Option<Self> {
         let obj = v.get("cod_rule")?;
+        let date_fmt = obj.get("date_fmt")?.as_str()?.to_string();
+        // 终审 I2：date_fmt 白名单——未知值透传 chrono 会在非法 specifier 上 panic（Display Err→to_string），
+        // 白名单外视为未配置（复用 400 文案路径）
+        if !matches!(date_fmt.as_str(), "yyyyMMdd" | "yyyyMM" | "none") {
+            tracing::warn!(date_fmt = %date_fmt, "cod_rule.date_fmt 非白名单值，按未配置处理");
+            return None;
+        }
         Some(Self {
             prefix: obj.get("prefix")?.as_str()?.to_string(),
-            date_fmt: obj.get("date_fmt")?.as_str()?.to_string(),
+            date_fmt,
             seq_digits: obj.get("seq_digits")?.as_i64()? as i32,
         })
     }
@@ -42,8 +49,7 @@ impl CodRule {
         } else {
             let fmt = match self.date_fmt.as_str() {
                 "yyyyMMdd" => "%Y%m%d",
-                "yyyyMM" => "%Y%m",
-                other => other, // 已是 chrono 格式则透传
+                _ => "%Y%m", // 白名单仅 yyyyMM；none 在上分支返回
             };
             Utc::now().format(fmt).to_string()
         }
