@@ -17,7 +17,6 @@ const doc = ref<DocResponse | null>(null);
 const bomRows = ref<BomRow[]>([]);
 const snapshots = ref<VersionSnapshot[]>([]);
 const wuRows = ref<WhereUsedAsofRow[]>([]);
-const wuTab = ref<"asof" | "none">("asof");
 const loading = ref(false);
 const acting = ref(false);
 // BOM 版本切换（增量11）：0=live；N=发布快照 major=N as-of
@@ -39,12 +38,18 @@ async function load() {
     doc.value = await getDoc(http, objNo);
     bomRows.value = await bomExpand(http, objNo, "onelevel", bomMajor.value || undefined);
     snapshots.value = (await listVersions(http, objNo)).snapshots;
-    wuRows.value = await whereUsedAsof(http, objNo);
   } catch (e) {
     ElMessage.error(extractApiError(e));
-  } finally {
     loading.value = false;
+    return;
   }
+  // 被谁使用=非关键卡：失败独立降级空态（终审 M4），不拖垮详情主视图
+  try {
+    wuRows.value = await whereUsedAsof(http, objNo);
+  } catch {
+    wuRows.value = [];
+  }
+  loading.value = false;
 }
 
 async function reloadBom() {
@@ -181,7 +186,7 @@ function back() {
           <template #default="{ row }">{{ row.parent_no }}</template>
         </el-table-column>
         <el-table-column label="发布版本" width="110">
-          <template #default="{ row }">v{{ row.release_root_no ? "" : "" }}{{ row.major }}.0</template>
+          <template #default="{ row }">v{{ row.major }}.0</template>
         </el-table-column>
         <el-table-column label="所属发布" min-width="160">
           <template #default="{ row }">{{ row.release_root_no }}</template>

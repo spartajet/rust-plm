@@ -138,7 +138,7 @@ pub struct WhereUsedQuery {
 /// 缺省=live（{ancestor, qty_total}）；`?asof=1`=发布快照历史（{release_root_no, major, parent_no, qty_total}）
 #[utoipa::path(
     get, path = "/api/v1/boms/{obj_no}/where-used",
-    params(("obj_no" = String, Path), ("asof" = String, Query, description = "as=1 → 发布快照历史反查")),
+    params(("obj_no" = String, Path), ("asof" = String, Query, description = "asof=1 → 发布快照历史反查")),
     responses((status = 200, description = "NDJSON 行流"))
 )]
 pub async fn where_used(
@@ -161,24 +161,48 @@ pub async fn where_used(
         ));
     }
     let ndjson = if q.asof.as_deref() == Some("1") {
-        // as-of：发布快照反查 + JOIN 回填对象号（root/parent）
-        let rows: Vec<(uuid::Uuid, i32, String, String, i64)> = sqlx::query_as(
-            "SELECT s.release_root, s.major, ru.obj_no, pu.obj_no, s.sum_qty \
-             FROM (SELECT release_root, major, parent, SUM(qty)::bigint AS sum_qty \
-                   FROM bom_edge_snapshot WHERE child = $1 \
-                   GROUP BY release_root, major, parent) s \
-             JOIN cm_object ru ON ru.id = s.release_root \
-             JOIN cm_object pu ON pu.id = s.parent \
-             ORDER BY s.release_root, s.major, s.parent",
-        )
-        .bind(obj.object.id)
-        .fetch_all(&st.pool)
-        .await
-        .map_err(|e| ApiError::new(core_model::DomainError::Db(e.to_string()), &tid.0))?;
-        rows.iter()
-            .map(|(_root, major, root_no, parent_no, qty)| {
-                json!({"release_root_no": root_no, "major": major, "parent_no": parent_no, "qty_total": qty})
-                    .to_string()
+        // as-of（增量14）：store 纯聚合 → 网关 ABAC 过滤（终审 C1：root/parent 是别的对象，
+        // 必须按查看者密级过滤——低密级用户不得经反查看到绝密父件的存在性/件号）→ 回填 obj_no
+        let agg = st
+            .bom
+            .where_used_asof(obj.object.id)
+            .await
+            .map_err(|e| ApiError::new(e, &tid.0))?;
+        let ids: Vec<uuid::Uuid> = agg
+            .iter()
+            .flat_map(|(root, _, parent, _)| [*root, *parent])
+            .collect();
+        // id → (obj_no, secret_level)
+        let meta: std::collections::HashMap<uuid::Uuid, (String, i16)> = if ids.is_empty() {
+            Default::default()
+        } else {
+            let rows: Vec<(uuid::Uuid, String, i16)> =
+                sqlx::query_as("SELECT id, obj_no, secret_level FROM cm_object WHERE id = ANY($1)")
+                    .bind(&ids)
+                    .fetch_all(&st.pool)
+                    .await
+                    .map_err(|e| {
+                        ApiError::new(core_model::DomainError::Db(e.to_string()), &tid.0)
+                    })?;
+            rows.into_iter()
+                .map(|(id, no, sl)| (id, (no, sl)))
+                .collect()
+        };
+        agg.iter()
+            // 行级丢弃越密级 root/parent（存在性隐藏——child 越级已在分支前 404）
+            .filter(|(root, _, parent, _)| {
+                let root_ok = meta.get(root).map(|(_, sl)| *sl <= user.max_secret_level) == Some(true);
+                let parent_ok =
+                    meta.get(parent).map(|(_, sl)| *sl <= user.max_secret_level) == Some(true);
+                root_ok && parent_ok
+            })
+            .filter_map(|(root, major, parent, qty)| {
+                let root_no = meta.get(root).map(|(no, _)| no.clone())?;
+                let parent_no = meta.get(parent).map(|(no, _)| no.clone())?;
+                Some(
+                    json!({"release_root_no": root_no, "major": major, "parent_no": parent_no, "qty_total": qty})
+                        .to_string(),
+                )
             })
             .collect::<Vec<_>>()
             .join("\n")

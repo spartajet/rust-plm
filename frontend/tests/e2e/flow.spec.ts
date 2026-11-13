@@ -226,6 +226,12 @@ test("user admin: create user and grant role", async ({ page }) => {
   // 授予 editor（点击 tag 切换）
   await page.click(`[data-test="role-${U}-editor"]`);
   await expect(page.locator(`[data-test="role-${U}-editor"].el-tag--success`)).toBeVisible({ timeout: 10_000 });
+
+  // 增量14 I2（裁定替代翻页钉——前端 size=50 翻页需 51 用户造数昂贵）：搜索联动分页条 total
+  await page.fill('[data-test="user-search"]', U);
+  await page.waitForTimeout(600); // 防抖 300ms + 加载
+  await expect(page.locator(".el-pagination__total")).toContainText("共 1 条", { timeout: 10_000 });
+  await expect(page.locator('[data-test="user-table"] .el-table__row')).toHaveCount(1);
 });
 
 // ==================== 增量12：M8 显隐 / URL 回写 ====================

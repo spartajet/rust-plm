@@ -1711,5 +1711,40 @@ async fn where_used_asof_via_api() {
         && r["major"] == 2
         && r["parent_no"] == "DWG-WU-A"
         && r["qty_total"] == 9));
+
+    // 终审 C1：越密级 parent 不得经反查泄露（child 低密级合法，parent 抬密级 5）
+    ctx.create_user_as_admin(&admin, "wued", "wued-pass-123", &["editor"], 0)
+        .await;
+    let ed = ctx.login_as("wued", "wued-pass-123").await;
+    sqlx::query("UPDATE cm_object SET secret_level = 5 WHERE obj_no = 'DWG-WU-A'")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    // ed 对 parent（密级5）基础可见性=404（模型语义基线）
+    let (s, _) = ctx.get_authed("/api/v1/docs/DWG-WU-A", &ed).await;
+    assert_eq!(s, 404, "前置基线：越密级 parent detail 404");
+    // 反查（live 与 asof）不得泄露 parent 的存在性/件号
+    let (s, body) = ctx
+        .get_authed("/api/v1/boms/DWG-WU-C/where-used?asof=1", &ed)
+        .await;
+    assert_eq!(s, 200, "child 合法，反查 200");
+    let text = String::from_utf8_lossy(&body);
+    assert!(
+        !text.contains("DWG-WU-A"),
+        "越密级 parent 件号不得出现: {text}"
+    );
+    // child 自身越级 → 404（I1：两形态钉）
+    sqlx::query("UPDATE cm_object SET secret_level = 5 WHERE obj_no = 'DWG-WU-C'")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (s, _) = ctx
+        .get_authed("/api/v1/boms/DWG-WU-C/where-used", &ed)
+        .await;
+    assert_eq!(s, 404, "越密级 child live 反查必须 404");
+    let (s, _) = ctx
+        .get_authed("/api/v1/boms/DWG-WU-C/where-used?asof=1", &ed)
+        .await;
+    assert_eq!(s, 404, "越密级 child asof 反查必须 404");
     ctx.cleanup().await;
 }
