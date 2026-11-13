@@ -117,3 +117,8 @@ Final: fixed I1 Playwright 双视图钉补齐——C2 视角：wu-live-table 恰
 Final: fixed M1 e2e 注释密级 5→3 订正（3=恰为 admin 上限的边界语义，代码本就是 3）。
 Final: 对账更正（复审 A1）：修复声明「M2 timer 包装改普通 let」为假——代码未动；本轮真改（普通 let+onUnmounted 清理），原项 Nit 级已闭环。
 Final: minor (deferred): live NDJSON 断言为子串级（无 JSON 级解析，asof 分支有）——低风险备忘。
+[增量16 COD 编码系统 追加台账]
+Final: Task1-3 完成——0014 cod_counter(原子 upsert 取号)+cod.rs(规则解析 yyyyMMdd→chrono 映射/渲染/预览不烧号)/create 空码自动赋码分支(无规则 400)/multipart auto_code 字段/cod-preview 端点/前端上传对话框自动编码开关(禁用图号输入)。后端 cod_it 6/6+e2e 25/25+Playwright 8/8。
+Final: Ruling: 规则存 cm_type.config.cod_rule（与 flow_tier 同模式，registry 热生效）——独立规则实体化（COD-06 审批管理）后置。
+Final: Ruling: 取号在 create 事务外（烧号窗口=SMB 可接受，记账）；e2e harness cod-preview 断言按 now 日（UTC/本地时区跨界敏感——断言用正则形状而非绝对日期的钉在前端，后端断言用 chrono now 对齐）。
+Final: minor (deferred): COD-01 属性映射码/校验码（依赖 PART 分类库）；COD-05 历史码映射导入；COD-06 规则变更审批留痕；取号同事务化（消除烧号窗口）。

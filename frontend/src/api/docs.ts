@@ -58,10 +58,11 @@ export async function getDoc(http: AxiosInstance, objNo: string): Promise<DocRes
 
 export async function uploadDoc(
   http: AxiosInstance,
-  form: { obj_no: string; attrs: Record<string, unknown>; file: File },
+  form: { obj_no: string; attrs: Record<string, unknown>; file: File; auto_code?: boolean },
 ): Promise<DocResponse> {
   const fd = new FormData();
   fd.set("obj_no", form.obj_no);
+  if (form.auto_code) fd.set("auto_code", "1");
   if (Object.keys(form.attrs).length) {
     fd.set("attrs", JSON.stringify(form.attrs));
   }

@@ -55,6 +55,11 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001
 curl -X POST http://localhost:8080/api/v1/im/actions -H 'Content-Type: application/json'   -H 'X-IM-Sign: <hex>' -d '{"obj_no":"DWG-001","action":"approve","user":"im-ding-1"}'
 # 卡片按钮→PLM 闭环需各平台企业应用回调（凭证联调后置）；机器人出站推送开箱即用
 
+# 自动编码（增量16，PRD COD）：类型配规则 → 上传 auto_code=1 空图号自动赋码
+# 规则存 cm_type.config.cod_rule（如 {"cod_rule":{"prefix":"DWG-","date_fmt":"yyyyMMdd","seq_digits":4}}，热生效）
+# 预览（不烧号）：GET /api/v1/meta/types/drawing/cod-preview?n=3
+curl -X POST http://localhost:8080/api/v1/docs -H "Authorization: Bearer $TOKEN"   -F 'obj_no=' -F 'auto_code=1' -F 'attrs={"name":"新图"}' -F 'file=@新图.dwg'
+
 # 列表（filter 等值过滤 / sort 排序 / page+size 分页）
 curl -g -H "Authorization: Bearer $TOKEN" \
   'http://localhost:8080/api/v1/docs?filter[material]=Q235&sort=-updated_at'
