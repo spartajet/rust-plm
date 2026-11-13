@@ -79,3 +79,10 @@ Final: Ruling: 角色→能力映射为前端常量（与 RBAC 种子 0005 一�
 Final: Ruling: 上传类型白名单外仅 WARN 不阻断——图纸长尾格式开放（.xyz 等可过），大小 200MB 硬限与后端一致。
 Final: Ruling: refresh 骨架期不吊销旧 token（文档化既有裁定）；前端本地清 session 即登出。
 Final: minor (deferred): Claims 不含 roles（角色变更后显隐需重登录刷新——15min access TTL 内可容忍）；e2e 里 el-select 交互需点击+option 两步（原生 select 不可用）。
+[增量12 终审修复轮台账] REQUEST_CHANGES: I1/M1-M5
+Final: fixed I1 refresh 单飞 Vitest 钉补齐（终审指认：adapter 注入口零消费者、声明不对账——增量8 I3 教训重演）——并发 401 共享一次换发/换发重放带新 token/onRefresh 放弃→跳登录/auth 路由 401 直接跳登录 四钉（mock adapter+可变 token 闭包模拟 index.ts 真实行为）。
+Final: fixed M1 onRefresh 末尾同步 store.setToken（store.token 与 localStorage 脱钩暗雷+注释误导清除）。
+Final: fixed M3 ROLES_KEY JSON.parse try/catch 兜底（存储损坏=白屏）。Fixed M5 裸 axios refresh 补 timeout 15s（后端挂起时单飞 Promise 永不落定无逃生）。
+Final: fixed 备忘 roles_of 静默吞 DB 错——fail-safe 保留但加 tracing::warn 留痕。
+Final: minor (deferred): M4 reject 按钮前端归 canApprove、后端在 docs_lc_write 组（前端比后端严=安全方向非对称）——后端把 reject 归组 approve 后置评估。
+Final: 教训（第二次重演警示）：新增测试注入口（adapter/钩子）必须在同一提交内带消费者测试，否则声明不对账。

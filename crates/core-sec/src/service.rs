@@ -485,13 +485,20 @@ impl SecService {
 
     /// 用户角色有序列表（增量12；零角色 → []）
     async fn roles_of(&self, username: &str) -> Vec<String> {
-        let rows: Vec<(String,)> = sqlx::query_as(
+        let rows: Vec<(String,)> = match sqlx::query_as(
             "SELECT role_code FROM sec_user_role WHERE username = $1 ORDER BY role_code",
         )
         .bind(username)
         .fetch_all(&self.pool)
         .await
-        .unwrap_or_default();
+        {
+            Ok(r) => r,
+            Err(e) => {
+                // fail-safe：查询失败按无角色处理（casbin 仍权威），但必须留下痕迹
+                tracing::warn!(username, error = %e, "roles 查询失败，按无角色处理");
+                Vec::new()
+            }
+        };
         rows.into_iter().map(|(r,)| r).collect()
     }
 }

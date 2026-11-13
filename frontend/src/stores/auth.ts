@@ -16,7 +16,14 @@ export const useAuthStore = defineStore("auth", {
   state: () => ({
     token: localStorage.getItem(TOKEN_KEY) ?? "",
     username: localStorage.getItem(USER_KEY) ?? "",
-    roles: JSON.parse(localStorage.getItem(ROLES_KEY) ?? "[]") as string[],
+    roles: (() => {
+      // 存储损坏兜底（终审 M3：JSON.parse 抛错=白屏）
+      try {
+        return JSON.parse(localStorage.getItem(ROLES_KEY) ?? "[]") as string[];
+      } catch {
+        return [];
+      }
+    })(),
   }),
   getters: {
     isAuthenticated: (s) => s.token.length > 0,

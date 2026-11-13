@@ -111,3 +111,99 @@ describe("stateTagType（终审 R1 回归钉）", () => {
     expect(stateTagType("x")).toBe("danger");
   });
 });
+
+// ==================== 增量12 RF2：refresh 单飞（终审 I1 补钉） ====================
+import { createHttp } from "../src/api/http";
+
+type Cfg = { url?: string; headers: Record<string, string>; _retry?: boolean };
+
+/// 假 adapter：按脚本返回状态码，记录每次请求的 authorization
+function mockAdapter(script: Map<string, number[]>, seen: { auth: string[]; urls: string[] }) {
+  return async (rawCfg: unknown): Promise<never> => {
+    const c = rawCfg as unknown as Cfg;
+    if (c.headers && typeof (c.headers as Record<string, unknown>).set !== "function") {
+      (c.headers as Record<string, unknown>).set = function (k: string, v: string) {
+        (this as Record<string, unknown>)[k] = v;
+      };
+    }
+    const url = c.url ?? "";
+    seen.urls.push(url);
+    seen.auth.push((c.headers as Record<string, string>)?.["authorization"] ?? "");
+    const queue = script.get(url.split("?")[0]) ?? [];
+    const status = queue.shift() ?? 200;
+    if (status >= 400) {
+      // 拦截器走 reject 路径所需错误形态
+      const e = new Error(`http ${status}`) as Error & { response?: unknown; config?: unknown };
+      e.response = { status };
+      e.config = rawCfg;
+      throw e;
+    }
+    return { status, data: { ok: 1 }, statusText: "", headers: {}, config: rawCfg } as never;
+  };
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+it("refresh 单飞：并发 401 共享一次换发，重放带新 token", async () => {
+  const script = new Map<string, number[]>([["/api/v1/things", [401, 401, 200]]]);
+  const seen = { auth: [] as string[], urls: [] as string[] };
+  let refreshCalls = 0;
+  // 可变 token 闭包——模拟 index.ts 真实行为（onRefresh 更新 localStorage，tokenGetter 读回）
+  let current = "old-token";
+  const http = createHttp(() => current, {
+    adapter: mockAdapter(script, seen),
+    onRefresh: async () => {
+      refreshCalls += 1;
+      await sleep(10); // 模拟网络延迟，制造并发窗口
+      current = "new-token";
+      return current;
+    },
+  });
+  const [a, b] = await Promise.all([
+    http.get("/api/v1/things").then((r) => r.status).catch(() => 0),
+    http.get("/api/v1/things").then((r) => r.status).catch(() => 0),
+  ]);
+  expect(refreshCalls).toBe(1);
+  expect([a, b]).toEqual([200, 200]);
+  // 重放请求带新 token（最后一次 thing 请求的 authorization）
+  const thingAuth = seen.auth.filter((_, i) => seen.urls[i].includes("/api/v1/things"));
+  expect(thingAuth.some((h) => h.includes("new-token"))).toBe(true);
+  expect(thingAuth.some((h) => h.includes("old-token"))).toBe(true);
+});
+
+it("refresh 失败 → onUnauthorized 被调", async () => {
+  const script = new Map<string, number[]>([["/api/v1/things", [401]]]);
+  const seen = { auth: [] as string[], urls: [] as string[] };
+  let unauthorized = 0;
+  const http = createHttp(() => "old-token", {
+    adapter: mockAdapter(script, seen),
+    onRefresh: async () => null,
+  });
+  const { setUnauthorizedHandler } = await import("../src/api/http");
+  setUnauthorizedHandler(() => {
+    unauthorized += 1;
+  });
+  await http.get("/api/v1/things").catch(() => 0);
+  expect(unauthorized).toBe(1);
+});
+
+it("/auth/ 路由 401 直接跳登录（不触发 refresh）", async () => {
+  const script = new Map<string, number[]>([["/api/v1/auth/login", [401]]]);
+  const seen = { auth: [] as string[], urls: [] as string[] };
+  let refreshCalls = 0;
+  let unauthorized = 0;
+  const http = createHttp(() => "", {
+    adapter: mockAdapter(script, seen),
+    onRefresh: async () => {
+      refreshCalls += 1;
+      return "new-token";
+    },
+  });
+  const { setUnauthorizedHandler } = await import("../src/api/http");
+  setUnauthorizedHandler(() => {
+    unauthorized += 1;
+  });
+  await http.post("/api/v1/auth/login", {}).catch(() => 0);
+  expect(refreshCalls).toBe(0);
+  expect(unauthorized).toBe(1);
+});
