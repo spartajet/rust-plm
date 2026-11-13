@@ -95,3 +95,7 @@ Final: fixed 附带发现：plm-server e2e harness 一直缺 core-events 迁移(
 Final: minor (deferred): where-used 历史化/BOM 边版本化深化；IM 相关三债(凭证联调/卡内按钮/重放防御)按用户指令暂缓。
 Final: 对账更正（复审 R1）：I1/I2 修复说明曾记「https://.. 等 false-accept 关闭」——实证为假：host_ok("https://..")=true（".." 非空含点，按字面规则通过）；同类残角 https://x?a=1.b（query 未剥离）。这些残角在**已诚实声明的规则内**（host 段非空含点=400 文案语义）、sec:manage 门控、失败可见（DNS 失败→退避→死信落 error 闭环）——代码不改，但规则内接受角如实记档，不得记「已关闭」（增量8 I3 对账原则）。
 Final: minor (deferred): 极端分页 e2e 钉（page=4294967295&size=200 → 200/空集，防 M1 回退）；im_it.rs 文件名与 outbox 索引钉名不符实（外观）。
+[增量14 where-used 历史化 追加台账]
+Final: Task1-3 完成——core-bom where_used_asof(bom_edge_snapshot 按 release_root/major/parent 分组 SUM)/网关 ?asof=1(JOIN cm_object 回填 release_root_no/parent_no,live 字段兼容)/前端详情"被谁使用"卡/list_users 分页(page/size clamp 200 信封,UserAdmin 分页条)/webhook dead 极端分页钉(u32::MAX, M1 防回退)。后端138+前端24+e2e24+Playwright 7/7。
+Final: Ruling: as-of 反查语义=直接父件粒度（parent 列为直接父，release_root/major 为发布上下文）——历史事实源=不可变快照表（增量9 裁定复用），零新迁移。
+Final: minor (deferred): UserAdmin 搜索防抖 timer 未在 unmount 清理（外观）；where-used asof 前端卡未做分页（快照反查量级小）。
