@@ -204,6 +204,17 @@ test("bom version switch: live vs major=1 snapshot on detail page", async ({ pag
   await page.click('[data-test="bom-ver-select"]');
   await page.click("text=v1.0 发布快照");
   await expect(bomRows).toHaveCount(2);
+
+  // 增量15 终审 I1：被谁使用卡双视图（以 C2 视角——被 P 的 live 与两份发布快照使用）
+  await page.goto(`/docs/${P}-C2`);
+  await expect(page.locator('[data-test="wu-live-table"]')).toBeVisible();
+  await expect(page.locator('[data-test="wu-live-table"] .el-table__row')).toHaveCount(1);
+  await expect(page.locator('[data-test="wu-live-table"]').getByText(P)).toBeVisible();
+  await expect(page.locator('[data-test="wu-asof-table"]')).toBeVisible();
+  // 仅 v1 已发布（测试流程未发布 v2）→ 历史反查恰 1 行
+  await expect(page.locator('[data-test="wu-asof-table"] .el-table__row')).toHaveCount(1, {
+    timeout: 10_000,
+  });
 });
 
 test("user admin: create user and grant role", async ({ page }) => {

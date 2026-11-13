@@ -50,6 +50,11 @@ async function load() {
   } catch {
     wuRows.value = [];
   }
+  try {
+    wuLive.value = await whereUsedLive(http, objNo);
+  } catch {
+    wuLive.value = [];
+  }
   loading.value = false;
 }
 
