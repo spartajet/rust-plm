@@ -93,3 +93,5 @@ Final: Ruling: REVOKE 防篡改=文档化不执行(单连接部署模型下无�
 Final: Ruling: reject 非对称(前端 approve 显隐/后端 write 组)=安全方向不改,裁定入 migrations.md。
 Final: fixed 附带发现：plm-server e2e harness 一直缺 core-events 迁移(webhook CRUD 全线 500,此前测试止于 403 未触 SQL 未暴露)——补齐。
 Final: minor (deferred): where-used 历史化/BOM 边版本化深化；IM 相关三债(凭证联调/卡内按钮/重放防御)按用户指令暂缓。
+Final: 对账更正（复审 R1）：I1/I2 修复说明曾记「https://.. 等 false-accept 关闭」——实证为假：host_ok("https://..")=true（".." 非空含点，按字面规则通过）；同类残角 https://x?a=1.b（query 未剥离）。这些残角在**已诚实声明的规则内**（host 段非空含点=400 文案语义）、sec:manage 门控、失败可见（DNS 失败→退避→死信落 error 闭环）——代码不改，但规则内接受角如实记档，不得记「已关闭」（增量8 I3 对账原则）。
+Final: minor (deferred): 极端分页 e2e 钉（page=4294967295&size=200 → 200/空集，防 M1 回退）；im_it.rs 文件名与 outbox 索引钉名不符实（外观）。
