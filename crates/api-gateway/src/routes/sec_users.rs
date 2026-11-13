@@ -4,6 +4,7 @@ use crate::error::ApiError;
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use axum::extract::Query;
 use axum::Extension;
 use axum::Json;
 use serde::{Deserialize, Serialize};
@@ -139,18 +140,27 @@ pub async fn list_roles(
     ))
 }
 
+/// 用户列表查询参数（增量13：username 模糊过滤）
+#[derive(Deserialize)]
+pub struct UsersQuery {
+    /// username 模糊过滤（增量13）
+    search: Option<String>,
+}
+
 /// GET /api/v1/sec/users（sec:manage）——用户列表（角色聚合；增量11 用户管理面）
 #[utoipa::path(
     get, path = "/api/v1/sec/users",
+    params(("search" = String, Query, description = "username 模糊过滤")),
     responses((status = 200, description = "用户数组（username/max_secret_level/roles/created_at）"), (status = 403))
 )]
 pub async fn list_users(
     State(st): State<AppState>,
     Extension(tid): Extension<crate::error::TraceId>,
+    Query(q): Query<UsersQuery>,
 ) -> Result<Json<Vec<core_sec::SecUserSummary>>, ApiError> {
     let users = st
         .sec
-        .list_users()
+        .list_users(q.search.as_deref())
         .await
         .map_err(|e| ApiError::new(e, &tid.0))?;
     Ok(Json(users))

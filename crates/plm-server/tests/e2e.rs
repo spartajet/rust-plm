@@ -1543,3 +1543,31 @@ async fn dead_events_pagination_and_strong_validation() {
     assert_eq!(v["items"].as_array().unwrap().len(), 0);
     ctx.cleanup().await;
 }
+
+// ==================== 增量13：list_users 搜索（Review Focus #5） ====================
+
+#[tokio::test]
+async fn sec_users_search_fuzzy_filter() {
+    let ctx = TestCtx::setup("srch", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "zhangsan", "zs-pass-123", &["editor"], 0)
+        .await;
+    ctx.create_user_as_admin(&admin, "zhangsi", "zs2-pass-123", &["viewer"], 0)
+        .await;
+    ctx.create_user_as_admin(&admin, "lisi", "ls-pass-123", &["viewer"], 0)
+        .await;
+
+    // 前缀模糊命中 zhang*
+    let (s, body) = ctx.get_authed("/api/v1/sec/users?search=zhang", &admin).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let names: Vec<&str> = v.as_array().unwrap().iter().map(|u| u["username"].as_str().unwrap()).collect();
+    assert_eq!(names.len(), 2, "zhang 前缀须命中 2 人: {names:?}");
+    assert!(names.contains(&"zhangsan") && names.contains(&"zhangsi"));
+    // 未命中 → 空
+    let (s, body) = ctx.get_authed("/api/v1/sec/users?search=nonexistent", &admin).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v.as_array().unwrap().len(), 0);
+    ctx.cleanup().await;
+}
