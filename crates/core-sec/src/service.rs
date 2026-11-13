@@ -18,6 +18,8 @@ pub struct TokenPair {
     pub access_token: String,
     pub refresh_token: String,
     pub expires_in: i64,
+    /// 用户角色（增量12：前端显隐能力映射；零角色用户为 []）
+    pub roles: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -443,7 +445,7 @@ impl SecService {
             .verify_password(password.as_bytes(), &parsed)
             .map_err(|_| bad())?;
 
-        let pair = self.issue(&r.id, &r.username);
+        let pair = self.issue(&r.id, &r.username).await;
         let _ = sqlx::query("UPDATE sec_user SET last_login_at = now() WHERE id = $1")
             .bind(r.id)
             .execute(&self.pool)
@@ -462,12 +464,12 @@ impl SecService {
         .fetch_optional(&self.pool)
         .await?;
         match enabled {
-            Some(true) => Ok(self.issue(&c.sub, &c.username)),
+            Some(true) => Ok(self.issue(&c.sub, &c.username).await),
             _ => Err(DomainError::SecUnauthorized),
         }
     }
 
-    fn issue(&self, sub: &uuid::Uuid, username: &str) -> TokenPair {
+    async fn issue(&self, sub: &uuid::Uuid, username: &str) -> TokenPair {
         let t = now();
         TokenPair {
             access_token: self
@@ -477,7 +479,20 @@ impl SecService {
                 .sign_claims(&Claims::refresh(*sub, username, t))
                 .expect("refresh 签发不应失败"),
             expires_in: ACCESS_TTL_SECS,
+            roles: self.roles_of(username).await,
         }
+    }
+
+    /// 用户角色有序列表（增量12；零角色 → []）
+    async fn roles_of(&self, username: &str) -> Vec<String> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT role_code FROM sec_user_role WHERE username = $1 ORDER BY role_code",
+        )
+        .bind(username)
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_default();
+        rows.into_iter().map(|(r,)| r).collect()
     }
 }
 

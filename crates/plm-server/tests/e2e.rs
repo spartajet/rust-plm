@@ -1381,3 +1381,54 @@ async fn sec_users_list_requires_manage_and_aggregates_roles() {
     }
     ctx.cleanup().await;
 }
+
+// ==================== 增量12：login/refresh 响应附 roles（Review Focus #1） ====================
+
+#[tokio::test]
+async fn login_and_refresh_responses_carry_roles() {
+    let ctx = TestCtx::setup("roles", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "roleed", "roleed-pass-123", &["editor"], 0)
+        .await;
+    // 双角色（editor+viewer 聚合有序）
+    ctx.grant_role_as_admin(&admin, "roleed", "viewer").await;
+
+    let login = |u: &str, p: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/login")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(format!(
+                r#"{{"username":"{u}","password":"{p}"}}"#
+            )))
+            .unwrap()
+    };
+    let (s, body, _) = send(&ctx.app, login("roleed", "roleed-pass-123")).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let roles: Vec<&str> = v["roles"].as_array().unwrap().iter().map(|r| r.as_str().unwrap()).collect();
+    assert_eq!(roles, vec!["editor", "viewer"], "login roles 聚合有序");
+
+    // admin 单角色
+    let (_, body, _) = send(&ctx.app, login("admin", common::TEST_ADMIN_PASSWORD)).await;
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let roles: Vec<&str> = v["roles"].as_array().unwrap().iter().map(|r| r.as_str().unwrap()).collect();
+    assert_eq!(roles, vec!["admin"]);
+
+    // refresh 轮换后 roles 仍在
+    let refresh_token = v["refresh_token"].as_str().unwrap().to_string();
+    let rr = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/refresh")
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(format!(
+            r#"{{"refresh_token":"{refresh_token}"}}"#
+        )))
+        .unwrap();
+    let (s, body, _) = send(&ctx.app, rr).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let roles: Vec<&str> = v["roles"].as_array().unwrap().iter().map(|r| r.as_str().unwrap()).collect();
+    assert_eq!(roles, vec!["admin"], "refresh 响应必须仍携带 roles");
+    ctx.cleanup().await;
+}
