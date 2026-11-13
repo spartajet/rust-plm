@@ -23,7 +23,7 @@ fn unique_db(hint: &str) -> String {
     )
 }
 
-async fn setup(hint: &str, rule_json: &str) -> (PgPool, std::path::PathBuf, String, String) {
+async fn setup(hint: &str, rule_json: &str) -> (PgPool, String, String) {
     let admin_url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
     let db = unique_db(hint);
     let admin = PgPoolOptions::new()
