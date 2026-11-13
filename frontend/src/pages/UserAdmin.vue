@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 用户管理（增量11）：建号 / 授权 / 回收（后端 sec:manage 门控；无权限者 403 提示）
 import { ElMessage } from "element-plus";
-import { onMounted, ref, watch } from "vue";
+import { onMounted, onUnmounted, ref, watch } from "vue";
 import { extractApiError } from "../api/http";
 import { http } from "../api/index";
 import { createUser, grantRole, listRoles, listUsers, revokeRole, type SecRole, type SecUser } from "../api/sec";
@@ -12,16 +12,18 @@ const total = ref(0);
 const page = ref(1);
 const size = ref(50);
 const loading = ref(false);
+const searchTimer = { id: null as ReturnType<typeof setTimeout> | null };
 const search = ref("");
-let searchTimer: ReturnType<typeof setTimeout> | null = null;
-
-// 搜索防抖 300ms（增量13）
+// 搜索防抖 300ms（增量13）；unmount 清理（增量15）
 watch(search, () => {
-  if (searchTimer) clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => {
+  if (searchTimer.id) clearTimeout(searchTimer.id);
+  searchTimer.id = setTimeout(() => {
     page.value = 1;
     load();
   }, 300);
+});
+onUnmounted(() => {
+  if (searchTimer.id) clearTimeout(searchTimer.id);
 });
 
 const dlgVisible = ref(false);
