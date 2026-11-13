@@ -205,7 +205,7 @@ test("bom version switch: live vs major=1 snapshot on detail page", async ({ pag
   await page.click("text=v1.0 发布快照");
   await expect(bomRows).toHaveCount(2);
 
-  // 增量15 终审 I1：被谁使用卡双视图（以 C2 视角——被 P 的 live 与两份发布快照使用）
+  // 增量15 终审 I1：被谁使用卡双视图（以 C2 视角——被 P 的 live 与已发布快照使用）
   await page.goto(`/docs/${P}-C2`);
   await expect(page.locator('[data-test="wu-live-table"]')).toBeVisible();
   await expect(page.locator('[data-test="wu-live-table"] .el-table__row')).toHaveCount(1);

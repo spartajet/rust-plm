@@ -12,18 +12,18 @@ const total = ref(0);
 const page = ref(1);
 const size = ref(50);
 const loading = ref(false);
-const searchTimer = { id: null as ReturnType<typeof setTimeout> | null };
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
 const search = ref("");
 // 搜索防抖 300ms（增量13）；unmount 清理（增量15）
 watch(search, () => {
-  if (searchTimer.id) clearTimeout(searchTimer.id);
-  searchTimer.id = setTimeout(() => {
+  if (searchTimer) clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
     page.value = 1;
     load();
   }, 300);
 });
 onUnmounted(() => {
-  if (searchTimer.id) clearTimeout(searchTimer.id);
+  if (searchTimer) clearTimeout(searchTimer);
 });
 
 const dlgVisible = ref(false);
