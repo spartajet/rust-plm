@@ -227,3 +227,64 @@ test("user admin: create user and grant role", async ({ page }) => {
   await page.click(`[data-test="role-${U}-editor"]`);
   await expect(page.locator(`[data-test="role-${U}-editor"].el-tag--success`)).toBeVisible({ timeout: 10_000 });
 });
+
+// ==================== 增量12：M8 显隐 / URL 回写 ====================
+
+test("role visibility: editor sees upload, viewer does not; neither sees admin menu", async ({ page }) => {
+  await page.goto("/login");
+  await page.fill('[data-test="username"]', "admin");
+  await page.fill('[data-test="password"]', ADMIN_PW);
+  await page.click('[data-test="login-btn"]');
+  await page.waitForURL("/");
+  // admin 造号：editor0（editor）+ pureviewer（viewer）
+  await page.evaluate(async () => {
+    const t = localStorage.getItem("rustplm_token") ?? "";
+    const api = (window as unknown as { E2E_API: string }).E2E_API;
+    const mk = (username: string, roles: string[]) =>
+      fetch(`${api}/api/v1/sec/users`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${t}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password: "ux-pass-123", roles, max_secret_level: 3 }),
+      });
+    await mk("uxeditor", ["editor"]);
+    await mk("uxviewer", ["viewer"]);
+  });
+
+  // editor：有上传按钮、无用户管理菜单
+  await page.goto("/login");
+  await page.fill('[data-test="username"]', "uxeditor");
+  await page.fill('[data-test="password"]', "ux-pass-123");
+  await page.click('[data-test="login-btn"]');
+  await page.waitForURL("/");
+  await page.goto("/docs");
+  await expect(page.locator('[data-test="open-upload"]')).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "用户管理" })).toHaveCount(0);
+
+  // viewer：无上传按钮、无用户管理菜单、列表仍可读（M8 显隐；后端 casbin 仍权威）
+  await page.goto("/login");
+  await page.fill('[data-test="username"]', "uxviewer");
+  await page.fill('[data-test="password"]', "ux-pass-123");
+  await page.click('[data-test="login-btn"]');
+  await page.waitForURL("/");
+  await page.goto("/docs");
+  await expect(page.locator('[data-test="open-upload"]')).toHaveCount(0);
+  await expect(page.getByRole("menuitem", { name: "用户管理" })).toHaveCount(0);
+  await expect(page.locator(".el-pagination__total")).toHaveText(/\d+/);
+});
+
+test("state filter writes back to URL and survives reload", async ({ page }) => {
+  await page.goto("/login");
+  await page.fill('[data-test="username"]', "admin");
+  await page.fill('[data-test="password"]', ADMIN_PW);
+  await page.click('[data-test="login-btn"]');
+  await page.waitForURL("/");
+  await page.goto("/docs");
+  // el-select 非原生 select：点开下拉后选项点击
+  await page.click('[data-test="state-filter"]');
+  await page.getByRole("option", { name: "工作中" }).click();
+  await page.waitForURL("**state=working**");
+  // 刷新后筛选保持（增量11 M2 清偿钉）
+  await page.reload();
+  await page.waitForURL("**state=working**");
+  await expect(page.locator(".el-pagination__total")).toHaveText(/\d+/);
+});
