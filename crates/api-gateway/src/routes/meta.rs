@@ -2,7 +2,7 @@
 
 use crate::error::ApiError;
 use crate::state::AppState;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Extension;
 use axum::Json;
@@ -86,4 +86,39 @@ pub async fn set_flow_tier(
     .await
     .map_err(|e| ApiError::new(core_model::DomainError::Db(e.to_string()), &tid.0))?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct CodPreviewQuery {
+    /// 预览数量（缺省 3，上限 20）
+    n: Option<usize>,
+}
+
+/// GET /api/v1/meta/types/{code}/cod-preview?n=3 — 编码预览（不烧号；增量16 PRD COD-01）
+#[utoipa::path(
+    get, path = "/api/v1/meta/types/{code}/cod-preview",
+    params(("code" = String, Path), ("n" = usize, Query, description = "预览数量，缺省 3")),
+    responses((status = 200, description = "{codes: [...]}"), (status = 404))
+)]
+pub async fn cod_preview(
+    State(st): State<AppState>,
+    Extension(tid): Extension<crate::error::TraceId>,
+    Path(code): Path<String>,
+    Query(q): Query<CodPreviewQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let td = st
+        .registry
+        .type_def(&code)
+        .map_err(|e| ApiError::new(e, &tid.0))?;
+    let rule = core_model::cod::CodRule::from_config(&td.config).ok_or_else(|| {
+        ApiError::new(
+            core_model::DomainError::BadRequest(format!("类型 {code} 未配置编码规则")),
+            &tid.0,
+        )
+    })?;
+    let n = q.n.unwrap_or(3).clamp(1, 20);
+    let codes = core_model::cod::preview(&st.pool, &code, &rule, n)
+        .await
+        .map_err(|e| ApiError::new(e, &tid.0))?;
+    Ok(Json(serde_json::json!({ "codes": codes })))
 }

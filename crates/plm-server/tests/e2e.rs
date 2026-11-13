@@ -1780,3 +1780,100 @@ async fn where_used_asof_via_api() {
     );
     ctx.cleanup().await;
 }
+
+// ==================== 增量16：COD 自动赋码（Review Focus #3/#4/#6） ====================
+
+#[tokio::test]
+async fn cod_auto_code_and_preview() {
+    let ctx = TestCtx::setup("cod", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    // drawing 类型配 cod_rule（registry 热生效——先创建类型时未配）
+    sqlx::query(
+        "UPDATE cm_type SET config = config || '{\"cod_rule\":{\"prefix\":\"DWG-\",\"date_fmt\":\"yyyyMMdd\",\"seq_digits\":4}}'::jsonb WHERE code='drawing'",
+    )
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    ctx.registry.reload_if_changed().await.unwrap();
+
+    // preview 不烧号：3 次预览后首个 create 仍为 0001（Review Focus #4）
+    let (s, body) = ctx
+        .get_authed("/api/v1/meta/types/drawing/cod-preview?n=3", &admin)
+        .await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let codes = v["codes"].as_array().unwrap();
+    assert_eq!(codes.len(), 3);
+    let today = chrono::Utc::now().format("%Y%m%d").to_string();
+    assert_eq!(
+        codes[0],
+        format!("DWG-{today}-0001"),
+        "preview 不烧号：首个 create 仍应为 0001"
+    );
+
+    // multipart auto_code=1（obj_no 空）
+    let (ct, body) = common::multipart_body(
+        "XyZabc",
+        &[
+            ("obj_no", None, b"".to_vec()),
+            (
+                "attrs",
+                None,
+                format!(r#"{{"name":"自动码件"}}"#).into_bytes(),
+            ),
+            ("file", Some("c.dwg"), FILE.to_vec()),
+            ("auto_code", None, b"1".to_vec()),
+        ],
+    );
+    let req = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/v1/docs")
+        .header("content-type", ct)
+        .header("content-length", body.len())
+        .header("authorization", format!("Bearer {admin}"))
+        .body(axum::body::Body::from(body))
+        .unwrap();
+    let (s, rbody, _) = send(&ctx.app, req).await;
+    assert_eq!(s, 201, "body={}", String::from_utf8_lossy(&rbody));
+    let v: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
+    let obj_no = v["object"]["obj_no"].as_str().unwrap().to_string();
+    assert!(obj_no.starts_with("DWG-"), "自动码={obj_no}");
+
+    // 无规则类型（bomtest 未建——用 second 类型验证 400）：
+    // mod_doc::DocService 只认 drawing；改走 mod 层…… 网关层用另一个类型不可行——
+    // 这里钉"registry 热生效"：移除 cod_rule → auto_code 再 create → 400
+    sqlx::query("UPDATE cm_type SET config = config - 'cod_rule' WHERE code='drawing'")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    ctx.registry.reload_if_changed().await.unwrap();
+    let (ct2, body2) = common::multipart_body(
+        "XyZdef",
+        &[
+            ("obj_no", None, b"".to_vec()),
+            (
+                "attrs",
+                None,
+                format!(r#"{{"name":"无规则件"}}"#).into_bytes(),
+            ),
+            ("file", Some("c.dwg"), FILE.to_vec()),
+            ("auto_code", None, b"1".to_vec()),
+        ],
+    );
+    let req2 = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/v1/docs")
+        .header("content-type", ct2)
+        .header("content-length", body2.len())
+        .header("authorization", format!("Bearer {admin}"))
+        .body(axum::body::Body::from(body2))
+        .unwrap();
+    let (s, rbody2, _) = send(&ctx.app, req2).await;
+    assert_eq!(
+        s,
+        400,
+        "无规则 auto_code 必须 400: {}",
+        String::from_utf8_lossy(&rbody2)
+    );
+    ctx.cleanup().await;
+}
