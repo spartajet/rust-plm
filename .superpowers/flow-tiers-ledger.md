@@ -86,3 +86,4 @@ Final: fixed M3 ROLES_KEY JSON.parse try/catch 兜底（存储损坏=白屏）�
 Final: fixed 备忘 roles_of 静默吞 DB 错——fail-safe 保留但加 tracing::warn 留痕。
 Final: minor (deferred): M4 reject 按钮前端归 canApprove、后端在 docs_lc_write 组（前端比后端严=安全方向非对称）——后端把 reject 归组 approve 后置评估。
 Final: 教训（第二次重演警示）：新增测试注入口（adapter/钩子）必须在同一提交内带消费者测试，否则声明不对账。
+Final: minor (deferred): URL 回写钉「刷新保持」半边弱（reload 后 waitForURL 恒真+/d+ 弱匹配，删重播种行仍绿）——后续增量补强（reload 后断言 select 显示值或 filtered total）【终审复审 R1】；_retry 重放再 401 无直接钉（奇异路径，记录）；setToken 注释过时（纯文案）。
