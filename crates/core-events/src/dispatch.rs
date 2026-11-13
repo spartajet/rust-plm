@@ -69,6 +69,7 @@ impl EventDispatcher {
                 .map_err(|e| core_model::DomainError::Internal(e.to_string()))?;
 
             let mut all_ok = true;
+            let mut last_error: Option<String> = None;
             for sub in &subs {
                 let mut mac = HmacSha256::new_from_slice(sub.secret.as_bytes())
                     .map_err(|e| core_model::DomainError::Internal(e.to_string()))?;
@@ -88,10 +89,12 @@ impl EventDispatcher {
                 {
                     Ok(r) if r.status().is_success() => true,
                     Ok(r) => {
+                        last_error = Some(format!("HTTP {}", r.status()));
                         warn!(topic = %topic, status = %r.status(), "webhook 投递被拒");
                         false
                     }
                     Err(e) => {
+                        last_error = Some(e.to_string());
                         warn!(topic = %topic, error = %e, "webhook 投递失败");
                         false
                     }
@@ -128,8 +131,10 @@ impl EventDispatcher {
                 .await
                 .map_err(|e| core_model::DomainError::Db(e.to_string()))?;
                 if attempts >= MAX_ATTEMPTS {
-                    sqlx::query("UPDATE event_outbox SET status = 2 WHERE id = $1 AND status = 0")
+                    // 增量13：死信落最后错误摘要（排查需要——此前死信无错误痕迹）
+                    sqlx::query("UPDATE event_outbox SET status = 2, error = $2 WHERE id = $1 AND status = 0")
                         .bind(id)
+                        .bind(last_error.as_deref().unwrap_or("unknown"))
                         .execute(&self.pool)
                         .await?;
                     warn!(topic = %topic, id = id, "webhook 重试超限：事件进入死信");

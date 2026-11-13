@@ -1447,3 +1447,99 @@ async fn login_and_refresh_responses_carry_roles() {
     assert_eq!(roles, vec!["admin"], "refresh 响应必须仍携带 roles");
     ctx.cleanup().await;
 }
+
+// ==================== 增量13：死信分页 + webhook 强校验（Review Focus #1/#2） ====================
+
+fn create_wh(body: &str, t: &str) -> axum::http::Request<axum::body::Body> {
+    axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/v1/sec/webhooks")
+        .header("authorization", format!("Bearer {t}"))
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(body.to_string()))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn dead_events_pagination_and_strong_validation() {
+    let ctx = TestCtx::setup("dl", 1024 * 1024).await;
+    let admin = ctx.login().await;
+
+    // 强校验：无 http(s) 前缀 / secret<8 / 未知 topic 各 400
+    for (body, why) in [
+        (
+            r#"{"url":"ftp://x.example/hook","topics":["doc.released"],"secret":"longsecret1"}"#,
+            "非 http(s)",
+        ),
+        (
+            r#"{"url":"https://x.example/hook","topics":["doc.released"],"secret":"short"}"#,
+            "secret 过短",
+        ),
+        (
+            r#"{"url":"https://x.example/hook","topics":["doc.published"],"secret":"longsecret1"}"#,
+            "未知 topic",
+        ),
+    ] {
+        let (s, rbody, _) = send(&ctx.app, create_wh(body, &admin)).await;
+        assert_eq!(s, 400, "{why}: body={}", String::from_utf8_lossy(&rbody));
+        let v: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
+        assert_eq!(v["code"], "MDL-BAD-REQUEST");
+    }
+    // 合法样本 → 201
+    let (s, _, _) = send(
+        &ctx.app,
+        create_wh(
+            r#"{"url":"https://ok.example/hook","topics":["doc.released"],"secret":"longsecret1"}"#,
+            &admin,
+        ),
+    )
+    .await;
+    assert_eq!(s, 201);
+
+    // 造 3 条死信（直插 outbox 并置 status=2——dispatcher 语义已另有钉）
+    for i in 1..=3 {
+        sqlx::query("INSERT INTO event_outbox(topic, payload, status, attempts, error) VALUES ('doc.released', $1::jsonb, 2, 4, 'boom')")
+            .bind(serde_json::json!({"obj_no": format!("DWG-DL-{i}")}).to_string())
+            .execute(&ctx.pool)
+            .await
+            .unwrap();
+    }
+    // size=2 → 第 1 页 2 行（id DESC）+ total=3；第 2 页 1 行
+    let (s, body) = ctx
+        .get_authed("/api/v1/sec/webhooks/dead?page=1&size=2", &admin)
+        .await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 3);
+    assert_eq!(v["page"], 1);
+    assert_eq!(v["size"], 2);
+    let items = v["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert!(
+        items[0]["attempts"].is_i64() && items[0]["error"] == "boom",
+        "死信须带排查字段"
+    );
+
+    let (s, body) = ctx
+        .get_authed("/api/v1/sec/webhooks/dead?page=2&size=2", &admin)
+        .await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["items"].as_array().unwrap().len(), 1);
+
+    // size clamp：>200 → 上限（不 500）
+    let (s, body) = ctx
+        .get_authed("/api/v1/sec/webhooks/dead?page=1&size=9999", &admin)
+        .await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["size"], 200, "size 须 clamp 至 200");
+    // page 越界 → 空集
+    let (s, body) = ctx
+        .get_authed("/api/v1/sec/webhooks/dead?page=9&size=2", &admin)
+        .await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["items"].as_array().unwrap().len(), 0);
+    ctx.cleanup().await;
+}
