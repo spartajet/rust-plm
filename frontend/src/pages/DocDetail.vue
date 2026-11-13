@@ -5,6 +5,7 @@ import { useRoute, useRouter } from "vue-router";
 import { extractApiError } from "../api/http";
 import { http } from "../api/index";
 import { bomExpand, downloadFile, getDoc, listVersions, transition, type BomRow, type DocResponse, type VersionSnapshot } from "../api/docs";
+import { useAuthStore } from "../stores/auth";
 import { flowUi, stateLabel, stateTagType } from "../utils/flowUi";
 import type { LifecycleAction } from "../api/docs";
 
@@ -20,6 +21,7 @@ const acting = ref(false);
 // BOM 版本切换（增量11）：0=live；N=发布快照 major=N as-of
 const bomMajor = ref(0);
 
+const auth = useAuthStore();
 const ui = computed(() => flowUi(doc.value?.object.state ?? ""));
 const bomOptions = computed(() => [
   { label: "当前版本", value: 0 },
@@ -120,19 +122,19 @@ function back() {
       </el-descriptions>
 
       <div style="margin-top: 16px; display: flex; gap: 8px">
-        <el-button v-if="ui.submit" type="primary" data-test="act-submit" :loading="acting" @click="act('submit')">
+        <el-button v-if="ui.submit && auth.canWrite" type="primary" data-test="act-submit" :loading="acting" @click="act('submit')">
           提交评审
         </el-button>
-        <el-button v-if="ui.approve" type="success" data-test="act-approve" :loading="acting" @click="act('approve')">
+        <el-button v-if="ui.approve && auth.canApprove" type="success" data-test="act-approve" :loading="acting" @click="act('approve')">
           审批通过
         </el-button>
-        <el-button v-if="ui.reject" type="warning" data-test="act-reject" :loading="acting" @click="act('reject')">
+        <el-button v-if="ui.reject && auth.canApprove" type="warning" data-test="act-reject" :loading="acting" @click="act('reject')">
           驳回修改
         </el-button>
-        <el-button v-if="ui.obsolete" type="danger" data-test="act-obsolete" :loading="acting" @click="act('obsolete')">
+        <el-button v-if="ui.obsolete && auth.canApprove" type="danger" data-test="act-obsolete" :loading="acting" @click="act('obsolete')">
           作废
         </el-button>
-        <el-button v-if="ui.revise" type="primary" plain data-test="act-revise" :loading="acting" @click="act('revise')">
+        <el-button v-if="ui.revise && auth.canWrite" type="primary" plain data-test="act-revise" :loading="acting" @click="act('revise')">
           升新版
         </el-button>
         <el-button v-if="doc.file" @click="download">下载文件（{{ doc.file.name }}）</el-button>

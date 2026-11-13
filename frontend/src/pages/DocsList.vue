@@ -5,10 +5,13 @@ import { useRoute, useRouter } from "vue-router";
 import { extractApiError } from "../api/http";
 import { http } from "../api/index";
 import { listDocs, uploadDoc, type BizObject, type ListParams } from "../api/docs";
+import { useAuthStore } from "../stores/auth";
 import { stateLabel, stateTagType } from "../utils/flowUi";
+import { validateUpload } from "../utils/upload";
 
 const route = useRoute();
 const router = useRouter();
+const auth = useAuthStore();
 
 const items = ref<BizObject[]>([]);
 const total = ref(0);
@@ -46,6 +49,8 @@ onMounted(load);
 
 function onStateChange() {
   page.value = 1;
+  // 增量11 终审 M2 清偿：筛选与 URL 回写（刷新保持）
+  router.replace({ query: { ...route.query, state: state.value || undefined } });
   load();
 }
 
@@ -62,6 +67,13 @@ async function doUpload() {
     ElMessage.warning("需填写图号并选择文件");
     return;
   }
+  // 客户端预校验（增量12：增量7 M2 清偿）
+  const chk = validateUpload(upFile.value);
+  if (!chk.ok) {
+    ElMessage.error(chk.reason ?? "文件不可上传");
+    return;
+  }
+  if (chk.warn) ElMessage.warning("非常规图纸格式，已允许继续上传");
   uploading.value = true;
   try {
     await uploadDoc(http, {
@@ -112,7 +124,7 @@ function openDetail(row: BizObject) {
         <el-option label="已发布" value="released" />
         <el-option label="已作废" value="obsolete" />
       </el-select>
-      <el-button type="primary" @click="openUpload">上传图纸</el-button>
+      <el-button v-if="auth.canWrite" type="primary" data-test="open-upload" @click="openUpload">上传图纸</el-button>
       <el-button @click="load">刷新</el-button>
     </div>
 

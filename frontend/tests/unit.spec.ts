@@ -75,3 +75,39 @@ describe("parseNdjson", () => {
     expect(parseNdjson("")).toEqual([]);
   });
 });
+
+// ==================== 增量12：上传预校验 + stateTagType ====================
+import { validateUpload } from "../src/utils/upload";
+import { stateTagType } from "../src/utils/flowUi";
+
+describe("validateUpload（增量7 M2 清偿：客户端预校验）", () => {
+  const f = (name: string, size: number) => ({ name, size }) as File;
+  it("空文件拒绝", () => {
+    const r = validateUpload(f("a.dwg", 0));
+    expect(r.ok).toBe(false);
+  });
+  it("超大拒绝（>200MB）", () => {
+    const r = validateUpload(f("big.step", 201 * 1024 * 1024));
+    expect(r.ok).toBe(false);
+  });
+  it("常规图纸通过", () => {
+    expect(validateUpload(f("支架.dwg", 1024)).ok).toBe(true);
+    expect(validateUpload(f("part.step", 1024)).ok).toBe(true);
+    expect(validateUpload({ name: "无扩展名", size: 1 } as unknown as File).ok).toBe(true); // 白名单外仅告警不阻断
+  });
+  it("白名单外仅 WARN（不阻断——图纸长尾格式开放裁定）", () => {
+    const r = validateUpload(f("data.xyz", 1024));
+    expect(r.ok).toBe(true);
+    expect(r.warn).toBe(true);
+  });
+});
+
+describe("stateTagType（终审 R1 回归钉）", () => {
+  it("checked 为警示色（非红）", () => {
+    expect(stateTagType("checked")).toBe("warning");
+  });
+  it("obsolete/未知 为 danger", () => {
+    expect(stateTagType("obsolete")).toBe("danger");
+    expect(stateTagType("x")).toBe("danger");
+  });
+});

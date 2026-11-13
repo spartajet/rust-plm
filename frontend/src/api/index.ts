@@ -1,10 +1,23 @@
-import { createHttp } from "./http";
-import { useAuthStore } from "../stores/auth";
+import axios from "axios";
+import { API_BASE, createHttp } from "./http";
 
-/// 共享 axios 单例（token 取自 auth store；401 由 http.ts 统一处理）
-export const http = createHttp(() => localStorage.getItem("rustplm_token"));
+/// refresh_token 本地键（auth store 同款）
+export const REFRESH_KEY = "rustplm_refresh";
 
-// 防循环依赖：store 在 http 之后创建（main.ts 顺序保证）
-export function authStore() {
-  return useAuthStore();
-}
+/// 共享 axios 单例（token 取自 localStorage；401 由 http.ts refresh 单飞自愈）
+export const http = createHttp(() => localStorage.getItem("rustplm_token"), {
+  // 裸 axios 调 refresh 端点（不经本实例——避免拦截器循环）
+  onRefresh: async () => {
+    const rt = localStorage.getItem(REFRESH_KEY);
+    if (!rt) return null;
+    try {
+      const res = await axios.post(`${API_BASE}/api/v1/auth/refresh`, { refresh_token: rt });
+      const pair = res.data as { access_token: string; refresh_token: string };
+      localStorage.setItem("rustplm_token", pair.access_token);
+      localStorage.setItem(REFRESH_KEY, pair.refresh_token);
+      return pair.access_token;
+    } catch {
+      return null;
+    }
+  },
+});
