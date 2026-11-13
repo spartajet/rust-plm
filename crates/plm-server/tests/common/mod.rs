@@ -115,6 +115,10 @@ impl TestCtx {
             .unwrap();
         let bom = Arc::new(core_bom::BomStore::new(pool.clone()));
         // 发布冻结注入（增量9，与 main 同源——api_gateway::bom_release_hook）
+        core_events::migrator()
+            .run(&pool)
+            .await
+            .expect("core-events 迁移失败");
         let lifecycle = Arc::new(LifecycleStore::new_with_hook(
             pool.clone(),
             Some(api_gateway::bom_release_hook(bom.clone())),

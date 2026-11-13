@@ -190,6 +190,7 @@ impl LifecycleStore {
                     "obj_no": row.obj_no,
                     "major": obj.3,
                     "minor": obj.4,
+                    "actor": updated_by.map(|u| u.to_string()),
                     "released_at": chrono::Utc::now(),
                 }))
                 .execute(&mut *tx)
@@ -208,6 +209,7 @@ impl LifecycleStore {
                     "obj_no": row.obj_no,
                     "old_major": row.major_ver,
                     "new_major": obj.3,
+                    "actor": updated_by.map(|u| u.to_string()),
                     "revised_at": chrono::Utc::now(),
                 }))
                 .execute(&mut *tx)

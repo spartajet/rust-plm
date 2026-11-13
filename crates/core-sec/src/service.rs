@@ -322,10 +322,12 @@ impl SecService {
     }
 
     /// 用户列表（增量11 用户管理面：角色聚合；仅 sec:manage 端点消费）
-    pub async fn list_users(&self) -> Result<Vec<SecUserSummary>> {
+    /// search：username ILIKE 模糊过滤（增量13）
+    pub async fn list_users(&self, search: Option<&str>) -> Result<Vec<SecUserSummary>> {
         let rows: Vec<SecUserSummary> = sqlx::query_as(
-            "SELECT u.username, u.max_secret_level, u.created_at,                     COALESCE(json_agg(r.role_code ORDER BY r.role_code) FILTER (WHERE r.role_code IS NOT NULL), '[]'::json) AS roles              FROM sec_user u              LEFT JOIN sec_user_role r ON r.username = u.username              GROUP BY u.username, u.max_secret_level, u.created_at              ORDER BY u.username",
+            "SELECT u.username, u.max_secret_level, u.created_at,                     COALESCE(json_agg(r.role_code ORDER BY r.role_code) FILTER (WHERE r.role_code IS NOT NULL), '[]'::json) AS roles              FROM sec_user u              LEFT JOIN sec_user_role r ON r.username = u.username              WHERE ($1::text IS NULL OR u.username ILIKE '%' || $1 || '%')              GROUP BY u.username, u.max_secret_level, u.created_at              ORDER BY u.username",
         )
+        .bind(search.filter(|s| !s.trim().is_empty()))
         .fetch_all(&self.pool)
         .await?;
         Ok(rows)

@@ -87,3 +87,11 @@ Final: fixed 备忘 roles_of 静默吞 DB 错——fail-safe 保留但加 tracin
 Final: minor (deferred): M4 reject 按钮前端归 canApprove、后端在 docs_lc_write 组（前端比后端严=安全方向非对称）——后端把 reject 归组 approve 后置评估。
 Final: 教训（第二次重演警示）：新增测试注入口（adapter/钩子）必须在同一提交内带消费者测试，否则声明不对账。
 Final: minor (deferred): URL 回写钉「刷新保持」半边弱（reload 后 waitForURL 恒真+/d+ 弱匹配，删重播种行仍绿）——后续增量补强（reload 后断言 select 显示值或 filtered total）【终审复审 R1】；_retry 重放再 401 无直接钉（奇异路径，记录）；setToken 注释过时（纯文案）。
+[增量13 后端杂项收口 追加台账]
+Final: Task1-3 完成——死信分页(clamp 200/attempts/error)+create 强校验(http(s)/secret≥8/topic 白名单)/outbox payload released+revised 补 actor(存量不改,不可变)/0013 部分索引+event_outbox.error 列+dispatcher 死信落最后错误/list_users ILIKE search+前端防抖搜索框/docs/migrations.md 注册表(迁移清单+payload 契约+REVOKE/reject 裁定段)。后端134+前端24。
+Final: Ruling: REVOKE 防篡改=文档化不执行(单连接部署模型下无对象)——多角色部署时对三张不可变表执行,裁定入 migrations.md。
+Final: Ruling: reject 非对称(前端 approve 显隐/后端 write 组)=安全方向不改,裁定入 migrations.md。
+Final: fixed 附带发现：plm-server e2e harness 一直缺 core-events 迁移(webhook CRUD 全线 500,此前测试止于 403 未触 SQL 未暴露)——补齐。
+Final: minor (deferred): where-used 历史化/BOM 边版本化深化；IM 相关三债(凭证联调/卡内按钮/重放防御)按用户指令暂缓。
+Final: 对账更正（复审 R1）：I1/I2 修复说明曾记「https://.. 等 false-accept 关闭」——实证为假：host_ok("https://..")=true（".." 非空含点，按字面规则通过）；同类残角 https://x?a=1.b（query 未剥离）。这些残角在**已诚实声明的规则内**（host 段非空含点=400 文案语义）、sec:manage 门控、失败可见（DNS 失败→退避→死信落 error 闭环）——代码不改，但规则内接受角如实记档，不得记「已关闭」（增量8 I3 对账原则）。
+Final: minor (deferred): 极端分页 e2e 钉（page=4294967295&size=200 → 200/空集，防 M1 回退）；im_it.rs 文件名与 outbox 索引钉名不符实（外观）。

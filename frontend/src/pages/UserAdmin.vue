@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 用户管理（增量11）：建号 / 授权 / 回收（后端 sec:manage 门控；无权限者 403 提示）
 import { ElMessage } from "element-plus";
-import { onMounted, ref } from "vue";
+import { onMounted, ref, watch } from "vue";
 import { extractApiError } from "../api/http";
 import { http } from "../api/index";
 import { createUser, grantRole, listRoles, listUsers, revokeRole, type SecRole, type SecUser } from "../api/sec";
@@ -9,6 +9,14 @@ import { createUser, grantRole, listRoles, listUsers, revokeRole, type SecRole, 
 const users = ref<SecUser[]>([]);
 const roles = ref<SecRole[]>([]);
 const loading = ref(false);
+const search = ref("");
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+// 搜索防抖 300ms（增量13）
+watch(search, () => {
+  if (searchTimer) clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => load(), 300);
+});
 
 const dlgVisible = ref(false);
 const uName = ref("");
@@ -20,7 +28,7 @@ const submitting = ref(false);
 async function load() {
   loading.value = true;
   try {
-    users.value = await listUsers(http);
+    users.value = await listUsers(http, search.value);
     roles.value = await listRoles(http);
   } catch (e) {
     ElMessage.error(extractApiError(e));
@@ -75,6 +83,13 @@ async function toggleRole(user: SecUser, role: string, has: boolean) {
 <template>
   <div class="page">
     <div class="toolbar">
+      <el-input
+        v-model="search"
+        placeholder="按用户名搜索"
+        clearable
+        style="width: 200px"
+        data-test="user-search"
+      />
       <el-button type="primary" data-test="open-create" @click="dlgVisible = true">新建用户</el-button>
       <el-button data-test="reload-users" @click="load">刷新</el-button>
     </div>

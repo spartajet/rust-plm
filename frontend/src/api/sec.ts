@@ -13,8 +13,9 @@ export interface SecRole {
   name: string;
 }
 
-export async function listUsers(http: AxiosInstance): Promise<SecUser[]> {
-  const res = await http.get<SecUser[]>("/api/v1/sec/users");
+export async function listUsers(http: AxiosInstance, search?: string): Promise<SecUser[]> {
+  const q = search?.trim() ? `?search=${encodeURIComponent(search.trim())}` : "";
+  const res = await http.get<SecUser[]>(`/api/v1/sec/users${q}`);
   return res.data;
 }
 

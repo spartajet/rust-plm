@@ -738,3 +738,52 @@ async fn strict_first_approve_writes_doc_checked_outbox() {
     assert_eq!(n2, 2, "release 不新增 submitted/checked");
     c.drop_it().await;
 }
+
+// ==================== 增量13：payload 契约（released/revised 补 actor） ====================
+
+#[tokio::test]
+async fn released_and_revised_payloads_carry_actor() {
+    // Review Focus #3：outbox payload 契约统一——released/revised 补 actor（操作人）
+    let c = setup("pay1").await;
+    let actor = uuid::Uuid::new_v4();
+    c.new_doc("DWG-PAY-1").await;
+    c.store
+        .transition("drawing", "DWG-PAY-1", LifecycleEvent::Submit, Some(actor))
+        .await
+        .unwrap();
+    let o = c
+        .store
+        .transition("drawing", "DWG-PAY-1", LifecycleEvent::Approve, Some(actor))
+        .await
+        .unwrap();
+    assert_eq!(o.state, "released");
+    c.store
+        .transition("drawing", "DWG-PAY-1", LifecycleEvent::Revise, Some(actor))
+        .await
+        .unwrap();
+
+    let rel_actor: Option<String> = sqlx::query_scalar(
+        "SELECT payload->>'actor' FROM event_outbox WHERE topic='doc.released' AND payload->>'obj_no'='DWG-PAY-1'",
+    )
+    .fetch_one(&c.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        rel_actor.as_deref(),
+        Some(actor.to_string().as_str()),
+        "released 须带 actor"
+    );
+
+    let rev_actor: Option<String> = sqlx::query_scalar(
+        "SELECT payload->>'actor' FROM event_outbox WHERE topic='doc.revised' AND payload->>'obj_no'='DWG-PAY-1'",
+    )
+    .fetch_one(&c.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        rev_actor.as_deref(),
+        Some(actor.to_string().as_str()),
+        "revised 须带 actor"
+    );
+    c.drop_it().await;
+}
