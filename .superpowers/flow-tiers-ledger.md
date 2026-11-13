@@ -73,3 +73,9 @@ Final: fixed M1 stateTagType checked 漏分支（default 红色）——补 warn
 Final: fixed M3 list_users roles=[] 分支钉——e2e revoke 全角色后断言 []。
 Final: fixed M4 reloadBom 失败残留旧行——请求前清空。
 Final: minor (deferred): M2 DocsList state 筛选与 URL 不回写（刷新跳回旧筛选）——纯外观债。
+[增量12 UX 收口 追加台账]
+Final: Task1-4 完成——TokenPair 附 roles(login/refresh)/前端 refresh 单飞(并发 401 共享换发,失败跳登录)/zh-cn locale/M8 显隐(菜单+上传按钮+生命周期按钮按能力映射)/上传预校验(纯函数+白名单外 WARN)/state 筛选 URL 回写。后端131+前端21+e2e21+Playwright 7/7。
+Final: Ruling: 角色→能力映射为前端常量（与 RBAC 种子 0005 一致）——显隐仅 UX，后端 casbin 仍权威；自定义角色支持后置。
+Final: Ruling: 上传类型白名单外仅 WARN 不阻断——图纸长尾格式开放（.xyz 等可过），大小 200MB 硬限与后端一致。
+Final: Ruling: refresh 骨架期不吊销旧 token（文档化既有裁定）；前端本地清 session 即登出。
+Final: minor (deferred): Claims 不含 roles（角色变更后显隐需重登录刷新——15min access TTL 内可容忍）；e2e 里 el-select 交互需点击+option 两步（原生 select 不可用）。

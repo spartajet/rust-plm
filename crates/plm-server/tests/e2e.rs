@@ -1406,13 +1406,23 @@ async fn login_and_refresh_responses_carry_roles() {
     let (s, body, _) = send(&ctx.app, login("roleed", "roleed-pass-123")).await;
     assert_eq!(s, 200);
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let roles: Vec<&str> = v["roles"].as_array().unwrap().iter().map(|r| r.as_str().unwrap()).collect();
+    let roles: Vec<&str> = v["roles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r.as_str().unwrap())
+        .collect();
     assert_eq!(roles, vec!["editor", "viewer"], "login roles 聚合有序");
 
     // admin 单角色
     let (_, body, _) = send(&ctx.app, login("admin", common::TEST_ADMIN_PASSWORD)).await;
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let roles: Vec<&str> = v["roles"].as_array().unwrap().iter().map(|r| r.as_str().unwrap()).collect();
+    let roles: Vec<&str> = v["roles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r.as_str().unwrap())
+        .collect();
     assert_eq!(roles, vec!["admin"]);
 
     // refresh 轮换后 roles 仍在
@@ -1428,7 +1438,12 @@ async fn login_and_refresh_responses_carry_roles() {
     let (s, body, _) = send(&ctx.app, rr).await;
     assert_eq!(s, 200);
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let roles: Vec<&str> = v["roles"].as_array().unwrap().iter().map(|r| r.as_str().unwrap()).collect();
+    let roles: Vec<&str> = v["roles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r.as_str().unwrap())
+        .collect();
     assert_eq!(roles, vec!["admin"], "refresh 响应必须仍携带 roles");
     ctx.cleanup().await;
 }
