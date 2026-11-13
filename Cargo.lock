@@ -1418,6 +1418,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mod-part"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "core-model",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "multer"
 version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
