@@ -46,9 +46,10 @@ pub async fn create_user(
     Extension(tid): Extension<crate::error::TraceId>,
     Json(req): Json<CreateUserReq>,
 ) -> Result<(StatusCode, Json<UserCreated>), ApiError> {
-    if req.username.trim().is_empty() || req.password.len() < 8 {
+    // 非空校验在本层；长度策略归 SecService（SYS-04 密码策略参数热生效——增量23，网关不再硬编码 8）
+    if req.username.trim().is_empty() || req.password.is_empty() {
         return Err(ApiError::new(
-            core_model::DomainError::FieldRequired("username 与 password(≥8位)".into()),
+            core_model::DomainError::FieldRequired("username 与 password".into()),
             &tid.0,
         ));
     }

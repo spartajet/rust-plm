@@ -3247,3 +3247,208 @@ async fn doc_preview_inline_whitelist_and_abac() {
 
     ctx.cleanup().await;
 }
+
+// ==================== 增量23 防爆破锁定 + SYS-04 参数 ====================
+
+#[tokio::test]
+async fn bruteforce_lockout_and_password_policy() {
+    let ctx = TestCtx::setup("bf", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    // 密码 8 位满足缺省策略 min_length=8
+    ctx.create_user_as_admin(&admin, "bfed", "bf-pass-123", &["editor"], 0)
+        .await;
+
+    let try_login = |pw: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/login")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(format!(
+                r#"{{"username":"bfed","password":"{pw}"}}"#
+            )))
+            .unwrap()
+    };
+    let code_of = |b: &bytes::Bytes| -> String {
+        serde_json::from_slice::<serde_json::Value>(b)
+            .ok()
+            .and_then(|v| v["code"].as_str().map(String::from))
+            .unwrap_or_default()
+    };
+
+    // ① 密码策略：建 7 位密码用户 → 400 MDL-SEC-PASSWORD-POLICY
+    let short = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/v1/sec/users")
+        .header("authorization", format!("Bearer {admin}"))
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(
+            r#"{"username":"shortpw","password":"a7chars","roles":["editor"]}"#,
+        ))
+        .unwrap();
+    let (s, body, _) = send(&ctx.app, short).await;
+    assert_eq!(s, 400, "7 位密码须拒");
+    assert_eq!(code_of(&body), "MDL-SEC-PASSWORD-POLICY");
+
+    // ② 连败 4 次（阈值 5-1）→ 仍 401
+    for _ in 0..4 {
+        let (s, _, _) = send(&ctx.app, try_login("wrong-pass")).await;
+        assert_eq!(s, 401);
+    }
+    // 第 5 次 → 触发锁定；本次响应仍为 401（计数在验证失败路径累加）
+    let (s, _, _) = send(&ctx.app, try_login("wrong-pass")).await;
+    assert_eq!(s, 401);
+    // 第 6 次（锁定期内）→ 423 MDL-SEC-ACCOUNT-LOCKED（正确密码也拒）
+    let (s, body, _) = send(&ctx.app, try_login("bf-pass-123")).await;
+    assert_eq!(s, 423, "锁定期内正确密码也拒");
+    assert_eq!(code_of(&body), "MDL-SEC-ACCOUNT-LOCKED");
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let mins = v["message"].as_str().unwrap_or("");
+    assert!(mins.contains("分钟"), "提示含剩余分钟: {mins}");
+
+    // ③ 锁定参数热生效验证：SQL 模拟到期解锁（locked_until 过去）→ 正确密码成功 + 清零
+    sqlx::query(
+        "UPDATE sec_user SET locked_until = now() - interval '1 min' WHERE username = 'bfed'",
+    )
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    let (s, _, _) = send(&ctx.app, try_login("bf-pass-123")).await;
+    assert_eq!(s, 200, "到期解锁后正确密码成功");
+    let n: i32 = sqlx::query_scalar("SELECT failed_attempts FROM sec_user WHERE username = 'bfed'")
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 0, "成功登录清零");
+
+    // ④ 改阈值参数热生效：threshold=2 → 两轮失败即锁
+    sqlx::query("UPDATE sys_param SET value = '2' WHERE key = 'lock_threshold'")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (s, _, _) = send(&ctx.app, try_login("wrong-1")).await;
+    assert_eq!(s, 401);
+    let (s, _, _) = send(&ctx.app, try_login("wrong-2")).await;
+    assert_eq!(s, 401);
+    let (s, body, _) = send(&ctx.app, try_login("bf-pass-123")).await;
+    assert_eq!(s, 423, "阈值 2 生效——两败即锁");
+    assert_eq!(code_of(&body), "MDL-SEC-ACCOUNT-LOCKED");
+
+    // ⑤ 未知用户不触发锁定语义（无锁定行 → 恒 401）
+    let unknown = |pw: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/login")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(format!(
+                r#"{{"username":"ghost-user","password":"{pw}"}}"#
+            )))
+            .unwrap()
+    };
+    for _ in 0..3 {
+        let (s, _, _) = send(&ctx.app, unknown("x")).await;
+        assert_eq!(s, 401, "未知用户恒 401");
+    }
+
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn sec_params_manage_and_audit_trail() {
+    let ctx = TestCtx::setup("sp", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "spview", "spview-pass-123", &["viewer"], 0)
+        .await;
+    let view = ctx.login_as("spview", "spview-pass-123").await;
+
+    // ① GET：三种子参数齐
+    let (s, body) = ctx.get_authed("/api/v1/sec/params", &admin).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    // handler 返回 Vec<SysParamDto> 直接序列化为顶层数组
+    let arr = v.as_array().expect("顶层数组");
+    assert_eq!(arr.len(), 3, "三种子参数");
+    for k in ["password_min_length", "lock_threshold", "lock_minutes"] {
+        assert!(arr.iter().any(|r| r["key"] == k), "含 {k}");
+    }
+    let min_row = arr
+        .iter()
+        .find(|r| r["key"] == "password_min_length")
+        .unwrap();
+    assert_eq!(min_row["value"], "8");
+
+    // ② viewer 403
+    let (s, _) = ctx.get_authed("/api/v1/sec/params", &view).await;
+    assert_eq!(s, 403);
+
+    // ③ PUT 改 min_length=12 → 生效（建 8 位密码用户 400）
+    let put = |key: &str, val: i64| {
+        axum::http::Request::builder()
+            .method("PUT")
+            .uri(format!("/api/v1/sec/params/{key}"))
+            .header("authorization", format!("Bearer {admin}"))
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(format!(r#"{{"value":{val}}}"#)))
+            .unwrap()
+    };
+    let (s, _, _) = send(&ctx.app, put("password_min_length", 12)).await;
+    assert_eq!(s, 204);
+    // 8 位密码（此前合法）现 400；12 位成功
+    let mk = |pw: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/sec/users")
+            .header("authorization", format!("Bearer {admin}"))
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(format!(
+                r#"{{"username":"{pw}u","password":"{pw}","roles":["editor"]}}"#
+            )))
+            .unwrap()
+    };
+    let (s, body, _) = send(&ctx.app, mk("eight8pw!")).await;
+    assert_eq!(s, 400, "8 位低于新阈值");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap()["code"],
+        "MDL-SEC-PASSWORD-POLICY"
+    );
+    let (s, _, _) = send(&ctx.app, mk("twelve12pw!!")).await;
+    assert_eq!(s, 201, "12 位满足新阈值");
+
+    // ④ 值域校验：越界 400 / 未知键 400 / 非法 tier 类值
+    let (s, _, _) = send(&ctx.app, put("password_min_length", 7)).await;
+    assert_eq!(s, 400, "低于下界 8");
+    let (s, _, _) = send(&ctx.app, put("password_min_length", 65)).await;
+    assert_eq!(s, 400, "高于上界 64");
+    let (s, _, _) = send(&ctx.app, put("bogus_key", 1)).await;
+    assert_eq!(s, 400, "未知键");
+
+    // ⑤ audit 留痕：sec-param.change from=8 to=12
+    let mut ok = false;
+    for _ in 0..20 {
+        let n: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log WHERE action='sec-param.change' AND object='password_min_length'",
+        )
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+        if n == 1 {
+            ok = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(ok, "sec-param.change 留痕须落库");
+    let row: serde_json::Value =
+        sqlx::query("SELECT detail FROM audit_log WHERE action='sec-param.change' AND object='password_min_length'")
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap()
+            .get("detail");
+    assert_eq!(row["from"], "8");
+    assert_eq!(row["to"], "12");
+
+    // ⑥ 还原（避免影响同库其他断言；cleanup 后库删无谓但语义完整）
+    let (s, _, _) = send(&ctx.app, put("password_min_length", 8)).await;
+    assert_eq!(s, 204);
+
+    ctx.cleanup().await;
+}

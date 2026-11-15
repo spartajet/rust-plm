@@ -5,6 +5,7 @@ import { buildListQuery, parseNdjson } from "../src/api/docs";
 import { summarizeBatch } from "../src/api/todos";
 import { groupLabel } from "../src/api/search";
 import { buildSetLinesPayload } from "../src/api/docs";
+import { paramLabel } from "../src/api/sec";
 
 // Review Focus #2/#1：flowUi 全状态穷举（增量8 +revise 维度；增量11 +checked 态——strict 二级）
 describe("flowUi", () => {
@@ -261,5 +262,17 @@ describe("buildSetLinesPayload", () => {
   });
   it("空行集 → 空 payload", () => {
     expect(buildSetLinesPayload([])).toEqual([]);
+  });
+});
+
+// 增量23 SYS-04：参数键展示名（纯函数）
+describe("paramLabel", () => {
+  it("三键中文映射", () => {
+    expect(paramLabel("password_min_length")).toBe("密码最小长度");
+    expect(paramLabel("lock_threshold")).toBe("锁定阈值（连续失败次数）");
+    expect(paramLabel("lock_minutes")).toBe("锁定时长（分钟）");
+  });
+  it("未知键回退原码", () => {
+    expect(paramLabel("x")).toBe("x");
   });
 });

@@ -4,7 +4,7 @@
 
 > 文档体系：[需求 v1.1](docs/PLM-产品需求文档-v1.0.md) · **[部署文档](docs/部署文档.md)** · **[需求符合度评审](docs/review-需求符合度评审.md)** · [迁移注册表](docs/migrations.md) · [ADR×19](docs/adr/README.md) · [概要设计](docs/PLM-概要设计说明书-v0.1.md) · [技术选型 v1.0](docs/PLM-技术选型说明书-v1.0.md) · [Spike 验证](spikes/REPORT.md)
 
-## 当前状态：MVP+ 主线纵切完成（22 个增量，详见 Roadmap）
+## 当前状态：MVP+ 主线纵切完成（23 个增量，详见 Roadmap）
 
 已覆盖：图纸受控/认证/授权(ABAC 密级)/生命周期(三档+Revise 升版)/Webhook 外投/BOM 引擎+版本链(冻结快照+as-of)+历史反查/COD 自动编码/PART 物料主数据(分类树+查重 MVP)/IM 卡片审批(钉钉加签/企微/飞书)/前端工作台(看板/用户管理/角色显隐/中文)。
 
@@ -64,6 +64,10 @@ curl -g -H "Authorization: Bearer $ADMIN_TOKEN" 'http://localhost:8080/api/v1/au
 curl -g -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/v1/search?q=%E8%BD%B4%E6%89%BF'      # q=轴承（聚类：图纸+物料）
 curl -g -H "Authorization: Bearer $TOKEN" 'http://127.0.0.1:8080/api/v1/search?q=DWG-001'                # 纯 ASCII=编号精确
 # 索引近实时：对账扫描器（PLM_SEARCH_SCAN_SECS 缺省 2s）+ 周期全量重建兜底迟提交；索引目录 data_dir/search
+
+# 防爆破+安全参数（增量23，PRD SYS-04/§7.3）：连续失败锁定（阈值/时长参数热生效）+密码最小长度策略
+curl -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/api/v1/sec/params
+curl -X PUT -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json'   http://localhost:8080/api/v1/sec/params/lock_threshold -d '{"value":5}'   # 修改留痕 audit
 
 # 待办中心（增量19，PRD WF-03）：待办/已办/我发起三盒 + 批量审批 + 意见必填开关
 curl -g -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/v1/todos?box=todo'   # box=todo|done|mine

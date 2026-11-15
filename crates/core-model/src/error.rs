@@ -73,6 +73,10 @@ pub enum DomainError {
     SecForbidden,
     #[error("用户已存在")]
     SecUserExists,
+    #[error("账户已锁定（连续登录失败），剩余 {0} 分钟后自动解锁")]
+    SecAccountLocked(i64),
+    #[error("密码不满足安全策略（长度不足）")]
+    SecPasswordPolicy,
     #[error("角色不存在: {0}")]
     SecRoleNotFound(String),
     #[error("非法生命周期迁移: {0} 不允许 {1}")]
@@ -118,6 +122,8 @@ impl DomainError {
             Self::SecBadCredentials => "MDL-SEC-BAD-CREDENTIALS",
             Self::SecForbidden => "MDL-SEC-FORBIDDEN",
             Self::SecUserExists => "MDL-SEC-USER-EXISTS",
+            Self::SecAccountLocked(_) => "MDL-SEC-ACCOUNT-LOCKED",
+            Self::SecPasswordPolicy => "MDL-SEC-PASSWORD-POLICY",
             Self::SecRoleNotFound(_) => "MDL-SEC-ROLE-NOT-FOUND",
             Self::IllegalTransition(_, _) => "MDL-LCS-TRANSITION",
             Self::CommentRequired => "MDL-LCS-COMMENT-REQUIRED",
@@ -153,6 +159,8 @@ impl DomainError {
             Self::MakerCheckerViolation => 409,
             Self::BomCycle => 409,
             Self::SecUserExists => 409,
+            Self::SecAccountLocked(_) => 423,
+            Self::SecPasswordPolicy => 400,
             Self::FileTooLarge(_) => 413,
             _ => 500,
         }

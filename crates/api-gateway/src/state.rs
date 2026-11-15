@@ -83,6 +83,8 @@ pub fn bom_release_hook(bom: Arc<core_bom::BomStore>) -> Arc<dyn core_version::R
         crate::routes::boms::lines_boms,
         crate::routes::boms::summary_boms,
         crate::routes::docs::preview_doc,
+        crate::routes::sec_params::list_params,
+        crate::routes::sec_params::set_param,
     ),
     components(schemas(
         crate::routes::docs::FileInfoDto,
@@ -97,6 +99,8 @@ pub fn bom_release_hook(bom: Arc<core_bom::BomStore>) -> Arc<dyn core_version::R
         crate::routes::search::SearchHitDto,
         crate::routes::boms::LineInfoDto,
         crate::routes::boms::SummaryDto,
+        crate::routes::sec_params::SysParamDto,
+        crate::routes::sec_params::SetParamReq,
         crate::routes::infra::Healthz,
         crate::routes::auth::LoginReq,
         crate::routes::auth::RefreshReq,

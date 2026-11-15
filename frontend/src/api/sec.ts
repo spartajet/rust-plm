@@ -61,3 +61,35 @@ export async function revokeRole(
 ): Promise<void> {
   await http.delete(`/api/v1/sec/users/${username}/roles/${role}`);
 }
+
+/// SYS-04 安全参数（增量23）
+export interface SysParam {
+  key: string;
+  value: string;
+  updated_by?: string | null;
+  updated_at?: string | null;
+}
+
+export async function listParams(http: AxiosInstance): Promise<SysParam[]> {
+  const res = await http.get("/api/v1/sec/params");
+  return res.data;
+}
+
+export async function setParam(
+  http: AxiosInstance,
+  key: string,
+  value: number,
+): Promise<void> {
+  await http.put(`/api/v1/sec/params/${key}`, { value });
+}
+
+/// 参数键展示名（纯函数可单测）
+export const PARAM_LABEL: Record<string, string> = {
+  password_min_length: "密码最小长度",
+  lock_threshold: "锁定阈值（连续失败次数）",
+  lock_minutes: "锁定时长（分钟）",
+};
+
+export function paramLabel(key: string): string {
+  return PARAM_LABEL[key] ?? key;
+}

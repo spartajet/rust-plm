@@ -727,3 +727,30 @@ test("doc preview: png inline with watermark, dwg falls back to download hint (D
     page.locator('.el-message:has-text("该格式不支持在线预览")'),
   ).toBeVisible({ timeout: 10_000 });
 });
+
+// ==================== 增量23 SYS-04 安全参数 ====================
+
+test("security params: panel edit saves and reflects (SYS-04)", async ({ page }) => {
+  await page.goto("/login");
+  await page.fill('[data-test="username"]', "admin");
+  await page.fill('[data-test="password"]', ADMIN_PW);
+  await page.click('[data-test="login-btn"]');
+  await page.waitForURL("/");
+
+  await page.goto("/admin/users");
+  await expect(page.locator('[data-test="params-table"] .el-table__row')).toHaveCount(3, { timeout: 10_000 });
+
+  // 改 lock_minutes 15→20 → 保存 → 面板值刷新为 20 → 还原 15。
+  // 策略生效语义由后端 e2e 钉住（sec_params_manage_and_audit_trail）；此处不造全局副作用
+  // （曾改 min_length+建号复验——与并行 user-admin 测试的全局参数竞争实测撞车，增量23 修复轮裁定）
+  const input = page.locator('[data-test="param-input-lock_minutes"] input');
+  await input.fill("20");
+  await page.click('[data-test="param-save-lock_minutes"]');
+  await expect(page.locator('.el-message:has-text("已保存")')).toBeVisible({ timeout: 10_000 });
+  await expect(input).toHaveValue("20", { timeout: 10_000 });
+
+  await input.fill("15");
+  await page.click('[data-test="param-save-lock_minutes"]');
+  await expect(page.locator('.el-message:has-text("已保存")')).toBeVisible({ timeout: 10_000 });
+  await expect(input).toHaveValue("15", { timeout: 10_000 });
+});

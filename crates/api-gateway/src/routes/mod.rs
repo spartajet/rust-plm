@@ -9,6 +9,7 @@ pub mod infra;
 pub mod meta;
 pub mod parts;
 pub mod search;
+pub mod sec_params;
 pub mod sec_users;
 pub mod todos;
 pub mod webhooks;
@@ -100,6 +101,15 @@ pub fn build(state: AppState) -> Router {
             delete(webhooks::delete_webhook),
         )
         .route("/api/v1/sec/webhooks/dead", get(webhooks::dead_events))
+        // SYS-04 最小参数中心（增量23）：sec:manage 同层
+        .route(
+            "/api/v1/sec/params",
+            get(sec_params::list_params).layer(axum::extract::DefaultBodyLimit::max(16 * 1024)),
+        )
+        .route(
+            "/api/v1/sec/params/{key}",
+            axum::routing::put(sec_params::set_param),
+        )
         .route("/api/v1/audit", get(audit::search_audit))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
