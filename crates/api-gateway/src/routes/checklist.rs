@@ -10,7 +10,6 @@ use axum::Extension;
 use axum::Json;
 use core_sec::AuthUser;
 use serde::Serialize;
-use serde_json::json;
 use utoipa::ToSchema;
 
 const CHECKLIST_KEY: &str = "impl_checklist_done";

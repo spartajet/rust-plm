@@ -3725,7 +3725,7 @@ async fn impl_checklist_auto_manual_and_order() {
     assert_eq!(s, 204);
     let (s, _, _) = send(&ctx.app, complete(&admin, "cutover")).await;
     assert_eq!(s, 204);
-    let (s, body) = ctx.get_authed("/api/v1/meta/impl-checklist", &admin).await;
+    let (_, body) = ctx.get_authed("/api/v1/meta/impl-checklist", &admin).await;
     let steps: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let arr = steps.as_array().unwrap();
     assert_eq!(
@@ -3768,7 +3768,7 @@ async fn impl_checklist_auto_manual_and_order() {
     ctx.create_user_as_admin(&admin, "ckview", "ckview-pass-123", &["viewer"], 0)
         .await;
     let view = ctx.login_as("ckview", "ckview-pass-123").await;
-    let (s, body) = ctx.get_authed("/api/v1/meta/impl-checklist", &view).await;
+    let (s, _) = ctx.get_authed("/api/v1/meta/impl-checklist", &view).await;
     assert_eq!(s, 200, "向导全员可见");
     let (s, _, _) = send(&ctx.app, complete(&view, "training")).await;
     assert_eq!(s, 403, "complete 需 sec:manage");
