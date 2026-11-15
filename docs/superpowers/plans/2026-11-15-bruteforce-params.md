@@ -31,3 +31,12 @@
 ## 验收标准
 - 迁移 0017 入注册表（docs/migrations.md）；e2e 新增 ≥6 钉；后端 166+ 全绿/clippy 0/fmt 过；Vitest 32+/Playwright 14+ 两轮全绿；OpenAPI 注册 params 两端点+SysParamDto。
 - 锁定阈值/时长由参数热生效（改参数后立即作用下一轮登录）。
+
+
+---
+
+## 对账台账（执行后回填）
+
+- T1+T2 完成（615e47f）：make_interval(mins=>$2) bigint→int 函数签名不匹配（e2e 500 拦下，$2::int 修）；网关硬编码 password.len()<8 是死参数（策略进服务层单一路径）；e2e 自身两处修正（Request clone 不满足→闭包工厂/解构简化）。
+- T3 完成（1a6aeb9）：Playwright 改 min_length+建号复验与并行 user-admin 全局参数竞争实测撞车（bd-pass-123 10 位被拒）——钉改为纯 UI 编辑回显（lock_minutes），策略生效语义由后端 e2e 钉住；同库历史残留参数值需修复（并行测试环境共享库教训）。
+- T4 完成：README/部署文档/评审报告（SYS-04/防爆破 ⬜→🟡）/migrations.md 0017 注册+五裁定。
