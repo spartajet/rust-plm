@@ -3367,6 +3367,14 @@ async fn sec_params_manage_and_audit_trail() {
     // handler 返回 Vec<SysParamDto> 直接序列化为顶层数组
     let arr = v.as_array().expect("顶层数组");
     assert_eq!(arr.len(), 3, "三种子参数");
+    // 系统内部键过滤（增量24 checklist 借 sys_param 持久化 impl_checklist_done——不混入面板）
+    sqlx::query("INSERT INTO sys_param(key, value) VALUES ('impl_checklist_done', '[\"training\"]') ON CONFLICT (key) DO NOTHING")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (_, body) = ctx.get_authed("/api/v1/sec/params", &admin).await;
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v.as_array().unwrap().len(), 3, "内部键不混入参数面板");
     for k in ["password_min_length", "lock_threshold", "lock_minutes"] {
         assert!(arr.iter().any(|r| r["key"] == k), "含 {k}");
     }

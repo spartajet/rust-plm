@@ -457,10 +457,14 @@ impl SecService {
             chrono::DateTime<chrono::Utc>,
         )>,
     > {
-        let rows =
-            sqlx::query_as("SELECT key, value, updated_by, updated_at FROM sys_param ORDER BY key")
-                .fetch_all(&self.pool)
-                .await?;
+        // 过滤系统内部键（增量24 终审前置实测拦截）：impl_checklist_done 借表持久化实施进度，
+        // 非可编辑安全参数——混入面板会渲染成第 4 行可编辑行
+        let rows = sqlx::query_as(
+            "SELECT key, value, updated_by, updated_at FROM sys_param \
+             WHERE key <> 'impl_checklist_done' ORDER BY key",
+        )
+        .fetch_all(&self.pool)
+        .await?;
         Ok(rows)
     }
 

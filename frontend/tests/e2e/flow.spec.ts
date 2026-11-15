@@ -754,3 +754,33 @@ test("security params: panel edit saves and reflects (SYS-04)", async ({ page })
   await expect(page.locator('.el-message:has-text("已保存")')).toBeVisible({ timeout: 10_000 });
   await expect(input).toHaveValue("15", { timeout: 10_000 });
 });
+
+// ==================== 增量24 AGL-05/09 模板包+实施向导 ====================
+
+test("impl wizard: eight steps + starter import report (AGL-05/09)", async ({ page }) => {
+  await page.goto("/login");
+  await page.fill('[data-test="username"]', "admin");
+  await page.fill('[data-test="password"]', ADMIN_PW);
+  await page.click('[data-test="login-btn"]');
+  await page.waitForURL("/");
+
+  // 向导卡展开：八步渲染
+  await page.click('[data-test="wizard-card"] .el-card__body > div:first-child');
+  await expect(page.locator('[data-test="wizard-steps"] .wiz-step')).toHaveCount(8, { timeout: 10_000 });
+
+  // 导入 Starter 包（dry_run 冲突+merge 一体流）→ 报告行可见
+  await page.click('[data-test="import-starter"]');
+  await expect(page.locator('[data-test="import-report"]')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-test="import-report"]')).toContainText("模板导入");
+
+  // training 人工步标记完成 → 状态翻已完成
+  const trainingDone = await page
+    .locator('.wiz-step:has-text("培训交付") [data-test="wizard-step-done"]')
+    .innerText();
+  if (trainingDone.includes("待完成")) {
+    await page.click('[data-test="wizard-complete-training"]');
+    await expect(
+      page.locator('.wiz-step:has-text("培训交付") [data-test="wizard-step-done"]:has-text("已完成")'),
+    ).toBeVisible({ timeout: 10_000 });
+  }
+});

@@ -6,6 +6,7 @@ import { summarizeBatch } from "../src/api/todos";
 import { groupLabel } from "../src/api/search";
 import { buildSetLinesPayload } from "../src/api/docs";
 import { paramLabel } from "../src/api/sec";
+import { stepRoute } from "../src/api/meta";
 
 // Review Focus #2/#1：flowUi 全状态穷举（增量8 +revise 维度；增量11 +checked 态——strict 二级）
 describe("flowUi", () => {
@@ -274,5 +275,18 @@ describe("paramLabel", () => {
   });
   it("未知键回退原码", () => {
     expect(paramLabel("x")).toBe("x");
+  });
+});
+
+// 增量24 AGL-09：步骤跳转路由（纯函数）
+describe("stepRoute", () => {
+  it("org/perm→用户管理 coding→物料 data→图纸", () => {
+    expect(stepRoute("org")).toBe("/admin/users");
+    expect(stepRoute("perm")).toBe("/admin/users");
+    expect(stepRoute("coding")).toBe("/parts");
+    expect(stepRoute("data")).toBe("/docs");
+  });
+  it("未知键回退首页", () => {
+    expect(stepRoute("x")).toBe("/");
   });
 });
