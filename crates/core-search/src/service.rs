@@ -49,6 +49,10 @@ struct Fields {
     f_secret: Field,
 }
 
+fn is_cjk(c: char) -> bool {
+    ('\u{4E00}'..='\u{9FFF}').contains(&c)
+}
+
 fn build_schema() -> (Schema, Fields) {
     let mut b = Schema::builder();
     let f_type = b.add_text_field("type_code", STRING | STORED);
@@ -119,8 +123,8 @@ pub struct SearchService {
     /// 查询侧分析器（与索引侧同 tokenizer；text_terms_query 逐 term 析取——避开 QueryParser
     /// 把相邻 token 组 PhraseQuery 的语义，jieba+bigram 重叠 token 会破坏邻接）
     analyzer: tantivy::tokenizer::TextAnalyzer,
-    /// Mutex：0.27 commit 为 &mut self；扫描器单任务+查询不持锁，串行化足够
-    writer: Option<std::sync::Mutex<IndexWriter>>,
+    /// tokio Mutex：0.27 commit 为 &mut self；commit 退避重试需跨 await 持锁（std Guard 非 Send）
+    writer: Option<tokio::sync::Mutex<IndexWriter>>,
     f: Fields,
 }
 
@@ -146,7 +150,7 @@ impl SearchService {
             .try_into()
             .map_err(|e| DomainError::Internal(e.to_string()))?;
         let writer = match index.writer(50_000_000) {
-            Ok(w) => Some(std::sync::Mutex::new(w)),
+            Ok(w) => Some(tokio::sync::Mutex::new(w)),
             Err(e) => {
                 tracing::warn!(error = %e, "tantivy 写锁被占（多实例共享索引卷？）——搜索进入 degraded 只读");
                 None
@@ -190,23 +194,37 @@ impl SearchService {
     }
 
     /// 幂等 upsert 一批行（按 obj_no 先删后加）
-    fn upsert_rows(&self, rows: &[ScanRow]) -> Result<(), DomainError> {
+    async fn upsert_rows(&self, rows: &[ScanRow]) -> Result<(), DomainError> {
         let Some(writer) = &self.writer else {
             return Err(DomainError::ServiceUnavailable(
                 "搜索索引写入不可用（degraded：多实例共享索引卷）".into(),
             ));
         };
-        let mut w = writer
-            .lock()
-            .map_err(|_| DomainError::Internal("索引写锁中毒".into()))?;
+        let mut w = writer.lock().await;
         for r in rows {
             w.delete_term(Term::from_field_text(self.f.f_obj_no, &r.obj_no));
             // add_document 仅入内存队列（commit 原子生效；单条失败在 commit 处统一暴露）
             w.add_document(self.doc_of(r))
                 .map_err(|e| DomainError::Internal(e.to_string()))?;
         }
-        w.commit()
-            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        // commit 重试：Windows 安全软件对新写索引文件（.del/.term）有秒级扫描锁，
+        // 瞬时 PermissionDenied 退避重试可自愈（本机环境实证；ADR-0007 退避思想同源）
+        let mut last_err = None;
+        for wait in [0u64, 300, 900] {
+            if wait > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+            }
+            match w.commit() {
+                Ok(_) => {
+                    last_err = None;
+                    break;
+                }
+                Err(e) => last_err = Some(e),
+            }
+        }
+        if let Some(e) = last_err {
+            return Err(DomainError::Internal(e.to_string()));
+        }
         self.reader
             .reload()
             .map_err(|e| DomainError::Internal(e.to_string()))?;
@@ -228,7 +246,7 @@ impl SearchService {
             .map(|r| r.updated_at)
             .max()
             .unwrap_or_else(chrono::Utc::now);
-        self.upsert_rows(&rows)?;
+        self.upsert_rows(&rows).await?;
         Ok((rows.len(), watermark))
     }
 
@@ -254,20 +272,19 @@ impl SearchService {
         if let Some(max_at) = rows.iter().map(|r| r.updated_at).max() {
             *watermark = max_at;
         }
-        self.upsert_rows(&rows)?;
+        self.upsert_rows(&rows).await?;
         Ok(n)
     }
 
     /// 内容查询：obj_no 精确 ∪ text 分词 terms 析取（OR）。
     /// 弃 QueryParser：其把分析出的相邻 token 组成 PhraseQuery，jieba 词与 CJK bigram
     /// 重叠 token 会让单词条查询也带邻接约束而全空（诊断实证）。
+    /// 内容查询：obj_no 精确 ∪ text 分词 terms 析取（OR，仅 CJK 查询）。
+    /// 弃 QueryParser：其把分析出的相邻 token 组成 PhraseQuery，jieba 词与 CJK bigram
+    /// 重叠 token 会让单词条查询也带邻接约束而全空（诊断实证）。
+    /// 纯 ASCII（编号式输入）只走 obj_no 精确——分词碎片（dwg/fe/…）在 OR 下会泛匹配
+    /// 一切名称含该碎片的对象（Playwright 并行钉诊断实证）。
     fn content_query(&self, q: &str) -> BooleanQuery {
-        let mut an = self.analyzer.clone();
-        let mut ts = an.token_stream(q);
-        let mut terms = std::collections::BTreeSet::new();
-        while ts.advance() {
-            terms.insert(ts.token().text.clone());
-        }
         let mut clauses: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
         clauses.push((
             Occur::Should,
@@ -276,14 +293,22 @@ impl SearchService {
                 tantivy::schema::IndexRecordOption::Basic,
             )),
         ));
-        for t in &terms {
-            clauses.push((
-                Occur::Should,
-                Box::new(TermQuery::new(
-                    Term::from_field_text(self.f.f_text, t),
-                    tantivy::schema::IndexRecordOption::WithFreqsAndPositions,
-                )),
-            ));
+        if q.chars().any(is_cjk) {
+            let mut an = self.analyzer.clone();
+            let mut ts = an.token_stream(q);
+            let mut terms = std::collections::BTreeSet::new();
+            while ts.advance() {
+                terms.insert(ts.token().text.clone());
+            }
+            for t in &terms {
+                clauses.push((
+                    Occur::Should,
+                    Box::new(TermQuery::new(
+                        Term::from_field_text(self.f.f_text, t),
+                        tantivy::schema::IndexRecordOption::WithFreqsAndPositions,
+                    )),
+                ));
+            }
         }
         BooleanQuery::new(clauses)
     }

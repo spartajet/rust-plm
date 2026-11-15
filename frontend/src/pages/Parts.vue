@@ -19,6 +19,8 @@ const total = ref(0);
 const page = ref(1);
 const size = ref(20);
 const loading = ref(false);
+// 名称筛选（增量20：数据累积后定位物料；后端 list_parts name 过滤）
+const nameFilter = ref("");
 
 const tree = ref<ClassNode[]>([]);
 const dlgVisible = ref(false);
@@ -31,7 +33,7 @@ const submitting = ref(false);
 async function load() {
   loading.value = true;
   try {
-    const res = await listParts(http, page.value, size.value);
+    const res = await listParts(http, page.value, size.value, nameFilter.value || undefined);
     items.value = res.items;
     total.value = res.total;
   } catch (e) {
@@ -119,6 +121,15 @@ async function submit() {
 <template>
   <div class="page">
     <div class="toolbar">
+      <el-input
+        v-model="nameFilter"
+        placeholder="按名称筛选"
+        style="width: 200px"
+        clearable
+        data-test="part-name-filter"
+        @change="load"
+        @clear="load"
+      />
       <el-button type="primary" data-test="open-create-part" @click="openCreate">新建物料</el-button>
       <el-button data-test="reload-parts" @click="load">刷新</el-button>
     </div>

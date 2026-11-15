@@ -43,9 +43,15 @@ test("parts: create with class coding and dedup warning (PART-01/02/05)", async 
     .waitForResponse((r) => r.url().includes("/api/v1/parts") && r.request().method() === "POST")
     .then((r) => `${r.status()} ${r.url().slice(-30)}`)
     .catch(() => "no-response");
-  // 列表出现外购件分类码物料（WL-WG-——键盘导航选中首项分类）
+  // 列表出现外购件分类码物料（WL-WG-——键盘导航选中首项分类）；
+  // 名称筛选定位（增量20：数据累积后 WL-WG 在 obj_no 降序下不在第一页）
+  await page.fill('[data-test="part-name-filter"]', baseName);
+  await page.locator('[data-test="part-name-filter"]').press("Enter");
   await expect(
-    page.locator('[data-test="parts-table"] .el-table__row:has-text("WL-WG-")').first(),
+    page
+      .locator('[data-test="parts-table"] .el-table__row')
+      .filter({ hasText: "WL-WG-" })
+      .first(),
   ).toBeVisible({ timeout: 15_000 });
   console.log("DBG-POST", await postDone);
 
@@ -175,10 +181,9 @@ test("board: per-state counts match and click links to filtered list", async ({ 
   await page.waitForURL("**/docs?state=working");
   // 断言分页 total 与卡片计数一致（列表 size=20 截断行数——total 才是全量）
   // toHaveText(regex) 是全串匹配；取文本后 word-boundary 比较（I1：子串在多位数间假 PASS）
+  // 卡片计数与列表 total 最终一致（全串匹配；兼容数据落地延迟——增量20 布局接线后初渲 0 的竞态钉）
   const totalEl = page.locator(".el-pagination__total");
-  await expect(totalEl).toHaveText(/\d+/, { timeout: 10_000 });
-  const totalText = await totalEl.innerText();
-  expect(new RegExp(`\\b${workingCount}\\b`).test(totalText)).toBe(true);
+  await expect(totalEl).toHaveText(`共 ${workingCount} 条`, { timeout: 10_000 });
 });
 
 test("bom version switch: live vs major=1 snapshot on detail page", async ({ page }) => {
@@ -471,4 +476,74 @@ test("todo center: three boxes + batch approve (WF-03)", async ({ page }) => {
   await expect(doneRow.locator(':text("approve")')).toBeVisible();
   await doneRow.click();
   await expect(page).toHaveURL(new RegExp(`/docs/${NO1}$`));
+});
+
+// ==================== 增量20 RPT-01 全局搜索 ====================
+
+test("global search: topbar query clusters drawings and parts (RPT-01)", async ({ page }) => {
+  await page.goto("/login");
+  await page.fill('[data-test="username"]', "admin");
+  await page.fill('[data-test="password"]', ADMIN_PW);
+  await page.click('[data-test="login-btn"]');
+  await page.waitForURL("/");
+
+  // 造数（browser fetch 直连）：图纸「六角轴承座」+ 物料「六角轴承」
+  const NO = `DWG-FE-SE-${Date.now()}`;
+  const PT = `PT-FE-SE-${Date.now()}`;
+  const setup = await page.evaluate(async ({ NO, PT }) => {
+    const api = (window as unknown as { E2E_API: string }).E2E_API;
+    const t = localStorage.getItem("rustplm_token") ?? "";
+    const ah = { Authorization: `Bearer ${t}` };
+    const fd = new FormData();
+    fd.append("obj_no", NO);
+    fd.append("attrs", JSON.stringify({ name: "六角轴承座", material: "Q235" }));
+    fd.append("file", new File(["%DWG-fe-search"], "s.dwg", { type: "application/octet-stream" }));
+    const ur = await fetch(`${api}/api/v1/docs`, { method: "POST", headers: ah, body: fd });
+    if (ur.status !== 201) return `upload ${ur.status}`;
+    const pr = await fetch(`${api}/api/v1/parts`, {
+      method: "POST",
+      headers: { ...ah, "Content-Type": "application/json" },
+      body: JSON.stringify({ class_code: "CLS-ZZ", attrs: { name: "六角轴承", material: "45钢" } }),
+    });
+    if (pr.status !== 201) return `part ${pr.status}`;
+    return "ok";
+  }, { NO, PT });
+  expect(setup).toBe("ok");
+
+  // 等扫描器（2s 周期）收编新行——轮询搜索 API 确定性就绪（并行满载下固定 sleep 不足）
+  await expect
+    .poll(
+      async () => {
+        return page.evaluate(async (no) => {
+          const api = (window as unknown as { E2E_API: string }).E2E_API;
+          const t = localStorage.getItem("rustplm_token") ?? "";
+          const r = await fetch(
+            `${api}/api/v1/search?q=${encodeURIComponent(no)}`,
+            { headers: { Authorization: `Bearer ${t}` } },
+          );
+          const d = (await r.json()) as { total: number };
+          return d.total;
+        }, NO);
+      },
+      { timeout: 15_000, intervals: [500] },
+    )
+    .toBe(1);
+
+  // 顶栏搜索 → /search?q= 聚类页（中文词：双组聚类 smoke；特定行不做排名断言——
+  // 既有 run 累积同名词会挤掉 top-10）
+  await page.fill('[data-test="global-search"]', "轴承");
+  await page.press('[data-test="global-search"]', "Enter");
+  await expect(page).toHaveURL(/\/search\?q=/);
+  await expect(
+    page.locator('[data-test="search-table-drawing"] .el-table__row').first(),
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-test="search-table-part"] .el-table__row').first()).toBeVisible();
+
+  // 编号精确搜索（纯 ASCII→obj_no term 语义钉）：行级断言+跳详情
+  await page.fill('[data-test="global-search"]', NO);
+  await page.press('[data-test="global-search"]', "Enter");
+  await expect(page).toHaveURL(new RegExp(`q=${NO}`));
+  await expect(page.locator(`[data-test="search-table-drawing"] .el-table__row:has-text("${NO}")`)).toBeVisible({ timeout: 10_000 });
+  await page.locator(`[data-test="search-table-drawing"] .el-table__row:has-text("${NO}")`).locator(':text("查看")').click();
+  await expect(page).toHaveURL(new RegExp(`/docs/${NO}$`));
 });
