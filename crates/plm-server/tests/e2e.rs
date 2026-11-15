@@ -3783,3 +3783,175 @@ async fn impl_checklist_auto_manual_and_order() {
 
     ctx.cleanup().await;
 }
+
+// ==================== 增量25 TQ-02 OpenAPI 契约快照门禁 ====================
+
+/// 结构化契约面：paths→methods、schemas→必填字段集+属性集（破坏面覆盖：
+/// 删端点/删 method/删 schema/删属性/删必填；类型变更不在面内——台账裁定）
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug)]
+struct ContractFace {
+    paths: std::collections::BTreeMap<String, Vec<String>>,
+    schemas: std::collections::BTreeMap<String, ContractSchema>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug, Default)]
+struct ContractSchema {
+    required: Vec<String>,
+    properties: Vec<String>,
+}
+
+fn extract_face(spec: &serde_json::Value) -> ContractFace {
+    let mut face = ContractFace {
+        paths: Default::default(),
+        schemas: Default::default(),
+    };
+    if let Some(paths) = spec["paths"].as_object() {
+        for (p, item) in paths {
+            let methods = item
+                .as_object()
+                .map(|m| {
+                    let mut ms: Vec<String> = m
+                        .keys()
+                        .filter(|k| {
+                            matches!(k.as_str(), "get" | "post" | "put" | "delete" | "patch")
+                        })
+                        .cloned()
+                        .collect();
+                    ms.sort();
+                    ms
+                })
+                .unwrap_or_default();
+            face.paths.insert(p.clone(), methods);
+        }
+    }
+    if let Some(comps) = spec["components"]["schemas"].as_object() {
+        for (name, sch) in comps {
+            let required = sch["required"]
+                .as_array()
+                .map(|a| {
+                    let mut v: Vec<String> = a
+                        .iter()
+                        .filter_map(|x| x.as_str().map(String::from))
+                        .collect();
+                    v.sort();
+                    v
+                })
+                .unwrap_or_default();
+            let mut properties: Vec<String> = sch["properties"]
+                .as_object()
+                .map(|m| m.keys().cloned().collect())
+                .unwrap_or_default();
+            properties.sort();
+            face.schemas.insert(
+                name.clone(),
+                ContractSchema {
+                    required,
+                    properties,
+                },
+            );
+        }
+    }
+    face
+}
+
+const SNAPSHOT_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/openapi-snapshot.json");
+
+#[tokio::test]
+async fn openapi_snapshot_gate() {
+    let ctx = TestCtx::setup("oas", 1024 * 1024).await;
+    let r = axum::http::Request::builder()
+        .method("GET")
+        .uri("/api/docs/openapi.json")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let (s, body, _) = send(&ctx.app, r).await;
+    assert_eq!(s, 200);
+    let spec: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let face = extract_face(&spec);
+
+    // 更新模式：重写基线（开发者有意变更契约时一键刷新；diff 走 git review）
+    if std::env::var("UPDATE_OPENAPI_SNAPSHOT").as_deref() == Ok("1") {
+        std::fs::write(
+            SNAPSHOT_PATH,
+            serde_json::to_string_pretty(&face).unwrap() + "\n",
+        )
+        .unwrap();
+        eprintln!("openapi-snapshot.json 已更新（git diff 审阅契约变更）");
+        ctx.cleanup().await;
+        return;
+    }
+
+    let baseline_raw = std::fs::read_to_string(SNAPSHOT_PATH)
+        .expect("契约基线缺失——跑 UPDATE_OPENAPI_SNAPSHOT=1 cargo test -p plm-server --test e2e openapi_snapshot 生成");
+    let baseline: ContractFace = serde_json::from_str(&baseline_raw).unwrap();
+
+    let mut breaking: Vec<String> = Vec::new();
+    let mut stale: Vec<String> = Vec::new();
+
+    // paths 面
+    for (p, methods) in &baseline.paths {
+        match face.paths.get(p) {
+            None => breaking.push(format!("端点被删除: {p}")),
+            Some(m) => {
+                for meth in methods {
+                    if !m.contains(meth) {
+                        breaking.push(format!("端点 {p} 失去方法 {meth}"));
+                    }
+                }
+                for meth in m {
+                    if !methods.contains(meth) {
+                        stale.push(format!("端点 {p} 新增方法 {meth}"));
+                    }
+                }
+            }
+        }
+    }
+    for p in face.paths.keys() {
+        if !baseline.paths.contains_key(p) {
+            stale.push(format!("新增端点: {p}"));
+        }
+    }
+    // schemas 面
+    for (name, bs) in &baseline.schemas {
+        match face.schemas.get(name) {
+            None => breaking.push(format!("schema 被删除: {name}")),
+            Some(fs) => {
+                for f in &bs.required {
+                    if !fs.required.contains(f) {
+                        breaking.push(format!("schema {name} 必填字段被移除: {f}"));
+                    }
+                }
+                for f in &bs.properties {
+                    if !fs.properties.contains(f) {
+                        breaking.push(format!("schema {name} 属性被移除: {f}"));
+                    }
+                }
+                for f in &fs.required {
+                    if !bs.required.contains(f) {
+                        stale.push(format!("schema {name} 新增必填: {f}"));
+                    }
+                }
+                for f in &fs.properties {
+                    if !bs.properties.contains(f) {
+                        stale.push(format!("schema {name} 新增属性: {f}"));
+                    }
+                }
+            }
+        }
+    }
+    for name in face.schemas.keys() {
+        if !baseline.schemas.contains_key(name) {
+            stale.push(format!("新增 schema: {name}"));
+        }
+    }
+
+    if !breaking.is_empty() || !stale.is_empty() {
+        panic!(
+            "OpenAPI 契约快照不匹配。\n破坏性变更（对外承诺断裂，禁止直接合并）:\n{}\n快照过期（向后兼容新增，确认后更新基线）:\n{}\n—— 有意变更请运行 UPDATE_OPENAPI_SNAPSHOT=1 cargo test -p plm-server --test e2e openapi_snapshot 刷新基线并 git diff 审阅",
+            breaking.join("\n"),
+            stale.join("\n")
+        );
+    }
+
+    ctx.cleanup().await;
+}

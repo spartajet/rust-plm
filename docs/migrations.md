@@ -100,3 +100,10 @@
 - **报表/看板域与插件依赖声明后置**：RPT-04 报表库未建（无可导出实体）；PLG-08 插件系统 V1.5。
 - **checklist 人工状态复用 sys_param**（impl_checklist_done JSON 数组）——零新迁移；list_params 过滤内部键（不混入安全参数面板）。
 - **auto 步阈值**：org≥2 人/perm 非admin 挂角色/coding 挂规则≥1/types attr 总数≥5（含种子 11——全新装即 done，终审 M2 文案已对齐"完成属性建模"语义）/flow 显式 flow_tier/data 对象≥1——判定语义以代码为权威（e2e 钉）。
+
+## 增量25（TQ-02 OpenAPI 快照门禁）：无新迁移
+
+**裁定**：
+- **自写结构化对比替代 oasdiff**：PRD 提名 oasdiff（go 二进制）——引入外部工具链成本高；自写覆盖破坏面主集（删端点/删 method/删 schema/删属性/删必填字段）；类型变更/响应运行时校验不在对比面（台账记）。
+- **基线随仓库**：crates/plm-server/tests/openapi-snapshot.json 进 review diff——契约变更显式可见；更新流=UPDATE_OPENAPI_SNAPSHOT=1 单测重写。
+- **注册面缺口台账（终审 I1-1）**：OpenAPI 注册 26/42 路由——docs 生命周期 7 条（submit/approve/reject/release/revise/obsolete/versions）、boms expand/where-used、im/actions、sec/users/roles/webhooks×3 等未注册（门禁不感知其删除/变更）；后续增量补 #[utoipa::path] 注解+注册后自动被同一门禁接管。
