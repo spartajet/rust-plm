@@ -4,7 +4,7 @@
 
 > 文档体系：[需求 v1.1](docs/PLM-产品需求文档-v1.0.md) · **[部署文档](docs/部署文档.md)** · **[需求符合度评审](docs/review-需求符合度评审.md)** · [迁移注册表](docs/migrations.md) · [ADR×19](docs/adr/README.md) · [概要设计](docs/PLM-概要设计说明书-v0.1.md) · [技术选型 v1.0](docs/PLM-技术选型说明书-v1.0.md) · [Spike 验证](spikes/REPORT.md)
 
-## 当前状态：MVP+ 主线纵切完成（24 个增量，详见 Roadmap）
+## 当前状态：MVP+ 主线纵切完成（25 个增量，详见 Roadmap）
 
 已覆盖：图纸受控/认证/授权(ABAC 密级)/生命周期(三档+Revise 升版)/Webhook 外投/BOM 引擎+版本链(冻结快照+as-of)+历史反查/COD 自动编码/PART 物料主数据(分类树+查重 MVP)/IM 卡片审批(钉钉加签/企微/飞书)/前端工作台(看板/用户管理/角色显隐/中文)。
 
@@ -141,6 +141,9 @@ PLM_DATA_DIR=./data HTTP_PORT=8080 cargo run -p plm-server
 
 # 3) 全量测试（集成测试自建唯一临时库，跑完自动删）
 TEST_DATABASE_URL=postgres://postgres:root@localhost:5432/postgres cargo test --workspace
+
+# 4) API 契约变更后刷新 OpenAPI 快照基线（TQ-02 门禁；git diff 审阅契约面变更）
+UPDATE_OPENAPI_SNAPSHOT=1 TEST_DATABASE_URL=postgres://postgres:root@localhost:5432/postgres   cargo test -p plm-server --test e2e openapi_snapshot
 ```
 
 配置项（环境变量，见 [.env.example](.env.example)）：`DATABASE_URL`（必填）、`PLM_DATA_DIR`（默认 `data`）、`HTTP_PORT`（默认 8080）、`PLM_MAX_UPLOAD`（默认 200MB）、`PLM_ADMIN_PASSWORD`（首启 admin 密码，缺省随机生成并打印一次）、`PLM_JWT_SECRET`（JWT 密钥，缺省 `data_dir/jwt.key` 文件复用；多实例必须相同）。
