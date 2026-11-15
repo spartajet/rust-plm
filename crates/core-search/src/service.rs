@@ -180,7 +180,7 @@ impl SearchService {
         let mut d = TantivyDocument::new();
         d.add_text(self.f.f_type, &r.type_code);
         d.add_text(self.f.f_obj_no, &r.obj_no);
-        d.add_text(self.f.f_obj_id, &r.id.to_string());
+        d.add_text(self.f.f_obj_id, r.id.to_string());
         let mut text = String::new();
         if let Some(n) = &r.name {
             text.push_str(n);
