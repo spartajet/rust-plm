@@ -154,3 +154,4 @@ Final: fixed M2 login 显式埋点带 IP——audit_mw 解析 x-forwarded-for �
 Final: fixed M1 search_audit 注册 OpenAPI（state.rs paths，第三次同族已入台账纪律）。
 Final: Ruling（I2）: 显式埋点词表收窄为 3 处（login 成败/flow-tier.change）——其余敏感操作暂由 http 兜底行覆盖（trace/method/path/status 全留痕，action 维度检索盲区记账）；download 埋点 deferred（handler 位置明确）；全量词表按 PRD 12 名在后续增量按需补齐（逐个加显式埋点=低价值高频改动，按审计消费需求驱动）。
 Final: minor (deferred): 响应信封 echo page/size 为原始值非 clamp 值（cosmetic）；e2e append-only 静态守卫为注释无断言（grep 已实证）；前端 from/to 时间筛选未透传（端点已支持）。
+Final: 复审残留记账：to 时间窗无钉（SQL 与 from 同构对称，回归面小）；login IP 无值级钉（XFF 场景未验，机制仅透传）；refresh 留痕随 /api/v1/auth 前缀豁免消失（SMB 裁定可接受，网关日志兜底）——三项均 Nit 级入账。
