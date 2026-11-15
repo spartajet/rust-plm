@@ -101,6 +101,8 @@ const addSearching = ref(false);
 // 汇总折叠（懒加载）
 const bomSummaryRows = ref<BomSummaryRow[]>([]);
 const bomSummaryLoaded = ref(false);
+// 折叠展开态（终审 M1-3：major 切换时若面板开着须自动刷新，避免误导性空态）
+const summaryOpen = ref<string[]>([]);
 
 const bomEditable = computed(() => auth.canWrite && bomMajor.value === 0);
 
@@ -215,6 +217,8 @@ watch(bomMajor, () => {
   bomSummaryLoaded.value = false;
   bomSummaryRows.value = [];
   reloadBom();
+  // 面板处于展开态 → 直接刷新（否则空态误导至用户重新折叠展开）
+  if (summaryOpen.value.includes("summary")) loadSummary();
 });
 
 onMounted(load);
@@ -335,7 +339,9 @@ function back() {
             添加子件
           </el-button>
         </template>
-        <span v-if="bomMajor !== 0" style="color: #909399; font-size: 12px">发布快照只读</span>
+      </div>
+      <div v-if="bomMajor !== 0" style="color: #909399; margin-bottom: 8px" data-test="bom-readonly-hint">
+        发布快照只读（切回当前版本可编辑）
       </div>
 
       <!-- 展示态：富行（编号/名称可读） -->
@@ -380,7 +386,7 @@ function back() {
       <div v-if="!editing && bomLineInfos.length === 0" style="color: #909399">无 BOM 行</div>
 
       <!-- BOM-07 汇总折叠（懒加载） -->
-      <el-collapse style="margin-top: 12px" @change="(names: string | string[]) => (Array.isArray(names) ? names : [names]).includes('summary') && loadSummary()">
+      <el-collapse v-model="summaryOpen" style="margin-top: 12px" @change="(names: string | string[]) => (Array.isArray(names) ? names : [names]).includes('summary') && loadSummary()">
         <el-collapse-item title="用量/分类汇总（BOM-07）" name="summary">
           <div style="margin-bottom: 8px">
             <el-button size="small" data-test="bom-csv-btn" @click="exportCsv">导出 CSV</el-button>

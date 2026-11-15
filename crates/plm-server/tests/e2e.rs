@@ -2948,7 +2948,7 @@ async fn bom_lines_info_summary_csv_and_abac() {
     assert_eq!(lines[2]["child_obj_no"], "DWG-B21-C");
     assert_eq!(lines[2]["qty"], 1);
 
-    // ② 汇总：多路径用量（外购=直挂3 + 经自制 5×2=10 → 13）
+    // ② 汇总：多路径用量（外购=直挂3 + 经图纸C 5×1=8）
     let (s, body) = ctx
         .get_authed("/api/v1/boms/DWG-B21-P/summary", &admin)
         .await;

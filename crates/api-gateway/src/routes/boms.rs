@@ -371,7 +371,14 @@ pub async fn summary_boms(
         // UTF-8 BOM（Excel 直开不乱码）；字段内引号/逗号转义
         let mut body = String::from("\u{FEFF}编号,名称,分类码,分类,单台用量\n");
         for r in &rows {
-            let esc = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
+            // 公式注入防护（终审 M1-2）：= + - @ 制表/回车开头的单元格加 ' 前缀（防 Excel 当公式执行）
+            let esc = |s: &str| {
+                let mut v = s.replace('"', "\"\"");
+                if matches!(v.chars().next(), Some('=' | '+' | '-' | '@' | '\t' | '\r')) {
+                    v = format!("'{v}");
+                }
+                format!("\"{v}\"")
+            };
             body.push_str(&format!(
                 "{},{},{},{},{}\n",
                 esc(&r.obj_no),

@@ -48,6 +48,15 @@
 
 - T1 完成（c23c6aa）：obj_id uuid STORED+目录 v2+uuid 依赖。
 - T2 完成（a55eb14/adcdc8b）：快照 SQL 占位符冲突（$2 既 major 又 secret——e2e 拦下）；快照存在性校验补齐（无快照 major 400）；BOM 路由父件限 drawing（part 父件后置台账）；多路径汇总语义钉（直挂3+经子装配5=8）。
-- T3 完成（e053ad7）：**两处回归被既有钉拦下**——watch(bomMajor) 重写时丢 reloadBom（bom version switch 钉）、网关 SearchHitDto 漏 obj_id（bom editor 钉）；parts 测试查重确认弹窗条件处理（历史数据累积 duplicates OR 材料匹配）。
+- T3 完成（e053ad7）：**两处回归被既有钉拦下**——watch(bomMajor) 重写时丢 reloadBom（bom version switch 钉）、网关 SearchHitDto 漏 obj_id（bom editor 钉）；parts 查重确认弹窗条件处理系增量20 修复轮（9910594）已落地——本增量仅沿用（原台账误记 T3 名下，终审 I1-2 修正）。
 - T4 完成：README/部署文档/评审报告（BOM-01 🟡 增补编辑器、BOM-07 ⬜→🟡）/migrations.md 五条裁定。
 - 修复轮：见终审报告 docs/review-增量21-终审.md。
+
+### 终审修复轮（PASS → 清偿 I1×2+M1×3）
+- I1-1：「发布快照只读」提示移出 bomEditable 容器（原死分支——as-of 用户得不到只读提示）+ data-test 钩子。
+- I1-2：台账归属修正（parts 弹窗处理系增量20 9910594）。
+- M1-1：e2e 陈旧注释（13→8 语义）更正。
+- M1-2：CSV 公式注入防护（=+-@/\t/\r 开头加 ' 前缀）。
+- M1-3：major 切换时展开态汇总面板自动刷新（summaryOpen v-model + watch 分支）。
+- M1-4/M1-5 记账后置：obj_id STORED 分词噪声（下次 schema 变更顺带 STRING|STORED）；set_lines/expand/where-used 三老端点 OpenAPI 未注册（先于本增量，后续增量补）。
+- 修复轮后：后端 165/clippy 0/前端 32/Playwright 13 全绿。
