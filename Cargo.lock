@@ -52,6 +52,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
+ "chrono",
  "core-bom",
  "core-events",
  "core-files",
@@ -409,6 +410,7 @@ name = "core-events"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "chrono",
  "core-files",
  "core-model",
  "core-version",

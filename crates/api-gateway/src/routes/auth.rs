@@ -49,11 +49,27 @@ pub async fn login(
     Extension(tid): Extension<crate::error::TraceId>,
     Json(req): Json<LoginReq>,
 ) -> Result<Json<TokenPairDto>, ApiError> {
-    let p = st
-        .sec
-        .login(&req.username, &req.password)
-        .await
-        .map_err(|e| ApiError::new(e, &tid.0))?;
+    // 审计埋点（增量18 SYS-01）：登录成功/失败均留痕（安全事件）
+    let result = st.sec.login(&req.username, &req.password).await;
+    match &result {
+        Ok(p) => st.audit.record(
+            req.username.clone(),
+            "login.ok",
+            None,
+            None,
+            Some(tid.0.clone()),
+            None,
+        ),
+        Err(e) => st.audit.record(
+            req.username.clone(),
+            "login.fail",
+            None,
+            Some(serde_json::json!({"error": e.code()})),
+            Some(tid.0.clone()),
+            None,
+        ),
+    }
+    let p = result.map_err(|e| ApiError::new(e, &tid.0))?;
     Ok(Json(dto(p)))
 }
 

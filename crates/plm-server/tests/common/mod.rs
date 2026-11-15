@@ -125,6 +125,8 @@ impl TestCtx {
             pool.clone(),
             objects.clone() as Arc<dyn core_model::ObjectStore>,
         ));
+        core_events::migrator().run(&pool).await.expect("core-events 迁移失败");
+        let audit = Arc::new(core_events::AuditService::new(pool.clone()));
         // 发布冻结注入（增量9，与 main 同源——api_gateway::bom_release_hook）
         core_events::migrator()
             .run(&pool)
@@ -143,6 +145,7 @@ impl TestCtx {
             lifecycle,
             bom,
             parts,
+            audit,
             im_secret: "im-test-secret".into(),
             im_user_map: [
                 ("im-admin".to_string(), "admin".to_string()),
@@ -351,6 +354,7 @@ pub fn degraded_app(
             bad_pool.clone(),
             objects.clone(),
         )),
+        audit: Arc::new(core_events::AuditService::new(bad_pool.clone())),
         im_secret: String::new(),
         im_user_map: Default::default(),
     })

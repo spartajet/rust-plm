@@ -1,8 +1,10 @@
 //! core-events —— 事件外投（ADR-0007）：Outbox → Webhook（HMAC 签名/退避/死信）。
 
+pub mod audit;
 pub mod dispatch;
 pub mod repo;
 
+pub use audit::AuditService;
 pub use dispatch::EventDispatcher;
 pub use repo::{WebhookRepo, WebhookSub};
 

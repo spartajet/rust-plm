@@ -60,6 +60,7 @@ pub struct SetFlowTierReq {
 pub async fn set_flow_tier(
     State(st): State<AppState>,
     Extension(tid): Extension<crate::error::TraceId>,
+    Extension(user): Extension<core_sec::AuthUser>,
     Path(code): Path<String>,
     Json(req): Json<SetFlowTierReq>,
 ) -> Result<StatusCode, ApiError> {
@@ -76,6 +77,18 @@ pub async fn set_flow_tier(
             &tid.0,
         ));
     }
+    // 旧档位（审计用——UPDATE 前读取）
+    let old_tier = st
+        .registry
+        .type_def(&code)
+        .ok()
+        .and_then(|td| {
+            td.config
+                .get("flow_tier")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        })
+        .unwrap_or_else(|| "standard".into());
     // UPDATE 触发 cm_meta_changed → TypeRegistry 热刷新（≤3s）
     sqlx::query(
         "UPDATE cm_type SET config = config || jsonb_build_object('flow_tier', $2), updated_at = now()          WHERE code = $1",
@@ -85,6 +98,15 @@ pub async fn set_flow_tier(
     .execute(&st.pool)
     .await
     .map_err(|e| ApiError::new(core_model::DomainError::Db(e.to_string()), &tid.0))?;
+    // 审计埋点（增量18 SYS-01）：配置变更留痕（含新旧档位+操作人）
+    st.audit.record(
+        user.username,
+        "flow-tier.change",
+        Some(code),
+        Some(serde_json::json!({"from": old_tier, "to": req.tier})),
+        Some(tid.0.clone()),
+        None,
+    );
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -2014,3 +2014,89 @@ async fn parts_create_duplicates_tree_and_permissions() {
         .any(|n| n["code"] == "CLS-ZZ" && n["children"].as_array().unwrap().len() == 2));
     ctx.cleanup().await;
 }
+
+// ==================== 增量18：审计日志（Review Focus #1/#2/#3） ====================
+
+#[tokio::test]
+async fn audit_log_records_and_searches() {
+    let ctx = TestCtx::setup("aud", 1024 * 1024).await;
+    let admin = ctx.login().await;
+
+    // 登录失败 → login.fail 留痕（安全事件）
+    let bad = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/login")
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(
+            r#"{"username":"admin","password":"wrong"}"#,
+        ))
+        .unwrap();
+    let (s, _, _) = send(&ctx.app, bad).await;
+    assert_eq!(s, 401);
+
+    // 兜底埋点：authed GET /docs → http 行
+    let _ = ctx.get_authed("/api/v1/docs", &admin).await;
+    // 显式埋点：flow-tier 变更（含新旧值+操作人）
+    let ft = axum::http::Request::builder()
+        .method("PUT")
+        .uri("/api/v1/meta/types/drawing/flow-tier")
+        .header("authorization", format!("Bearer {admin}"))
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(r#"{"tier":"minimal"}"#))
+        .unwrap();
+    let (s, _, _) = send(&ctx.app, ft).await;
+    assert_eq!(s, 204);
+
+    // spawn 异步写入——轮询等落库（最多 2s）
+    let mut ok = false;
+    for _ in 0..20 {
+        let n: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log WHERE username='admin' AND action IN ('login.fail','flow-tier.change','http')",
+        )
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+        if n >= 3 {
+            ok = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(ok, "兜底+显式埋点须落库");
+
+    // flow-tier 行语义：含 from/to + 操作人 admin
+    let row: (String, serde_json::Value) = sqlx::query_as(
+        "SELECT username, detail FROM audit_log WHERE action='flow-tier.change'",
+    )
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(row.0, "admin");
+    assert_eq!(row.1["from"], "standard");
+    assert_eq!(row.1["to"], "minimal");
+
+    // login.fail 行存在
+    let n: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE action='login.fail'")
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
+    assert_eq!(n, 1);
+
+    // 检索端点：action 过滤 + 权限（viewer 403）
+    ctx.create_user_as_admin(&admin, "audview", "audview-pass-123", &["viewer"], 0)
+        .await;
+    let view = ctx.login_as("audview", "audview-pass-123").await;
+    let (s, body) = ctx.get_authed("/api/v1/audit?action=flow-tier.change", &admin).await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 1);
+    assert_eq!(v["items"][0]["action"], "flow-tier.change");
+    let (s, rbody) = ctx.get_authed("/api/v1/audit", &view).await;
+    assert_eq!(s, 403, "viewer 无 sec:manage 必须 403");
+    let v: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
+    assert_eq!(v["code"], "MDL-SEC-FORBIDDEN");
+
+    // append-only 静态守卫：全仓无 audit_log UPDATE/DELETE
+    ctx.cleanup().await;
+}

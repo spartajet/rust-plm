@@ -144,6 +144,12 @@ async fn main() -> Result<()> {
         .await
         .context("mod-part 迁移失败")?;
     let parts = Arc::new(mod_part::PartService::new(pool.clone(), objects.clone()));
+    // 审计服务（增量18 SYS-01）
+    core_events::migrator()
+        .run(&pool)
+        .await
+        .context("core-events 迁移失败")?;
+    let audit = Arc::new(core_events::AuditService::new(pool.clone()));
     let lifecycle = Arc::new(core_version::LifecycleStore::new_with_hook(
         pool.clone(),
         Some(api_gateway::bom_release_hook(bom.clone())),
@@ -189,6 +195,7 @@ async fn main() -> Result<()> {
         lifecycle,
         bom,
         parts,
+        audit,
         im_secret: cfg.im_secret.clone(),
         im_user_map,
     };
