@@ -228,6 +228,11 @@ impl SecService {
                 "max_secret_level 须在 0..=3".into(),
             ));
         }
+        // SYS-04 密码策略（增量23）：最小长度参数实时读取（热生效）
+        let min_len = self.param_i64("password_min_length", 8).await?;
+        if (password.len() as i64) < min_len {
+            return Err(DomainError::SecPasswordPolicy);
+        }
         for r in roles {
             self.ensure_role(r).await?; // 终审 I2：与 grant 同语义 400
         }
@@ -431,6 +436,80 @@ impl SecService {
         })
     }
 
+    /// SYS-04 参数读取（增量23）：实时查表热生效；缺省兜底（参数行被删不致命）
+    pub async fn param_i64(&self, key: &str, default: i64) -> Result<i64> {
+        let v: Option<String> = sqlx::query_scalar("SELECT value FROM sys_param WHERE key = $1")
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(v.and_then(|s| s.trim().parse::<i64>().ok())
+            .unwrap_or(default))
+    }
+
+    /// 参数全量（GET /sec/params）
+    pub async fn params(
+        &self,
+    ) -> Result<
+        Vec<(
+            String,
+            String,
+            Option<uuid::Uuid>,
+            chrono::DateTime<chrono::Utc>,
+        )>,
+    > {
+        let rows =
+            sqlx::query_as("SELECT key, value, updated_by, updated_at FROM sys_param ORDER BY key")
+                .fetch_all(&self.pool)
+                .await?;
+        Ok(rows)
+    }
+
+    /// 参数写入（PUT；值域校验由调用方/网关按 key 白名单执行）返回旧值供审计
+    pub async fn set_param(
+        &self,
+        key: &str,
+        value: i64,
+        actor: Option<uuid::Uuid>,
+    ) -> Result<String> {
+        let old: Option<String> = sqlx::query_scalar("SELECT value FROM sys_param WHERE key = $1")
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await?;
+        let Some(old) = old else {
+            return Err(DomainError::BadRequest(format!("未知参数键: {key}")));
+        };
+        sqlx::query(
+            "UPDATE sys_param SET value = $2, updated_by = $3, updated_at = now() WHERE key = $1",
+        )
+        .bind(key)
+        .bind(value.to_string())
+        .bind(actor)
+        .execute(&self.pool)
+        .await?;
+        Ok(old)
+    }
+
+    /// 登录失败计数（增量23）：+1；达 lock_threshold → 锁 lock_minutes（参数热生效）
+    async fn record_login_failure(&self, user_id: &uuid::Uuid) -> Result<()> {
+        let threshold = self.param_i64("lock_threshold", 5).await?;
+        let minutes = self.param_i64("lock_minutes", 15).await?;
+        let attempts: i32 =
+            sqlx::query_scalar("UPDATE sec_user SET failed_attempts = failed_attempts + 1 WHERE id = $1 RETURNING failed_attempts")
+                .bind(user_id)
+                .fetch_one(&self.pool)
+                .await?;
+        if i64::from(attempts) >= threshold {
+            sqlx::query(
+                "UPDATE sec_user SET locked_until = now() + make_interval(mins => $2::int), failed_attempts = 0 WHERE id = $1",
+            )
+            .bind(user_id)
+            .bind(minutes)
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(())
+    }
+
     pub async fn login(&self, username: &str, password: &str) -> Result<TokenPair> {
         #[derive(sqlx::FromRow)]
         struct Row {
@@ -447,18 +526,50 @@ impl SecService {
         .await?;
         // 统一 401 语义：响应体与**耗时**均不区分"用户不存在/禁用/密码错"（终审 I3）——
         // 未知/禁用路径对 DUMMY_HASH 跑一次等价 argon2 验证
+        // 锁定检查在验证前（增量23）：locked_until > now() → 423（枚举权衡见 migrations.md 裁定）
         let bad = || DomainError::SecBadCredentials;
-        let r = match row {
-            Some(r) if r.enabled => r,
+        if let Some(r) = &row {
+            let locked: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
+                "SELECT locked_until FROM sec_user WHERE id = $1 AND locked_until > now()",
+            )
+            .bind(r.id)
+            .fetch_optional(&self.pool)
+            .await?;
+            if let Some(until) = locked {
+                let mins = ((until - chrono::Utc::now()).num_minutes()).max(1);
+                return Err(DomainError::SecAccountLocked(mins));
+            }
+        }
+        let verified = match row {
+            Some(r) if r.enabled => {
+                let ok = PasswordHash::new(&r.password_hash)
+                    .map(|parsed| {
+                        Argon2::default()
+                            .verify_password(password.as_bytes(), &parsed)
+                            .is_ok()
+                    })
+                    .unwrap_or(false);
+                if ok {
+                    Some(r)
+                } else {
+                    // 失败计数：达阈值 → 锁定（参数热生效）
+                    self.record_login_failure(&r.id).await?;
+                    None
+                }
+            }
             _ => {
                 fold_unknown_user(password);
-                return Err(bad());
+                None
             }
         };
-        let parsed = PasswordHash::new(&r.password_hash).map_err(|_| bad())?;
-        Argon2::default()
-            .verify_password(password.as_bytes(), &parsed)
-            .map_err(|_| bad())?;
+        let Some(r) = verified else {
+            return Err(bad());
+        };
+        // 成功登录：清零计数与锁定
+        sqlx::query("UPDATE sec_user SET failed_attempts = 0, locked_until = NULL WHERE id = $1")
+            .bind(r.id)
+            .execute(&self.pool)
+            .await?;
 
         let pair = self.issue(&r.id, &r.username).await;
         let _ = sqlx::query("UPDATE sec_user SET last_login_at = now() WHERE id = $1")
