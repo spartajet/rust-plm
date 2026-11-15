@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { flowUi, stateLabel } from "../src/utils/flowUi";
 import { guardTarget } from "../src/router/index";
 import { buildListQuery, parseNdjson } from "../src/api/docs";
+import { summarizeBatch } from "../src/api/todos";
 
 // Review Focus #2/#1：flowUi 全状态穷举（增量8 +revise 维度；增量11 +checked 态——strict 二级）
 describe("flowUi", () => {
@@ -206,4 +207,25 @@ it("/auth/ 路由 401 直接跳登录（不触发 refresh）", async () => {
   await http.post("/api/v1/auth/login", {}).catch(() => 0);
   expect(refreshCalls).toBe(0);
   expect(unauthorized).toBe(1);
+});
+
+// 增量19 WF-03：批量审批结果聚合（纯函数）
+describe("summarizeBatch", () => {
+  it("counts successes and failures", () => {
+    const r = summarizeBatch([
+      { obj_no: "A", ok: true, state: "released" },
+      { obj_no: "B", ok: false, error: "MDL-OBJ-NOT-FOUND" },
+      { obj_no: "C", ok: true },
+    ]);
+    expect(r.okCount).toBe(2);
+    expect(r.failures).toEqual([{ obj_no: "B", error: "MDL-OBJ-NOT-FOUND" }]);
+  });
+  it("all ok → empty failures", () => {
+    const r = summarizeBatch([{ obj_no: "A", ok: true }]);
+    expect(r.okCount).toBe(1);
+    expect(r.failures).toEqual([]);
+  });
+  it("empty batch → zero", () => {
+    expect(summarizeBatch([])).toEqual({ okCount: 0, failures: [] });
+  });
 });

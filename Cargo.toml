@@ -28,7 +28,7 @@ figment = { version = "0.10", features = ["env"] }
 tower-http = { version = "0.6", features = ["cors"] }
 hmac = "0.12"
 base64 = "0.22"
-utoipa = { version = "5", features = ["axum_extras", "uuid"] }
+utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono"] }
 jsonwebtoken = "9"
 casbin = { version = "2", default-features = false, features = ["runtime-tokio"] }
 argon2 = "0.5"

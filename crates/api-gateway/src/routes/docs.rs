@@ -50,6 +50,7 @@ pub struct ListResponse {
 pub async fn upload_doc(
     State(st): State<AppState>,
     Extension(tid): Extension<crate::error::TraceId>,
+    Extension(user): Extension<AuthUser>,
     mut mp: Multipart,
 ) -> Result<(StatusCode, Json<DocResponse>), ApiError> {
     let mut obj_no: Option<String> = None;
@@ -145,12 +146,15 @@ pub async fn upload_doc(
     let detail = st
         .service
         .upload_staged(
-            obj_no,
-            attrs.unwrap_or_default(),
-            file_name.unwrap_or_default(),
-            mime,
-            hash,
-            size,
+            mod_doc::StagedUpload {
+                obj_no,
+                attrs: attrs.unwrap_or_default(),
+                file_name: file_name.unwrap_or_default(),
+                mime,
+                hash,
+                size,
+            },
+            Some(user.id),
         )
         .await
         .map_err(|e| ApiError::new(e, &tid.0))?;
@@ -346,31 +350,132 @@ fn pct_encode(s: &str) -> String {
 
 // ==================== 生命周期端点（增量3） ====================
 
+/// 生命周期动作可选 body（增量19 WF-02 意见）：{"comment": "..."}；无 body/无 JSON content-type → None（向后兼容）
+#[derive(Deserialize, ToSchema)]
+pub struct LcBody {
+    pub comment: Option<String>,
+}
+
+/// 类型 require_comment 开关读取（cm_type.config.require_comment；缺省 false）
+async fn require_comment_of(st: &AppState, type_code: &str) -> Result<bool, core_model::DomainError> {
+    let td = st.registry.type_def(type_code)?;
+    Ok(td
+        .config
+        .get("require_comment")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false))
+}
+
+/// 单次生命周期迁移核心（ABAC→意见开关→迁移→审计）；Web 端点与批量审批共用，错误域内收敛
+async fn transition_once(
+    st: &AppState,
+    tid: &crate::error::TraceId,
+    user: &core_sec::AuthUser,
+    ip: Option<String>,
+    obj_no: &str,
+    ev: core_version::LifecycleEvent,
+    comment: Option<String>,
+) -> Result<core_model::BizObject, core_model::DomainError> {
+    // 终审 I1：生命周期端点同受密级 ABAC 约束（越级 404 不泄露存在性）
+    let d = st.service.detail(obj_no).await?;
+    if d.object.secret_level > user.max_secret_level {
+        return Err(core_model::DomainError::ObjNotFound(format!(
+            "docs:{obj_no}"
+        )));
+    }
+    // WF-02 审批意见必填开关（增量19）：仅约束 approve/reject（需要意见的动作）；
+    // IM 回调路径在 im.rs 内不经过此函数（豁免，台账记裁定）
+    let comment = comment.map(|c| c.trim().to_string()).filter(|c| !c.is_empty());
+    if (matches!(ev, core_version::LifecycleEvent::Approve)
+        || matches!(ev, core_version::LifecycleEvent::Reject))
+        && comment.is_none()
+        && require_comment_of(st, &d.object.type_code).await?
+    {
+        return Err(core_model::DomainError::CommentRequired);
+    }
+    let old_state = d.object.state.clone();
+    let o = st
+        .service
+        .transition(&st.lifecycle, ev, obj_no, user.id)
+        .await?;
+    // 显式审计埋点（增量19 WF-03/SYS-01）：action=事件名、object=obj_no——
+    // WF-03 已办盒数据源 + 审批留痕；audit_mw 的 http 兜底行与 action 名不同不冲突
+    st.audit.record(
+        user.username.clone(),
+        ev.as_str().to_string(),
+        Some(obj_no.to_string()),
+        Some(json!({"from": old_state, "to": o.state, "comment": comment})),
+        Some(tid.0.clone()),
+        ip,
+    );
+    Ok(o)
+}
+
 async fn do_transition(
     st: &AppState,
     tid: &crate::error::TraceId,
     user: &core_sec::AuthUser,
+    ip: Option<String>,
     obj_no: &str,
     ev: core_version::LifecycleEvent,
+    comment: Option<String>,
 ) -> Result<axum::Json<serde_json::Value>, ApiError> {
-    // 终审 I1：生命周期端点同受密级 ABAC 约束（越级 404 不泄露存在性）
-    let d = st
-        .service
-        .detail(obj_no)
-        .await
-        .map_err(|e| ApiError::new(e, &tid.0))?;
-    if d.object.secret_level > user.max_secret_level {
-        return Err(ApiError::new(
-            core_model::DomainError::ObjNotFound(format!("docs:{obj_no}")),
-            &tid.0,
-        ));
-    }
-    let o = st
-        .service
-        .transition(&st.lifecycle, ev, obj_no, user.id)
+    let o = transition_once(st, tid, user, ip, obj_no, ev, comment)
         .await
         .map_err(|e| ApiError::new(e, &tid.0))?;
     Ok(axum::Json(json!(o)))
+}
+
+// ==================== 批量审批（增量19 WF-03：同流程多对象） ====================
+
+#[derive(Deserialize, ToSchema)]
+pub struct BatchApproveReq {
+    /// 目标编号集（顺序逐个迁移；单件失败不中断批次；上限 50）
+    pub obj_nos: Vec<String>,
+    /// 审批意见（require_comment 开启时必填）
+    pub comment: Option<String>,
+}
+
+/// POST /api/v1/docs/batch-approve — 批量批准（docs:approve 门控）
+#[utoipa::path(
+    post, path = "/api/v1/docs/batch-approve",
+    request_body = BatchApproveReq,
+    responses((status = 200, body = BatchApproveResp), (status = 400), (status = 403))
+)]
+pub async fn batch_approve(
+    State(st): State<AppState>,
+    Extension(tid): Extension<crate::error::TraceId>,
+    Extension(user): Extension<core_sec::AuthUser>,
+    Extension(ip): Extension<crate::audit_mw::ClientIp>,
+    Json(req): Json<BatchApproveReq>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if req.obj_nos.is_empty() {
+        return Err(ApiError::new(
+            core_model::DomainError::BadRequest("obj_nos 不能为空".into()),
+            &tid.0,
+        ));
+    }
+    if req.obj_nos.len() > 50 {
+        return Err(ApiError::new(
+            core_model::DomainError::BadRequest("单批上限 50 件".into()),
+            &tid.0,
+        ));
+    }
+    let mut items = Vec::with_capacity(req.obj_nos.len());
+    for no in &req.obj_nos {
+        match transition_once(&st, &tid, &user, ip.0.clone(), no, core_version::LifecycleEvent::Approve, req.comment.clone())
+            .await
+        {
+            Ok(o) => items.push(json!({"obj_no": no, "ok": true, "state": o.state})),
+            Err(e) => items.push(json!({"obj_no": no, "ok": false, "error": e.code()})),
+        }
+    }
+    Ok(axum::Json(json!({ "items": items })))
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct BatchApproveResp {
+    pub items: Vec<serde_json::Value>,
 }
 
 macro_rules! lc_endpoint {
@@ -379,15 +484,19 @@ macro_rules! lc_endpoint {
             post,
             path = $path_lit,
             params(("obj_no" = String, Path)),
-            responses((status = 200, description = $doc_lit), (status = 403), (status = 404), (status = 409))
+            request_body = Option<LcBody>,
+            responses((status = 200, description = $doc_lit), (status = 400), (status = 403), (status = 404), (status = 409))
         )]
         pub async fn $fn_name(
             State(st): State<AppState>,
             Extension(tid): Extension<crate::error::TraceId>,
             Extension(user): Extension<core_sec::AuthUser>,
+            Extension(ip): Extension<crate::audit_mw::ClientIp>,
             Path(obj_no): Path<String>,
+            body: Option<Json<LcBody>>,
         ) -> Result<axum::Json<serde_json::Value>, ApiError> {
-            do_transition(&st, &tid, &user, &obj_no, $ev).await
+            let comment = body.and_then(|Json(b)| b.comment);
+            do_transition(&st, &tid, &user, ip.0, &obj_no, $ev, comment).await
         }
     };
 }

@@ -46,8 +46,10 @@ pub async fn get_type(
 
 #[derive(Deserialize, ToSchema)]
 pub struct SetFlowTierReq {
-    /// minimal | standard | strict
-    pub tier: String,
+    /// minimal | standard | strict（增量19 起可选；与 require_comment 至少一项）
+    pub tier: Option<String>,
+    /// 审批意见必填开关（增量19 WF-02；缺省不改）
+    pub require_comment: Option<bool>,
 }
 
 /// PUT /api/v1/meta/types/{code}/flow-tier（docs:approve 门控；热生效 ≤3s）
@@ -68,14 +70,23 @@ pub async fn set_flow_tier(
     st.registry
         .type_def(&code)
         .map_err(|e| ApiError::new(e, &tid.0))?;
-    if core_version::FlowTier::parse(&req.tier).is_none() {
+    if req.tier.is_none() && req.require_comment.is_none() {
         return Err(ApiError::new(
-            core_model::DomainError::BadRequest(format!(
-                "档位须为 minimal|standard|strict，得到 {}",
-                req.tier
-            )),
+            core_model::DomainError::BadRequest(
+                "tier 与 require_comment 至少提供一项".into(),
+            ),
             &tid.0,
         ));
+    }
+    if let Some(tier) = &req.tier {
+        if core_version::FlowTier::parse(tier).is_none() {
+            return Err(ApiError::new(
+                core_model::DomainError::BadRequest(format!(
+                    "档位须为 minimal|standard|strict，得到 {tier}"
+                )),
+                &tid.0,
+            ));
+        }
     }
     // 旧档位（审计用——UPDATE 前读取）
     let old_tier = st
@@ -89,21 +100,46 @@ pub async fn set_flow_tier(
                 .map(String::from)
         })
         .unwrap_or_else(|| "standard".into());
-    // UPDATE 触发 cm_meta_changed → TypeRegistry 热刷新（≤3s）
+    let old_rc = st
+        .registry
+        .type_def(&code)
+        .ok()
+        .and_then(|td| {
+            td.config
+                .get("require_comment")
+                .and_then(|v| v.as_bool())
+        })
+        .unwrap_or(false);
+    // UPDATE 触发 cm_meta_changed → TypeRegistry 热刷新（≤3s）；合并未提供的键
+    let mut patch = serde_json::Map::new();
+    if let Some(tier) = &req.tier {
+        patch.insert("flow_tier".into(), serde_json::json!(tier));
+    }
+    if let Some(rc) = req.require_comment {
+        patch.insert("require_comment".into(), serde_json::json!(rc));
+    }
     sqlx::query(
-        "UPDATE cm_type SET config = config || jsonb_build_object('flow_tier', $2), updated_at = now()          WHERE code = $1",
+        "UPDATE cm_type SET config = config || $2::jsonb, updated_at = now() WHERE code = $1",
     )
     .bind(&code)
-    .bind(&req.tier)
+    .bind(serde_json::Value::Object(patch))
     .execute(&st.pool)
     .await
     .map_err(|e| ApiError::new(core_model::DomainError::Db(e.to_string()), &tid.0))?;
-    // 审计埋点（增量18 SYS-01）：配置变更留痕（含新旧档位+操作人）
+    // 审计埋点（增量18 SYS-01）：配置变更留痕（含新旧档位/意见开关+操作人）
+    let old_rc_json = if old_rc { serde_json::json!(true) } else { serde_json::json!(false) };
+    let new_rc_json = req
+        .require_comment
+        .map(|rc| serde_json::json!(rc))
+        .unwrap_or(old_rc_json.clone());
     st.audit.record(
         user.username,
         "flow-tier.change",
         Some(code),
-        Some(serde_json::json!({"from": old_tier, "to": req.tier})),
+        Some(serde_json::json!({
+            "from": old_tier.clone(), "to": req.tier.clone().unwrap_or(old_tier),
+            "require_comment_from": old_rc_json, "require_comment_to": new_rc_json,
+        })),
         Some(tid.0.clone()),
         None,
     );

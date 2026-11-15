@@ -32,6 +32,7 @@ pub struct ImActionReq {
 pub async fn im_action(
     State(st): State<AppState>,
     Extension(tid): Extension<crate::error::TraceId>,
+    Extension(ip): Extension<crate::audit_mw::ClientIp>,
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Json<serde_json::Value>, ApiError> {
@@ -119,6 +120,15 @@ pub async fn im_action(
         .transition(&st.lifecycle, ev, &req.obj_no, uid)
         .await
         .map_err(|e| ApiError::new(e, &tid.0))?;
+    // 显式审计埋点（增量19 WF-03）：IM 审批与 Web 端同构入已办/审计（卡片无意见输入，comment 缺省）
+    st.audit.record(
+        username.clone(),
+        ev.as_str().to_string(),
+        Some(req.obj_no.clone()),
+        Some(json!({"from": d.object.state, "to": o.state, "via": "im"})),
+        Some(tid.0.clone()),
+        ip.0,
+    );
     Ok(Json(json!({
         "obj_no": o.obj_no,
         "state": o.state,

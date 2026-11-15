@@ -9,6 +9,7 @@ pub mod infra;
 pub mod meta;
 pub mod parts;
 pub mod sec_users;
+pub mod todos;
 pub mod webhooks;
 
 use crate::middleware::{require_authn, require_perm};
@@ -34,6 +35,8 @@ pub fn build(state: AppState) -> Router {
         .route("/api/v1/parts", get(parts::list_parts))
         .route("/api/v1/parts/duplicates", get(parts::duplicates))
         .route("/api/v1/classes", get(parts::class_tree))
+        // WF-03 待办中心（增量19）：与 docs 列表同层 docs:read；ABAC 在服务内
+        .route("/api/v1/todos", get(todos::list_todos))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             require_perm("docs", "read"),
@@ -48,6 +51,7 @@ pub fn build(state: AppState) -> Router {
         ));
     let docs_lc_approve = Router::new()
         .route("/api/v1/docs/{obj_no}/approve", post(docs::approve_doc))
+        .route("/api/v1/docs/batch-approve", post(docs::batch_approve))
         .route("/api/v1/docs/{obj_no}/obsolete", post(docs::obsolete_doc))
         .route("/api/v1/docs/{obj_no}/release", post(docs::release_doc))
         .layer(axum::middleware::from_fn_with_state(

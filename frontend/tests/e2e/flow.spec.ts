@@ -393,3 +393,82 @@ test("state filter writes back to URL and survives reload", async ({ page }) => 
   await page.waitForURL("**state=working**");
   await expect(page.locator(".el-pagination__total")).toHaveText(/\d+/);
 });
+
+// ==================== 增量19 WF-03 待办中心 ====================
+
+test("todo center: three boxes + batch approve (WF-03)", async ({ page }) => {
+  // 造数（browser fetch 直连后端）：建 editor → editor 上传并提交两件
+  await page.goto("/login");
+  await page.fill('[data-test="username"]', "admin");
+  await page.fill('[data-test="password"]', ADMIN_PW);
+  await page.click('[data-test="login-btn"]');
+  await page.waitForURL("/");
+
+  const ED = `fe2todo${Date.now()}`;
+  const NO1 = `DWG-FE-TD1-${Date.now()}`;
+  const NO2 = `DWG-FE-TD2-${Date.now()}`;
+  const setup = await page.evaluate(async ({ ED, NO1, NO2 }) => {
+    const api = (window as unknown as { E2E_API: string }).E2E_API;
+    const t = localStorage.getItem("rustplm_token") ?? "";
+    const ah = { Authorization: `Bearer ${t}` };
+    let r = await fetch(`${api}/api/v1/sec/users`, {
+      method: "POST",
+      headers: { ...ah, "Content-Type": "application/json" },
+      body: JSON.stringify({ username: ED, password: "fe2todo-pass-123", roles: ["editor"] }),
+    });
+    if (r.status !== 201 && r.status !== 409) return `create-user ${r.status}`;
+    r = await fetch(`${api}/api/v1/sec/users/${ED}/roles/editor`, { method: "POST", headers: ah });
+    if (r.status !== 204 && r.status !== 409) return `grant ${r.status}`;
+    const lr = await fetch(`${api}/api/v1/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: ED, password: "fe2todo-pass-123" }),
+    });
+    const et = ((await lr.json()) as { access_token: string }).access_token;
+    for (const no of [NO1, NO2]) {
+      const fd = new FormData();
+      fd.append("obj_no", no);
+      fd.append("attrs", JSON.stringify({ name: "前端待办件" }));
+      fd.append("file", new File(["%DWG-fe-todo"], "t.dwg", { type: "application/octet-stream" }));
+      const ur = await fetch(`${api}/api/v1/docs`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${et}` },
+        body: fd,
+      });
+      if (ur.status !== 201) return `upload ${no} ${ur.status}`;
+      const sr = await fetch(`${api}/api/v1/docs/${no}/submit`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${et}` },
+      });
+      if (sr.status !== 200) return `submit ${no} ${sr.status}`;
+    }
+    return "ok";
+  }, { ED, NO1, NO2 });
+  expect(setup).toBe("ok");
+
+  // 待办 tab：两行可见（提交人=editor）
+  await page.goto("/todos");
+  await expect(page.locator(`.el-table__row:has-text("${NO1}")`)).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator(`.el-table__row:has-text("${NO2}")`)).toBeVisible();
+  await expect(
+    page.locator(`.el-table__row:has-text("${NO1}")`).locator(`:text("${ED}")`),
+  ).toBeVisible();
+
+  // 批量批准：勾选两行 → 弹窗填意见 → 成功提示 → 待办清空
+  await page.locator(`.el-table__row:has-text("${NO1}") .el-checkbox`).click();
+  await page.locator(`.el-table__row:has-text("${NO2}") .el-checkbox`).click();
+  await page.click('[data-test="batch-approve"]');
+  await expect(page.locator(".el-message-box__input textarea")).toBeVisible({ timeout: 10_000 });
+  await page.fill(".el-message-box__input textarea", "前端批量放行");
+  await page.click(".el-message-box__btns .el-button--primary");
+  await expect(page.locator('.el-message:has-text("已批准 2 件")')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator(`.el-table__row:has-text("${NO1}")`)).toHaveCount(0, { timeout: 10_000 });
+
+  // 已办 tab：approve 行可见；行点击跳详情
+  await page.click('[data-test="tab-done"]');
+  const doneRow = page.locator(`.el-table__row:has-text("${NO1}")`);
+  await expect(doneRow).toBeVisible({ timeout: 10_000 });
+  await expect(doneRow.locator(':text("approve")')).toBeVisible();
+  await doneRow.click();
+  await expect(page).toHaveURL(new RegExp(`/docs/${NO1}$`));
+});

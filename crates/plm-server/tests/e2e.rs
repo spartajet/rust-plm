@@ -4,7 +4,7 @@
 mod common;
 
 use common::{multipart_body, send, TestCtx};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use std::io::Cursor;
 
 const FILE: &[u8] = b"%DWG-e2e-content-9876543210";
@@ -2146,5 +2146,479 @@ async fn audit_log_records_and_searches() {
     assert_eq!(v["code"], "MDL-SEC-FORBIDDEN");
 
     // append-only 静态守卫：全仓无 audit_log UPDATE/DELETE
+    ctx.cleanup().await;
+}
+
+// ==================== 增量19 WF-03 待办中心 ====================
+
+#[tokio::test]
+async fn todos_center_three_boxes_and_abac() {
+    let ctx = TestCtx::setup("todo", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "todoed", "todoed-pass-123", &["editor"], 0)
+        .await;
+    ctx.create_user_as_admin(&admin, "todolow", "todolow-pass-123", &["editor"], 0)
+        .await;
+    // peer：无任何自身提交的纯观察者——待办可见性只由他人提交+密级决定（ABAC 钉去混淆）
+    ctx.create_user_as_admin(&admin, "todopeer", "todopeer-pass-123", &["editor"], 0)
+        .await;
+    let ed = ctx.login_as("todoed", "todoed-pass-123").await;
+    let low = ctx.login_as("todolow", "todolow-pass-123").await;
+    let peer = ctx.login_as("todopeer", "todopeer-pass-123").await;
+
+    // todoed 上传 level-0 件并提交；todolow 上传密级 2 件并提交
+    let (s, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&ed),
+            "DWG-TODO-1",
+            r#"{"name":"轴承座"}"#,
+            Some("t1.dwg"),
+            FILE.to_vec(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201);
+    let (s, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&low),
+            "DWG-TODO-S",
+            r#"{"name":"保密件"}"#,
+            Some("ts.dwg"),
+            FILE.to_vec(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201);
+
+    let sub = |t: &str, no: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/submit"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let (s, _, _) = send(&ctx.app, sub(&ed, "DWG-TODO-1")).await;
+    assert_eq!(s, 200);
+    let (s, _, _) = send(&ctx.app, sub(&low, "DWG-TODO-S")).await;
+    assert_eq!(s, 200);
+    // 提交后再提密（fail-closed ABAC 下低权限者无法操作越密对象；密级变更受控属 SYS 域）
+    sqlx::query("UPDATE cm_object SET secret_level = 2 WHERE obj_no = 'DWG-TODO-S'")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+
+    // 待办盒（admin）：两件都在，提交人/名称/状态齐
+    let (s, body) = ctx.get_authed("/api/v1/todos?box=todo", &admin).await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 2);
+    let items = v["items"].as_array().unwrap();
+    let t1 = items.iter().find(|i| i["obj_no"] == "DWG-TODO-1").expect("待办含 TODO-1");
+    assert_eq!(t1["submitter"], "todoed");
+    assert_eq!(t1["name"], "轴承座");
+    assert_eq!(t1["state"], "review");
+    let ts = items.iter().find(|i| i["obj_no"] == "DWG-TODO-S").expect("待办含 TODO-S");
+    assert_eq!(ts["submitter"], "todolow");
+
+    // 待办盒（editor）：自己的提交不算待办；密级 2 件越权不可见 → 空
+    let (s, body) = ctx.get_authed("/api/v1/todos?box=todo", &ed).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 0, "editor 待办应为空");
+
+    // ABAC 钉（peer 无自身提交）：只见 level-0 的 TODO-1，level-2 的 TODO-S 被密级过滤
+    let (s, body) = ctx.get_authed("/api/v1/todos?box=todo", &peer).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 1, "peer 待办恰一件");
+    assert_eq!(v["items"][0]["obj_no"], "DWG-TODO-1");
+
+    // 待办盒（todolow）：TODO-1 可见（密级 0、他人提交）；自己的 TODO-S 不入待办
+    let (s, body) = ctx.get_authed("/api/v1/todos?box=todo", &low).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 1, "low 待办恰一件");
+    assert_eq!(v["items"][0]["obj_no"], "DWG-TODO-1");
+
+    // 我发起盒：editor 见自己的 DWG-TODO-1；low 无
+    let (s, body) = ctx.get_authed("/api/v1/todos?box=mine", &ed).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 1);
+    assert_eq!(v["items"][0]["obj_no"], "DWG-TODO-1");
+    let (s, body) = ctx.get_authed("/api/v1/todos?box=mine", &low).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 0);
+
+    // admin 批准 TODO-1（无 body——向后兼容）→ 显式审计行（from/to）
+    let app = |t: &str, no: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/approve"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let (s, body, _) = send(&ctx.app, app(&admin, "DWG-TODO-1")).await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+
+    // spawn 异步写审计——轮询等落库
+    let mut ok = false;
+    for _ in 0..20 {
+        let n: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log WHERE action='approve' AND object='DWG-TODO-1'",
+        )
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+        if n == 1 {
+            ok = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(ok, "approve 显式审计行须落库");
+    let row: serde_json::Value =
+        sqlx::query("SELECT detail FROM audit_log WHERE action='approve' AND object='DWG-TODO-1'")
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap()
+            .get("detail");
+    assert_eq!(row["from"], "review");
+    assert_eq!(row["to"], "released");
+
+    // 待办消失、已办出现（admin 视角 approve 行；editor 视角 submit 行）
+    let (s, body) = ctx.get_authed("/api/v1/todos?box=todo", &admin).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 1, "仅剩 TODO-S");
+    let (s, body) = ctx.get_authed("/api/v1/todos?box=done", &admin).await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(v["total"].as_i64().unwrap() >= 1, "admin 已办含 approve 行");
+    let done = v["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["obj_no"] == "DWG-TODO-1" && i["action"] == "approve")
+        .expect("已办含 approve 行");
+    assert_eq!(done["state"], "released");
+    let (s, body) = ctx.get_authed("/api/v1/todos?box=done", &ed).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let ed_done = v["items"].as_array().unwrap();
+    assert!(
+        ed_done.iter().any(|i| i["obj_no"] == "DWG-TODO-1" && i["action"] == "submit"),
+        "editor 已办含自己的提交行"
+    );
+    assert!(
+        !ed_done.iter().any(|i| i["action"] == "approve"),
+        "editor 无审批动作"
+    );
+
+    // 非法盒名 → 400
+    let (s, _) = ctx.get_authed("/api/v1/todos?box=bogus", &admin).await;
+    assert_eq!(s, 400);
+
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn lifecycle_comment_record_and_require_switch() {
+    let ctx = TestCtx::setup("cmt", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "cmted", "cmted-pass-123", &["editor"], 0)
+        .await;
+    let ed = ctx.login_as("cmted", "cmted-pass-123").await;
+
+    let upload = |t: &str, no: &str| {
+        send(
+            &ctx.app,
+            post_docs_multipart(Some(t), no, r#"{"name":"N"}"#, Some("c.dwg"), FILE.to_vec()),
+        )
+    };
+    let sub = |t: &str, no: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/submit"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let act_json = |t: &str, no: &str, act: &str, body: Option<&str>| {
+        let bld = axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/{act}"))
+            .header("authorization", format!("Bearer {t}"));
+        match body {
+            Some(s) => bld
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(s.to_string()))
+                .unwrap(),
+            None => bld.body(axum::body::Body::empty()).unwrap(),
+        }
+    };
+
+    // ① approve 带 JSON 意见 → 200；audit 显式行含 comment/from/to
+    let (s, _, _) = upload(&ed, "DWG-CMT-1").await;
+    assert_eq!(s, 201);
+    let (s, _, _) = send(&ctx.app, sub(&ed, "DWG-CMT-1")).await;
+    assert_eq!(s, 200);
+    let (s, body, _) = send(
+        &ctx.app,
+        act_json(&admin, "DWG-CMT-1", "approve", Some(r#"{"comment":"质量合格，准予发布"}"#)),
+    )
+    .await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let mut ok = false;
+    for _ in 0..20 {
+        let n: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log WHERE action='approve' AND object='DWG-CMT-1'",
+        )
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+        if n == 1 {
+            ok = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(ok, "approve 审计行须落库");
+    let row: serde_json::Value =
+        sqlx::query("SELECT detail FROM audit_log WHERE action='approve' AND object='DWG-CMT-1'")
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap()
+            .get("detail");
+    assert_eq!(row["comment"], "质量合格，准予发布");
+    assert_eq!(row["from"], "review");
+    assert_eq!(row["to"], "released");
+
+    // ② reject 带意见 → working；audit reject 行含 comment
+    let (s, _, _) = upload(&ed, "DWG-CMT-2").await;
+    assert_eq!(s, 201);
+    let (s, _, _) = send(&ctx.app, sub(&ed, "DWG-CMT-2")).await;
+    assert_eq!(s, 200);
+    let (s, body, _) = send(
+        &ctx.app,
+        act_json(&admin, "DWG-CMT-2", "reject", Some(r#"{"comment":"尺寸标注缺失"}"#)),
+    )
+    .await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["state"], "working");
+    for _ in 0..20 {
+        let n: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log WHERE action='reject' AND object='DWG-CMT-2' \
+             AND detail->>'comment' = '尺寸标注缺失'",
+        )
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+        if n == 1 {
+            ok = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(ok, "reject 审计行须含意见");
+
+    // ③ 开启 require_comment（tier+开关同请求生效）→ 无意见 approve 400 CommentRequired
+    let (s, _, _) = upload(&ed, "DWG-CMT-3").await;
+    assert_eq!(s, 201);
+    let (s, _, _) = send(&ctx.app, sub(&ed, "DWG-CMT-3")).await;
+    assert_eq!(s, 200);
+    let sw = axum::http::Request::builder()
+        .method("PUT")
+        .uri("/api/v1/meta/types/drawing/flow-tier")
+        .header("authorization", format!("Bearer {admin}"))
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(r#"{"tier":"standard","require_comment":true}"#))
+        .unwrap();
+    let (s, _, _) = send(&ctx.app, sw).await;
+    assert_eq!(s, 204);
+    // 热刷新等待（registry NOTIFY/兜底轮询 ≤3s；与 flow_tier 测试同约定）
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    // submit 不受开关约束（提交无意见输入）
+    let (s, _, _) = upload(&ed, "DWG-CMT-4").await;
+    assert_eq!(s, 201);
+    let (s, _, _) = send(&ctx.app, sub(&ed, "DWG-CMT-4")).await;
+    assert_eq!(s, 200);
+    // 无意见 approve → 400 + 稳定错误码
+    let (s, body, _) = send(&ctx.app, act_json(&admin, "DWG-CMT-3", "approve", None)).await;
+    assert_eq!(s, 400, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["code"], "MDL-LCS-COMMENT-REQUIRED");
+    // 带意见 → 200
+    let (s, body, _) = send(
+        &ctx.app,
+        act_json(&admin, "DWG-CMT-3", "approve", Some(r#"{"comment":"ok"}"#)),
+    )
+    .await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    // 空串意见同样视为缺失
+    let (s, body, _) = send(&ctx.app, act_json(&admin, "DWG-CMT-4", "approve", Some(r#"{"comment":"  "}"#))).await;
+    assert_eq!(s, 400, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["code"], "MDL-LCS-COMMENT-REQUIRED");
+
+    // ④ IM 回调豁免（HMAC 可信路径，卡片无意见输入）——开关开启下无意见仍 200
+    let (s, _, _) = upload(&ed, "DWG-CMT-5").await;
+    assert_eq!(s, 201);
+    let (s, _, _) = send(&ctx.app, sub(&ed, "DWG-CMT-5")).await;
+    assert_eq!(s, 200);
+    let body = serde_json::json!({"user": "im-admin", "obj_no": "DWG-CMT-5", "action": "approve"});
+    let (s, _, _) = send(&ctx.app, im_action(&body.to_string(), Some(&im_sign_hex("im-test-secret", &body.to_string())))).await;
+    assert_eq!(s, 200, "IM 回调无意见须豁免开关");
+
+    // ⑤ 关闭开关 → 无意见 approve 照旧（可逆）
+    let sw = axum::http::Request::builder()
+        .method("PUT")
+        .uri("/api/v1/meta/types/drawing/flow-tier")
+        .header("authorization", format!("Bearer {admin}"))
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(r#"{"require_comment":false}"#))
+        .unwrap();
+    let (s, _, _) = send(&ctx.app, sw).await;
+    assert_eq!(s, 204);
+    // 热刷新等待（关闭开关同 ≤3s）
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    let (s, _, _) = upload(&ed, "DWG-CMT-6").await;
+    assert_eq!(s, 201);
+    let (s, _, _) = send(&ctx.app, sub(&ed, "DWG-CMT-6")).await;
+    assert_eq!(s, 200);
+    let (s, _, _) = send(&ctx.app, act_json(&admin, "DWG-CMT-6", "approve", None)).await;
+    assert_eq!(s, 200);
+
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn batch_approve_partial_results_and_guards() {
+    let ctx = TestCtx::setup("bat", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "bated", "bated-pass-123", &["editor"], 0)
+        .await;
+    let ed = ctx.login_as("bated", "bated-pass-123").await;
+
+    let upload = |t: &str, no: &str| {
+        send(
+            &ctx.app,
+            post_docs_multipart(Some(t), no, r#"{"name":"N"}"#, Some("b.dwg"), FILE.to_vec()),
+        )
+    };
+    let sub = |t: &str, no: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/submit"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    for no in ["DWG-BAT-1", "DWG-BAT-2", "DWG-BAT-3"] {
+        let (s, _, _) = upload(&ed, no).await;
+        assert_eq!(s, 201);
+        let (s, _, _) = send(&ctx.app, sub(&ed, no)).await;
+        assert_eq!(s, 200);
+    }
+
+    let batch = |t: &str, body: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/docs/batch-approve")
+            .header("authorization", format!("Bearer {t}"))
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body.to_string()))
+            .unwrap()
+    };
+
+    // ① 混合批次：两件成功 + 不存在编号逐项报错（不中断批次）
+    let (s, body, _) = send(
+        &ctx.app,
+        batch(
+            &admin,
+            r#"{"obj_nos":["DWG-BAT-1","DWG-BAT-2","DWG-NOPE-404"]}"#,
+        ),
+    )
+    .await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let items = v["items"].as_array().unwrap();
+    assert_eq!(items.len(), 3);
+    let find = |no: &str| items.iter().find(|i| i["obj_no"] == no).unwrap();
+    assert_eq!(find("DWG-BAT-1")["ok"], true);
+    assert_eq!(find("DWG-BAT-1")["state"], "released");
+    assert_eq!(find("DWG-BAT-2")["ok"], true);
+    assert_eq!(find("DWG-NOPE-404")["ok"], false);
+    assert_eq!(find("DWG-NOPE-404")["error"], "MDL-OBJ-NOT-FOUND");
+    // 审计：两件 approve 行（含 from/to）
+    for _ in 0..20 {
+        let n: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log WHERE action='approve' AND object LIKE 'DWG-BAT-%'",
+        )
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+        if n == 2 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action='approve' AND object LIKE 'DWG-BAT-%'",
+    )
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(n, 2, "批量审批两件须各留审计行");
+
+    // ② editor 无 docs:approve → 403
+    let (s, _, _) = send(&ctx.app, batch(&ed, r#"{"obj_nos":["DWG-BAT-3"]}"#)).await;
+    assert_eq!(s, 403);
+
+    // ③ 超上限 50 → 400
+    let many: Vec<String> = (0..51).map(|i| format!("\"DWG-X{i}\"")).collect();
+    let (s, _, _) = send(
+        &ctx.app,
+        batch(&admin, &format!("{{\"obj_nos\":[{}]}}", many.join(","))),
+    )
+    .await;
+    assert_eq!(s, 400);
+
+    // ④ 空批次 → 400
+    let (s, _, _) = send(&ctx.app, batch(&admin, r#"{"obj_nos":[]}"#)).await;
+    assert_eq!(s, 400);
+
+    // ⑤ require_comment 开启：批量无意见 → 逐项 ok:false CommentRequired；带意见 → 成功
+    let sw = axum::http::Request::builder()
+        .method("PUT")
+        .uri("/api/v1/meta/types/drawing/flow-tier")
+        .header("authorization", format!("Bearer {admin}"))
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(r#"{"require_comment":true}"#))
+        .unwrap();
+    let (s, _, _) = send(&ctx.app, sw).await;
+    assert_eq!(s, 204);
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    let (s, body, _) = send(&ctx.app, batch(&admin, r#"{"obj_nos":["DWG-BAT-3"]}"#)).await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["items"][0]["ok"], false);
+    assert_eq!(v["items"][0]["error"], "MDL-LCS-COMMENT-REQUIRED");
+    let (s, body, _) = send(
+        &ctx.app,
+        batch(&admin, r#"{"obj_nos":["DWG-BAT-3"],"comment":"批量放行"}"#),
+    )
+    .await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["items"][0]["ok"], true);
+    assert_eq!(v["items"][0]["state"], "released");
+
     ctx.cleanup().await;
 }

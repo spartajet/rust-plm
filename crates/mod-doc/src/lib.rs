@@ -13,4 +13,4 @@ pub fn migrator() -> sqlx::migrate::Migrator {
 }
 
 pub use dto::{DocDetail, FileInfo};
-pub use service::DocService;
+pub use service::{DocService, StagedUpload, TodoBox, TodoItem};
