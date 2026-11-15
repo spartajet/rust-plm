@@ -4,6 +4,8 @@ import type { AxiosInstance } from "axios";
 export interface SearchHit {
   type_code: string;
   obj_no: string;
+  /// 对象 uuid（增量21：BOM 编辑器选件直接取 id）
+  obj_id?: string;
   name?: string | null;
   state: string;
   major_ver: number;

@@ -4,6 +4,7 @@ import { guardTarget } from "../src/router/index";
 import { buildListQuery, parseNdjson } from "../src/api/docs";
 import { summarizeBatch } from "../src/api/todos";
 import { groupLabel } from "../src/api/search";
+import { buildSetLinesPayload } from "../src/api/docs";
 
 // Review Focus #2/#1：flowUi 全状态穷举（增量8 +revise 维度；增量11 +checked 态——strict 二级）
 describe("flowUi", () => {
@@ -239,5 +240,26 @@ describe("groupLabel", () => {
   });
   it("未知类型回退原码", () => {
     expect(groupLabel("eco")).toBe("eco");
+  });
+});
+
+// 增量21 BOM-01：编辑行 → set_lines payload（行号重排，纯函数）
+describe("buildSetLinesPayload", () => {
+  it("行号重排 1..n 并取 child_id/qty", () => {
+    const p = buildSetLinesPayload([
+      { child_id: "b", child_obj_no: "B", qty: 3 },
+      { child_id: "a", child_obj_no: "A", qty: 1 },
+    ]);
+    expect(p).toEqual([
+      { line_no: 1, child: "b", qty: 3 },
+      { line_no: 2, child: "a", qty: 1 },
+    ]);
+  });
+  it("qty 缺省 1（UI 校验兜底前）", () => {
+    const p = buildSetLinesPayload([{ child_id: "x", child_obj_no: "X", qty: null }]);
+    expect(p[0].qty).toBe(1);
+  });
+  it("空行集 → 空 payload", () => {
+    expect(buildSetLinesPayload([])).toEqual([]);
   });
 });

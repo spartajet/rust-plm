@@ -4,7 +4,28 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { extractApiError } from "../api/http";
 import { http } from "../api/index";
-import { bomExpand, downloadFile, getDoc, listVersions, whereUsedAsof, whereUsedLive, transition, type BomRow, type DocResponse, type VersionSnapshot, type WhereUsedAsofRow, type WhereUsedLiveRow } from "../api/docs";
+import {
+  bomExpand,
+  bomLines,
+  bomSummary,
+  buildSetLinesPayload,
+  downloadBomSummaryCsv,
+  downloadFile,
+  getDoc,
+  listVersions,
+  setBomLines,
+  whereUsedAsof,
+  whereUsedLive,
+  transition,
+  type BomEditRow,
+  type BomRow,
+  type BomSummaryRow,
+  type DocResponse,
+  type VersionSnapshot,
+  type WhereUsedAsofRow,
+  type WhereUsedLiveRow,
+} from "../api/docs";
+import { searchGlobal } from "../api/search";
 import { useAuthStore } from "../stores/auth";
 import { flowUi, stateLabel, stateTagType } from "../utils/flowUi";
 import type { LifecycleAction } from "../api/docs";
@@ -15,6 +36,8 @@ const objNo = route.params.objNo as string;
 
 const doc = ref<DocResponse | null>(null);
 const bomRows = ref<BomRow[]>([]);
+// 富行（增量21）：编号/名称直接可读；live 与 as-of 均走 /lines
+const bomLineInfos = ref<Awaited<ReturnType<typeof bomLines>>>([]);
 const snapshots = ref<VersionSnapshot[]>([]);
 const wuRows = ref<WhereUsedAsofRow[]>([]);
 const wuLive = ref<WhereUsedLiveRow[]>([]);
@@ -37,7 +60,7 @@ async function load() {
   loading.value = true;
   try {
     doc.value = await getDoc(http, objNo);
-    bomRows.value = await bomExpand(http, objNo, "onelevel", bomMajor.value || undefined);
+    bomLineInfos.value = await bomLines(http, objNo, bomMajor.value || undefined);
     snapshots.value = (await listVersions(http, objNo)).snapshots;
   } catch (e) {
     ElMessage.error(extractApiError(e));
@@ -59,15 +82,140 @@ async function load() {
 }
 
 async function reloadBom() {
-  bomRows.value = []; // 切换失败时不得残留上一版行（终审 M4）
+  bomLineInfos.value = []; // 切换失败时不得残留上一版行（终审 M4）
   try {
-    bomRows.value = await bomExpand(http, objNo, "onelevel", bomMajor.value || undefined);
+    bomLineInfos.value = await bomLines(http, objNo, bomMajor.value || undefined);
   } catch (e) {
     ElMessage.error(extractApiError(e));
   }
 }
 
-watch(bomMajor, reloadBom);
+// ==================== 增量21 BOM-01 编辑器 + BOM-07 汇总 ====================
+const editing = ref(false);
+const editRows = ref<BomEditRow[]>([]);
+const saving = ref(false);
+const addVisible = ref(false);
+const addQ = ref("");
+const addHits = ref<{ obj_id: string; obj_no: string; name?: string | null; type_code: string }[]>([]);
+const addSearching = ref(false);
+// 汇总折叠（懒加载）
+const bomSummaryRows = ref<BomSummaryRow[]>([]);
+const bomSummaryLoaded = ref(false);
+
+const bomEditable = computed(() => auth.canWrite && bomMajor.value === 0);
+
+function startEdit() {
+  editRows.value = (bomLineInfos.value ?? []).map((r) => ({
+    child_id: r.child_id,
+    child_obj_no: r.child_obj_no,
+    child_name: r.child_name,
+    qty: r.qty,
+  }));
+  editing.value = true;
+}
+
+function cancelEdit() {
+  editing.value = false;
+  editRows.value = [];
+}
+
+async function saveEdit() {
+  if (editRows.value.some((r) => r.qty === null || r.qty <= 0)) {
+    ElMessage.warning("数量须为正数");
+    return;
+  }
+  const ids = new Set(editRows.value.map((r) => r.child_id));
+  if (ids.size !== editRows.value.length) {
+    ElMessage.warning("存在重复子件行");
+    return;
+  }
+  saving.value = true;
+  try {
+    await setBomLines(http, objNo, buildSetLinesPayload(editRows.value));
+    ElMessage.success("BOM 已保存");
+    editing.value = false;
+    editRows.value = [];
+    await reloadBom();
+  } catch (e) {
+    // 409 循环引用/400 校验错误原样透出
+    ElMessage.error(extractApiError(e));
+  } finally {
+    saving.value = false;
+  }
+}
+
+function removeRow(i: number) {
+  editRows.value.splice(i, 1);
+}
+
+async function searchForAdd() {
+  const q = addQ.value.trim();
+  if (!q) return;
+  addSearching.value = true;
+  try {
+    const res = await searchGlobal(http, q);
+    addHits.value = res.groups.flatMap((g) =>
+      g.items.map((i) => ({
+        obj_id: i.obj_id ?? "",
+        obj_no: i.obj_no,
+        name: i.name,
+        type_code: g.type_code,
+      })),
+    );
+  } catch (e) {
+    ElMessage.error(extractApiError(e));
+  } finally {
+    addSearching.value = false;
+  }
+}
+
+function pickHit(h: { obj_id: string; obj_no: string; name?: string | null }) {
+  if (!h.obj_id) return;
+  if (h.obj_id === (doc.value?.object.id ?? "")) {
+    ElMessage.warning("不能引用自身（循环）");
+    return;
+  }
+  if (editRows.value.some((r) => r.child_id === h.obj_id)) {
+    ElMessage.warning("该子件已在行中");
+    return;
+  }
+  editRows.value.push({ child_id: h.obj_id, child_obj_no: h.obj_no, child_name: h.name, qty: 1 });
+  addVisible.value = false;
+  addQ.value = "";
+  addHits.value = [];
+}
+
+async function loadSummary() {
+  try {
+    bomSummaryRows.value = await bomSummary(http, objNo, bomMajor.value || undefined);
+    bomSummaryLoaded.value = true;
+  } catch (e) {
+    ElMessage.error(extractApiError(e));
+  }
+}
+
+async function exportCsv() {
+  try {
+    const blob = await downloadBomSummaryCsv(http, objNo, bomMajor.value || undefined);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `summary-${objNo}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    ElMessage.error(extractApiError(e));
+  }
+}
+
+watch(bomMajor, () => {
+  // 版本切换：编辑态失效 + 汇总缓存作废 + 重载行（原增量11 语义保留）
+  editing.value = false;
+  editRows.value = [];
+  bomSummaryLoaded.value = false;
+  bomSummaryRows.value = [];
+  reloadBom();
+});
 
 onMounted(load);
 
@@ -174,16 +322,120 @@ function back() {
           </el-select>
         </div>
       </template>
-      <el-table :data="bomRows" size="small">
-        <el-table-column label="子件" min-width="280">
-          <template #default="{ row }">{{ row.child }}</template>
+      <div v-if="bomEditable" style="margin-bottom: 8px">
+        <el-button v-if="!editing" size="small" type="primary" data-test="bom-edit-btn" @click="startEdit">
+          编辑结构
+        </el-button>
+        <template v-else>
+          <el-button size="small" type="success" data-test="bom-save-btn" :loading="saving" @click="saveEdit">
+            保存
+          </el-button>
+          <el-button size="small" data-test="bom-cancel-btn" @click="cancelEdit">取消</el-button>
+          <el-button size="small" type="primary" plain data-test="bom-add-btn" @click="addVisible = true">
+            添加子件
+          </el-button>
+        </template>
+        <span v-if="bomMajor !== 0" style="color: #909399; font-size: 12px">发布快照只读</span>
+      </div>
+
+      <!-- 展示态：富行（编号/名称可读） -->
+      <el-table v-if="!editing" :data="bomLineInfos" size="small" data-test="bom-lines-table">
+        <el-table-column label="行号" width="70">
+          <template #default="{ row }">{{ row.line_no || "-" }}</template>
         </el-table-column>
-        <el-table-column label="数量" width="120">
-          <template #default="{ row }">{{ row.qty_total }}</template>
+        <el-table-column label="子件编号" min-width="150">
+          <template #default="{ row }">{{ row.child_obj_no }}</template>
+        </el-table-column>
+        <el-table-column label="子件名称" min-width="150">
+          <template #default="{ row }">{{ row.child_name ?? "-" }}</template>
+        </el-table-column>
+        <el-table-column label="数量" width="100">
+          <template #default="{ row }">{{ row.qty }}</template>
         </el-table-column>
       </el-table>
-      <div v-if="bomRows.length === 0" style="color: #909399">无 BOM 行</div>
+      <!-- 编辑态：qty 行内编辑 + 删行 -->
+      <el-table v-else :data="editRows" size="small" data-test="bom-edit-table">
+        <el-table-column label="行号" width="70">
+          <template #default="{ $index }">{{ $index + 1 }}</template>
+        </el-table-column>
+        <el-table-column label="子件编号" min-width="150">
+          <template #default="{ row }">{{ row.child_obj_no }}</template>
+        </el-table-column>
+        <el-table-column label="子件名称" min-width="140">
+          <template #default="{ row }">{{ row.child_name ?? "-" }}</template>
+        </el-table-column>
+        <el-table-column label="数量" width="130">
+          <template #default="{ row }">
+            <el-input-number v-model="row.qty" :min="1" size="small" data-test="bom-qty-input" />
+          </template>
+        </el-table-column>
+        <el-table-column label="" width="80">
+          <template #default="{ $index }">
+            <el-button link type="danger" size="small" data-test="bom-del-btn" @click="removeRow($index)">
+              删除
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-if="!editing && bomLineInfos.length === 0" style="color: #909399">无 BOM 行</div>
+
+      <!-- BOM-07 汇总折叠（懒加载） -->
+      <el-collapse style="margin-top: 12px" @change="(names: string | string[]) => (Array.isArray(names) ? names : [names]).includes('summary') && loadSummary()">
+        <el-collapse-item title="用量/分类汇总（BOM-07）" name="summary">
+          <div style="margin-bottom: 8px">
+            <el-button size="small" data-test="bom-csv-btn" @click="exportCsv">导出 CSV</el-button>
+          </div>
+          <el-table :data="bomSummaryRows" size="small" data-test="bom-summary-table">
+            <el-table-column label="编号" min-width="140" prop="obj_no" />
+            <el-table-column label="名称" min-width="140">
+              <template #default="{ row }">{{ row.name ?? "-" }}</template>
+            </el-table-column>
+            <el-table-column label="分类" min-width="110">
+              <template #default="{ row }">{{ row.class_name ?? "-" }}</template>
+            </el-table-column>
+            <el-table-column label="单台用量" width="100" prop="qty_total" />
+          </el-table>
+          <div v-if="bomSummaryRows.length === 0" style="color: #909399">无叶子件</div>
+        </el-collapse-item>
+      </el-collapse>
     </el-card>
+
+    <!-- 添加子件对话框：全局搜索选件（obj_id 直取） -->
+    <el-dialog v-model="addVisible" title="添加子件（全局搜索）" width="560px">
+      <div style="display: flex; gap: 8px">
+        <el-input
+          v-model="addQ"
+          placeholder="编号 / 名称关键词"
+          data-test="bom-add-search"
+          clearable
+          @keyup.enter="searchForAdd"
+        />
+        <el-button data-test="bom-add-search-btn" @click="searchForAdd">搜索</el-button>
+      </div>
+      <el-table
+        :data="addHits"
+        size="small"
+        style="margin-top: 8px"
+        max-height="280"
+        data-test="bom-add-results"
+        v-loading="addSearching"
+      >
+        <el-table-column label="编号" min-width="140" prop="obj_no" />
+        <el-table-column label="名称" min-width="130">
+          <template #default="{ row }">{{ row.name ?? "-" }}</template>
+        </el-table-column>
+        <el-table-column label="类型" width="90">
+          <template #default="{ row }">{{ row.type_code === "part" ? "物料" : "图纸" }}</template>
+        </el-table-column>
+        <el-table-column label="" width="80">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" data-test="bom-add-select" @click="pickHit(row)">
+              选择
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
 
     <el-card style="margin-top: 16px">
       <template #header>被谁使用</template>

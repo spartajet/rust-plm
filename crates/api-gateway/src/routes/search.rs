@@ -24,6 +24,8 @@ pub struct SearchQ {
 pub struct SearchHitDto {
     pub type_code: String,
     pub obj_no: String,
+    /// 对象 uuid（增量21：BOM 编辑器选件直接取 id）
+    pub obj_id: String,
     pub name: Option<String>,
     pub state: String,
     pub major_ver: i32,
@@ -36,6 +38,7 @@ impl From<core_search::SearchHit> for SearchHitDto {
         Self {
             type_code: h.type_code,
             obj_no: h.obj_no,
+            obj_id: h.obj_id,
             name: h.name,
             state: h.state,
             major_ver: h.major_ver,
