@@ -21,6 +21,8 @@ pub struct TestCtx {
     pub watcher: tokio::task::JoinHandle<()>,
     pub files_root: PathBuf,
     pub pool: PgPool,
+    /// 全文检索句柄（增量20）：e2e 显式 rebuild/scan 驱动近实时路径（扫描器线程不进测试）
+    pub search: Arc<core_search::SearchService>,
     db: String,
     admin_url: String,
 }
@@ -130,6 +132,11 @@ impl TestCtx {
             .await
             .expect("core-events 迁移失败");
         let audit = Arc::new(core_events::AuditService::new(pool.clone()));
+        // 全文检索（增量20）：临时索引目录随 files_root；扫描器不在测试内启动（e2e 显式调 rebuild/scan）
+        let search = Arc::new(
+            core_search::SearchService::open(&files_root.join("search")).expect("search open"),
+        );
+        let search_handle = search.clone();
         // 发布冻结注入（增量9，与 main 同源——api_gateway::bom_release_hook）
         core_events::migrator()
             .run(&pool)
@@ -149,6 +156,7 @@ impl TestCtx {
             bom,
             parts,
             audit,
+            search,
             im_secret: "im-test-secret".into(),
             im_user_map: [
                 ("im-admin".to_string(), "admin".to_string()),
@@ -166,6 +174,7 @@ impl TestCtx {
             db,
             admin_url,
             pool,
+            search: search_handle,
         }
     }
 
@@ -358,6 +367,10 @@ pub fn degraded_app(
             objects.clone(),
         )),
         audit: Arc::new(core_events::AuditService::new(bad_pool.clone())),
+        search: Arc::new(
+            core_search::SearchService::open(&std::env::temp_dir().join("plmsrv-degraded-search"))
+                .expect("search open"),
+        ),
         im_secret: String::new(),
         im_user_map: Default::default(),
     })

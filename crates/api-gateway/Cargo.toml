@@ -22,6 +22,7 @@ async-trait = { workspace = true }
 tracing = { workspace = true }
 sqlx = { workspace = true }
 core-model = { path = "../core-model" }
+core-search = { path = "../core-search" }
 core-files = { path = "../core-files" }
 mod-doc = { path = "../mod-doc" }
 core-sec = { path = "../core-sec" }

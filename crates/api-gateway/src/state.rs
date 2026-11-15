@@ -27,6 +27,8 @@ pub struct AppState {
     pub parts: Arc<mod_part::PartService>,
     /// 审计服务（增量18 SYS-01）
     pub audit: Arc<core_events::AuditService>,
+    /// 全文检索（增量20 RPT-01/03，core-search 内嵌 tantivy）
+    pub search: Arc<core_search::SearchService>,
     /// IM 回调 HMAC 密钥（增量10；空串=端点 503 关闭——未配置即不可用）
     pub im_secret: String,
     /// IM id → PLM username 映射（增量10）
@@ -77,6 +79,7 @@ pub fn bom_release_hook(bom: Arc<core_bom::BomStore>) -> Arc<dyn core_version::R
         crate::routes::audit::search_audit,
         crate::routes::todos::list_todos,
         crate::routes::docs::batch_approve,
+        crate::routes::search::search,
     ),
     components(schemas(
         crate::routes::docs::FileInfoDto,
@@ -86,6 +89,9 @@ pub fn bom_release_hook(bom: Arc<core_bom::BomStore>) -> Arc<dyn core_version::R
         crate::routes::docs::BatchApproveReq,
         crate::routes::docs::BatchApproveResp,
         crate::routes::todos::TodoItemDto,
+        crate::routes::search::SearchResponse,
+        crate::routes::search::GroupDto,
+        crate::routes::search::SearchHitDto,
         crate::routes::infra::Healthz,
         crate::routes::auth::LoginReq,
         crate::routes::auth::RefreshReq,

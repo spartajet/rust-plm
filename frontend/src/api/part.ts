@@ -40,8 +40,11 @@ export async function listParts(
   http: AxiosInstance,
   page = 1,
   size = 20,
+  name?: string,
 ): Promise<{ items: PartRow[]; total: number }> {
-  const res = await http.get(`/api/v1/parts?page=${page}&size=${size}`);
+  const q = new URLSearchParams({ page: String(page), size: String(size) });
+  if (name && name.trim()) q.set("name", name.trim());
+  const res = await http.get(`/api/v1/parts?${q.toString()}`);
   return res.data;
 }
 

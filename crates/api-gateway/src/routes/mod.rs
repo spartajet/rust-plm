@@ -8,6 +8,7 @@ pub mod im;
 pub mod infra;
 pub mod meta;
 pub mod parts;
+pub mod search;
 pub mod sec_users;
 pub mod todos;
 pub mod webhooks;
@@ -37,6 +38,8 @@ pub fn build(state: AppState) -> Router {
         .route("/api/v1/classes", get(parts::class_tree))
         // WF-03 待办中心（增量19）：与 docs 列表同层 docs:read；ABAC 在服务内
         .route("/api/v1/todos", get(todos::list_todos))
+        // RPT-01 全局搜索（增量20）：docs:read 同层；ABAC 密级在查询内
+        .route("/api/v1/search", get(search::search))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             require_perm("docs", "read"),

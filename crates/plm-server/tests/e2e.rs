@@ -2653,3 +2653,179 @@ async fn batch_approve_partial_results_and_guards() {
 
     ctx.cleanup().await;
 }
+
+// ==================== 增量20 RPT-01 全局搜索 ====================
+
+#[tokio::test]
+async fn search_global_clusters_abac_and_near_realtime() {
+    let ctx = TestCtx::setup("srch", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "srched", "srched-pass-123", &["editor"], 0)
+        .await;
+    ctx.create_user_as_admin(&admin, "srchlow", "srchlow-pass-123", &["editor"], 0)
+        .await;
+    let ed = ctx.login_as("srched", "srched-pass-123").await;
+    let low = ctx.login_as("srchlow", "srchlow-pass-123").await;
+
+    let upload = |t: &str, no: &str, name: &str| {
+        send(
+            &ctx.app,
+            post_docs_multipart(
+                Some(t),
+                no,
+                &format!(r#"{{"name":"{name}"}}"#),
+                Some("s.dwg"),
+                FILE.to_vec(),
+            ),
+        )
+    };
+    let (s, _, _) = upload(&ed, "DWG-SRCH-1", "六角轴承座").await;
+    assert_eq!(s, 201);
+    let (s, _, _) = upload(&admin, "DWG-SRCH-2", "保密轴承").await;
+    assert_eq!(s, 201);
+    sqlx::query("UPDATE cm_object SET secret_level = 2 WHERE obj_no = 'DWG-SRCH-2'")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+
+    // 物料（POST /parts，分类码种子）——RPT-01 一处搜一切含物料
+    let (s, _, _) = send(
+        &ctx.app,
+        axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/parts")
+            .header("authorization", format!("Bearer {ed}"))
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(
+                r#"{"class_code":"CLS-ZZ","attrs":{"name":"六角轴承","material":"45钢"}}"#,
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(s, 201, "建物料须成功（CLS-ZZ 种子分类）");
+
+    // 近实时：上传后先 0 命中 → scan_once 增量 → 命中（扫描器生产态 <5s 的机制钉）
+    let mut wm = chrono::DateTime::<chrono::Utc>::UNIX_EPOCH;
+    let (s, body) = ctx.get_authed("/api/v1/search?q=同步带轮", &admin).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 0, "未索引前零命中");
+    let (s, _, _) = upload(&ed, "DWG-SRCH-3", "同步带轮").await;
+    assert_eq!(s, 201);
+    let replayed = ctx.search.scan_once(&ctx.pool, &mut wm).await.unwrap();
+    assert!(replayed >= 4, "首轮扫描回放全部既有行，实际 {replayed}");
+    let (s, body) = ctx.get_authed("/api/v1/search?q=同步带轮", &admin).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 1, "扫描后近实时可见");
+
+    // ① 聚类：图纸+物料双组命中
+    let (s, body) = ctx.get_authed("/api/v1/search?q=轴承", &admin).await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let groups = v["groups"].as_array().unwrap();
+    let drawing = groups.iter().find(|g| g["type_code"] == "drawing").unwrap();
+    let part = groups.iter().find(|g| g["type_code"] == "part").unwrap();
+    assert_eq!(drawing["total"], 2, "SRCH-1/SRCH-2 双件");
+    assert_eq!(part["total"], 1, "物料六角轴承");
+    let names: Vec<&str> = drawing["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|i| i["name"].as_str())
+        .collect();
+    assert!(
+        names.contains(&"六角轴承座"),
+        "BM25 序不定——集合断言: {names:?}"
+    );
+    assert!(names.contains(&"保密轴承"), "{names:?}");
+    assert_eq!(drawing["items"][0]["state"], "working");
+
+    // ② 子串（jieba 未收录「承座」——bigram 兜底）
+    let (s, body) = ctx.get_authed("/api/v1/search?q=承座", &admin).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 1);
+    assert_eq!(v["groups"][0]["items"][0]["obj_no"], "DWG-SRCH-1");
+
+    // ③ 编号精确
+    let (s, body) = ctx.get_authed("/api/v1/search?q=DWG-SRCH-1", &admin).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 1);
+
+    // ④ ABAC：上限 0 用户不见密级 2 的「保密轴承」
+    let (s, body) = ctx.get_authed("/api/v1/search?q=轴承", &low).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let groups = v["groups"].as_array().unwrap();
+    let drawing = groups.iter().find(|g| g["type_code"] == "drawing").unwrap();
+    assert_eq!(drawing["total"], 1, "低上限只见 SRCH-1");
+    let all_nos: Vec<&str> = groups
+        .iter()
+        .flat_map(|g| g["items"].as_array().unwrap())
+        .filter_map(|i| i["obj_no"].as_str())
+        .collect();
+    assert!(!all_nos.contains(&"DWG-SRCH-2"), "越密级绝不出现");
+
+    // ④' 终审 I1-1 硬化钉：带外提密（SQL 直改、updated_at 不动——索引陈旧窗口模拟）
+    // → DB 权威复核立即剔除（低上限用户 items 空；admin 不受影响）
+    let (s, _, _) = upload(&ed, "DWG-SRCH-4", "普通垫片").await;
+    assert_eq!(s, 201);
+    let _ = ctx.search.scan_once(&ctx.pool, &mut wm).await.unwrap();
+    let (s, body) = ctx.get_authed("/api/v1/search?q=普通垫片", &low).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        v["groups"][0]["items"].as_array().unwrap().len(),
+        1,
+        "提密前可见"
+    );
+    sqlx::query("UPDATE cm_object SET secret_level = 2 WHERE obj_no = 'DWG-SRCH-4'")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (s, body) = ctx.get_authed("/api/v1/search?q=普通垫片", &low).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        v["groups"][0]["items"].as_array().unwrap().len(),
+        0,
+        "带外提密后 DB 复核立即剔除（不等索引自愈）"
+    );
+    let (s, body) = ctx.get_authed("/api/v1/search?q=普通垫片", &admin).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        v["groups"][0]["items"].as_array().unwrap().len(),
+        1,
+        "admin 上限内不受复核影响"
+    );
+
+    // ⑤ 钻取分页 + 非法 type
+    let (s, body) = ctx
+        .get_authed("/api/v1/search?q=轴承&type=drawing&page=1&size=1", &admin)
+        .await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["groups"][0]["total"], 2);
+    assert_eq!(v["groups"][0]["items"].as_array().unwrap().len(), 1);
+    assert_eq!(v["page"], 1);
+    let (s, _) = ctx
+        .get_authed("/api/v1/search?q=x&type=bogus", &admin)
+        .await;
+    assert_eq!(s, 400);
+
+    // ⑥ 空 q 400 / 无 token 401
+    let (s, _) = ctx.get_authed("/api/v1/search?q=%20%20", &admin).await;
+    assert_eq!(s, 400);
+    let r = axum::http::Request::builder()
+        .method("GET")
+        .uri("/api/v1/search?q=轴承")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let (s, _, _) = send(&ctx.app, r).await;
+    assert_eq!(s, 401);
+
+    ctx.cleanup().await;
+}

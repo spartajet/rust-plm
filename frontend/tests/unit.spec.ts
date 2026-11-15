@@ -3,6 +3,7 @@ import { flowUi, stateLabel } from "../src/utils/flowUi";
 import { guardTarget } from "../src/router/index";
 import { buildListQuery, parseNdjson } from "../src/api/docs";
 import { summarizeBatch } from "../src/api/todos";
+import { groupLabel } from "../src/api/search";
 
 // Review Focus #2/#1：flowUi 全状态穷举（增量8 +revise 维度；增量11 +checked 态——strict 二级）
 describe("flowUi", () => {
@@ -227,5 +228,16 @@ describe("summarizeBatch", () => {
   });
   it("empty batch → zero", () => {
     expect(summarizeBatch([])).toEqual({ okCount: 0, failures: [] });
+  });
+});
+
+// 增量20 RPT-01：聚类组展示名（纯函数）
+describe("groupLabel", () => {
+  it("drawing→图纸 part→物料", () => {
+    expect(groupLabel("drawing")).toBe("图纸");
+    expect(groupLabel("part")).toBe("物料");
+  });
+  it("未知类型回退原码", () => {
+    expect(groupLabel("eco")).toBe("eco");
   });
 });

@@ -1,0 +1,20 @@
+[package]
+name = "core-search"
+version = "0.1.0"
+edition = "2021"
+description = "RustPLM 全文检索（RPT-03，ADR-0005）：内嵌 tantivy + jieba 中文分词 + 对账扫描近实时"
+
+[dependencies]
+tokio = { workspace = true }
+sqlx = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+core-model = { path = "../core-model" }
+tantivy = "0.27"
+jieba-rs = "0.11"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+mod-doc = { path = "../mod-doc" }

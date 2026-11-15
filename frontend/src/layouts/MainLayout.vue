@@ -1,11 +1,18 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useAuthStore } from "../stores/auth";
 
 const auth = useAuthStore();
 const router = useRouter();
 const username = computed(() => auth.username || "未登录");
+const keyword = ref("");
+
+function doSearch() {
+  const q = keyword.value.trim();
+  if (!q) return;
+  router.push({ path: "/search", query: { q } });
+}
 
 function logout() {
   auth.clear();
@@ -29,6 +36,14 @@ function logout() {
     <el-container>
       <el-header class="topbar">
         <span class="title">产品数据工作台</span>
+        <el-input
+          v-model="keyword"
+          placeholder="全局搜索"
+          style="width: 240px"
+          data-test="global-search"
+          clearable
+          @keyup.enter="doSearch"
+        />
         <span class="user">
           {{ username }}
           <el-button link type="danger" @click="logout">登出</el-button>
