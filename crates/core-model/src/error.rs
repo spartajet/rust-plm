@@ -63,6 +63,8 @@ pub enum DomainError {
     FileTooLarge(u64),
     #[error("请求不合法: {0}")]
     BadRequest(String),
+    #[error("该格式不支持在线预览，请下载查看")]
+    PreviewUnsupported,
     #[error("未认证或凭证无效")]
     SecUnauthorized,
     #[error("用户名或密码错误")]
@@ -111,6 +113,7 @@ impl DomainError {
             Self::FileEmpty => "MDL-FILE-EMPTY",
             Self::FileTooLarge(_) => "MDL-FILE-TOO-LARGE",
             Self::BadRequest(_) => "MDL-BAD-REQUEST",
+            Self::PreviewUnsupported => "MDL-DOC-PREVIEW-UNSUPPORTED",
             Self::SecUnauthorized => "MDL-SEC-UNAUTHORIZED",
             Self::SecBadCredentials => "MDL-SEC-BAD-CREDENTIALS",
             Self::SecForbidden => "MDL-SEC-FORBIDDEN",
@@ -141,6 +144,7 @@ impl DomainError {
             Self::HookTimeout(_) => 504,
             Self::ServiceUnavailable(_) => 503,
             Self::FieldRequired(_) | Self::FileMulti | Self::FileEmpty | Self::BadRequest(_) => 400,
+            Self::PreviewUnsupported => 415,
             Self::SecUnauthorized | Self::SecBadCredentials => 401,
             Self::SecForbidden => 403,
             Self::SecRoleNotFound(_) => 400,

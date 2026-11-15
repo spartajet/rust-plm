@@ -3059,3 +3059,127 @@ async fn bom_lines_info_summary_csv_and_abac() {
 
     ctx.cleanup().await;
 }
+
+// ==================== 增量22 DOC-05 在线预览 ====================
+
+#[tokio::test]
+async fn doc_preview_inline_whitelist_and_abac() {
+    let ctx = TestCtx::setup("prev", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "pved", "pved-pass-123", &["editor"], 0)
+        .await;
+    ctx.create_user_as_admin(&admin, "pvlow", "pvlow-pass-123", &["editor"], 0)
+        .await;
+    let ed = ctx.login_as("pved", "pved-pass-123").await;
+    let low = ctx.login_as("pvlow", "pvlow-pass-123").await;
+
+    let pdf_body = b"%PDF-1.4 fake-preview-content".to_vec();
+    let png_body = b"\x89PNG\r\n\x1a\nfakepng".to_vec();
+    let (s, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&ed),
+            "DWG-PRE-PDF",
+            r#"{"name":"说明书"}"#,
+            Some("a.pdf"),
+            pdf_body.clone(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201);
+    let (s, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&ed),
+            "DWG-PRE-PNG",
+            r#"{"name":"示意图"}"#,
+            Some("b.png"),
+            png_body.clone(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201);
+    let (s, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&ed),
+            "DWG-PRE-DWG",
+            r#"{"name":"图纸"}"#,
+            Some("c.dwg"),
+            FILE.to_vec(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201);
+
+    // ① PDF → 200 inline + application/pdf + nosniff（send 不回 headers——oneshot 直取）
+    use tower::ServiceExt as _;
+    let req = |t: &str, no: &str| {
+        axum::http::Request::builder()
+            .method("GET")
+            .uri(format!("/api/v1/docs/{no}/preview"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let res = ctx
+        .app
+        .clone()
+        .oneshot(req(&admin, "DWG-PRE-PDF"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200, "pdf preview");
+    let headers = res.headers().clone();
+    let body = http_body_util::BodyExt::collect(res.into_body())
+        .await
+        .unwrap()
+        .to_bytes();
+    assert_eq!(
+        headers.get("content-type").and_then(|v| v.to_str().ok()),
+        Some("application/pdf")
+    );
+    let cd = headers
+        .get("content-disposition")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(cd.starts_with("inline"), "inline 直开: {cd}");
+    assert_eq!(
+        headers
+            .get("x-content-type-options")
+            .and_then(|v| v.to_str().ok()),
+        Some("nosniff")
+    );
+    assert_eq!(body.to_vec(), pdf_body, "内容一致（流式）");
+
+    // ② PNG → 200 image/png
+    let res = ctx
+        .app
+        .clone()
+        .oneshot(req(&admin, "DWG-PRE-PNG"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let ct = res
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    assert_eq!(ct, "image/png");
+
+    // ③ DWG → 415 预览不支持（SVG 同理排除；前端提示走下载）
+    let (s, _, _) = send(&ctx.app, req(&admin, "DWG-PRE-DWG")).await;
+    assert_eq!(s, 415);
+
+    // ④ ABAC：提密 → 低上限用户 404 不泄露存在性
+    sqlx::query("UPDATE cm_object SET secret_level = 2 WHERE obj_no = 'DWG-PRE-PDF'")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (s, _, _) = send(&ctx.app, req(&low, "DWG-PRE-PDF")).await;
+    assert_eq!(s, 404);
+    let (s, _, _) = send(&ctx.app, req(&admin, "DWG-PRE-PDF")).await;
+    assert_eq!(s, 200, "admin 不受影响");
+
+    ctx.cleanup().await;
+}
