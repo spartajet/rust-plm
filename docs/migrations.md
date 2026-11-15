@@ -39,3 +39,13 @@
 
 - **快照防篡改（REVOKE）**：当前部署模型=应用与建表同用户（单连接），REVOKE 无对象——文档化不执行；多角色部署（应用账号/DBA 分离）时对 `cm_obj_snapshot/bom_edge_snapshot/bom_release` 执行 `REVOKE UPDATE, DELETE`（增量13 裁定）。
 - **reject 权限非对称**：reject 语义为评审行为，UI 按 docs:approve 显隐；后端归 docs:write 组是 SMB 宽容（editor 兼评审场景）——前端比后端严=安全方向，不改（增量12 M4 裁定）。
+
+## 增量19（WF-03 待办中心）：无新迁移
+
+复用 0016 audit_log（已办盒数据源）与 cm_type.config（require_comment 开关 jsonb merge），无新表/列。
+
+**裁定**：
+- **WF-03 方案 A（零新表）**：待办=cm_object 查询（state IN review,checked 且 updated_by≠me），已办=audit_log 六动作，我发起=created_by；wf_task 实例表方案（为 WF-05 催办/代理移交打底）后置至 EC/V1.0 域。
+- **IM 回调豁免意见必填开关**：IM 卡片无意见输入，HMAC 可信路径；Web 端 do_transition 强制。台账留此豁免。
+- **上传 owner=actor 同源**：cm_object INSERT 复用 $5（owner）落 created_by/updated_by——上传链现传 actor 使"我发起"盒成立；owner 语义收窄为独立字段留待后续。
+- **audit 双行共存语义**：lc 动作行（action=submit/approve/…，带 object/from/to/comment）与 audit_mw http 兜底行（action=http）并存；已办盒按 action IN 六动作过滤，互不干扰。

@@ -55,3 +55,13 @@
 - 后端 e2e 新增 ≥8 钉全绿；`cargo test --workspace` 全绿（基线 152+）；前端 Vitest 全绿（基线 24）；Playwright 新钉过（retries=2）；clippy 无新警告。
 - OpenAPI（/api/docs/openapi.json）包含 todos/batch-approve 且 body schema 注册。
 - 不新增迁移文件；Dockerfile 不动；IM 豁免有测试钉。
+
+---
+
+## 对账台账（执行后回填）
+
+- Task1 完成（632e3dd）：计划外发现「upload 链不写 created_by」→ 上传链穿 actor（upload_staged 加 StagedUpload 结构体收敛 clippy 8/7）；SQL 占位符错位/低权限提交越密级件被 ABAC 拦截两处测试自身错误修正。
+- Task2 完成（39c24db）：require_comment 开关走 cm_type.config jsonb patch；set_flow_tier 扩展为双可选（至少一项）；热刷新 ≤3s 用 1500ms sleep（与存量 flow_tier 测试同约定）。
+- Task3 完成（c9bec27）：transition_once 抽出共用（Web 单件/批量同构，审计/ABAC/开关语义一处）；批量逐项 error=稳定错误码。
+- Task4：前端 Todo.vue 三 tab+批量批准弹窗+summarizeBatch 单测；Playwright 全链钉（editor 造数→admin 批审→已办→跳详情）。
+- Task5：README/部署文档/评审报告/migrations.md（无新迁移段+四条裁定）已更新。
