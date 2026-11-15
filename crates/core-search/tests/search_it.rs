@@ -95,6 +95,10 @@ async fn rebuild_cluster_substring_abac_and_scan() {
     assert_eq!(drawing.total, 1, "drawing 组恰 DWG-S1");
     assert_eq!(drawing.items[0].obj_no, "DWG-S1");
     assert_eq!(drawing.items[0].name.as_deref(), Some("六角轴承座"));
+    assert!(
+        !drawing.items[0].obj_id.is_empty(),
+        "obj_id 随索引回填（增量21 编辑器选件依赖）"
+    );
     assert_eq!(drawing.items[0].state, "working");
     assert_eq!(part.total, 2, "part 组 P-1/P-2");
     assert_eq!(groups.len(), SEARCH_TYPES.len());

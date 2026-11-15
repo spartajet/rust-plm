@@ -554,3 +554,102 @@ test("global search: topbar query clusters drawings and parts (RPT-01)", async (
   await page.locator(`[data-test="search-table-drawing"] .el-table__row:has-text("${NO}")`).locator(':text("查看")').click();
   await expect(page).toHaveURL(new RegExp(`/docs/${NO}$`));
 });
+
+// ==================== 增量21 BOM 编辑器 + BOM-07 汇总 ====================
+
+test("bom editor: edit save summary csv (BOM-01/07)", async ({ page }) => {
+  await page.goto("/login");
+  await page.fill('[data-test="username"]', "admin");
+  await page.fill('[data-test="password"]', ADMIN_PW);
+  await page.click('[data-test="login-btn"]');
+  await page.waitForURL("/");
+
+  // 造数（browser fetch 直连）：父图纸 + 两个子图纸
+  const P = `DWG-FE-B21-${Date.now()}`;
+  const C1 = `DWG-FE-B21C1-${Date.now()}`;
+  const C2 = `DWG-FE-B21C2-${Date.now()}`;
+  const setup = await page.evaluate(async ({ P, C1, C2 }) => {
+    const api = (window as unknown as { E2E_API: string }).E2E_API;
+    const t = localStorage.getItem("rustplm_token") ?? "";
+    const ah = { Authorization: `Bearer ${t}` };
+    const up = async (no: string) => {
+      const fd = new FormData();
+      fd.append("obj_no", no);
+      fd.append("attrs", JSON.stringify({ name: "B21件" }));
+      fd.append("file", new File(["%B21"], "b.dwg", { type: "application/octet-stream" }));
+      const r = await fetch(`${api}/api/v1/docs`, { method: "POST", headers: ah, body: fd });
+      if (r.status !== 201) return `up ${no} ${r.status}`;
+      return null;
+    };
+    for (const e of [await up(P), await up(C1), await up(C2)]) {
+      if (e) return e;
+    }
+    // 取子件 uuid（详情接口 object.id）
+    const idOf = async (no: string) => {
+      const r = await fetch(`${api}/api/v1/docs/${no}`, { headers: ah });
+      const d = (await r.json()) as { object: { id: string } };
+      return d.object.id;
+    };
+    const [c1, c2] = [await idOf(C1), await idOf(C2)];
+    const r = await fetch(`${api}/api/v1/boms/${P}/lines`, {
+      method: "POST",
+      headers: { ...ah, "Content-Type": "application/json" },
+      body: JSON.stringify([
+        { line_no: 1, child: c1, qty: 2 },
+        { line_no: 2, child: c2, qty: 3 },
+      ]),
+    });
+    if (r.status !== 204) return `set ${r.status}`;
+    return "ok";
+  }, { P, C1, C2 });
+  expect(setup).toBe("ok");
+
+  // 等扫描器收编新件（编辑器"添加子件"走全局搜索——索引就绪确定性轮询）
+  await expect
+    .poll(
+      async () => {
+        return page.evaluate(async (no) => {
+          const api = (window as unknown as { E2E_API: string }).E2E_API;
+          const t = localStorage.getItem("rustplm_token") ?? "";
+          const r = await fetch(`${api}/api/v1/search?q=${encodeURIComponent(no)}`, {
+            headers: { Authorization: `Bearer ${t}` },
+          });
+          const d = (await r.json()) as { total: number };
+          return d.total;
+        }, C1);
+      },
+      { timeout: 15_000, intervals: [500] },
+    )
+    .toBe(1);
+
+  // 详情页：富行展示（编号/名称——增量21 前不再裸 uuid）
+  await page.goto(`/docs/${P}`);
+  await expect(page.locator('[data-test="bom-lines-table"] .el-table__row')).toHaveCount(2, { timeout: 10_000 });
+  await expect(page.locator(`[data-test="bom-lines-table"] .el-table__row:has-text("${C1}")`)).toBeVisible();
+
+  // 编辑器：删一行 + 改 qty + 经全局搜索添加新行 → 保存 → onelevel 复验
+  await page.click('[data-test="bom-edit-btn"]');
+  await expect(page.locator('[data-test="bom-edit-table"] .el-table__row')).toHaveCount(2);
+  // 删除第一行（C1）
+  await page.locator('[data-test="bom-del-btn"]').first().click();
+  // 改第二行（C2）数量为 5
+  await page.locator('[data-test="bom-qty-input"] input').fill("5");
+  // 添加子件：全局搜索 C1 → 选择
+  await page.click('[data-test="bom-add-btn"]');
+  await page.fill('[data-test="bom-add-search"]', C1);
+  await page.click('[data-test="bom-add-search-btn"]');
+  await page.locator('[data-test="bom-add-results"] .el-table__row').first().waitFor({ timeout: 10_000 });
+  await page.locator('[data-test="bom-add-select"]').first().click();
+  await expect(page.locator('[data-test="bom-edit-table"] .el-table__row')).toHaveCount(2);
+  await page.click('[data-test="bom-save-btn"]');
+  await expect(page.locator('.el-message:has-text("BOM 已保存")')).toBeVisible({ timeout: 10_000 });
+  // 保存后富行复验：C1 回到行内（qty=1）
+  await expect(page.locator(`[data-test="bom-lines-table"] .el-table__row:has-text("${C1}")`)).toBeVisible({ timeout: 10_000 });
+
+  // 汇总：展开折叠（懒加载触发）→ 两叶行 → CSV 下载钉
+  await page.locator('.el-collapse-item__header:has-text("用量/分类汇总")').click();
+  await expect(page.locator('[data-test="bom-summary-table"] .el-table__row')).toHaveCount(2, { timeout: 10_000 });
+  await page.click('[data-test="bom-csv-btn"]');
+  const download = await page.waitForEvent("download", { timeout: 10_000 });
+  expect(download.suggestedFilename()).toBe(`summary-${P}.csv`);
+});

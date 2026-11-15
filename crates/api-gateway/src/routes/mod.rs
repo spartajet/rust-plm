@@ -73,6 +73,9 @@ pub fn build(state: AppState) -> Router {
     let boms_r = Router::new()
         .route("/api/v1/boms/{obj_no}/expand", get(boms::expand))
         .route("/api/v1/boms/{obj_no}/where-used", get(boms::where_used))
+        // 增量21 BOM-01 富行 + BOM-07 汇总（读=docs:read；ABAC 同 expand 语义）
+        .route("/api/v1/boms/{obj_no}/lines", get(boms::lines_boms))
+        .route("/api/v1/boms/{obj_no}/summary", get(boms::summary_boms))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             require_perm("docs", "read"),

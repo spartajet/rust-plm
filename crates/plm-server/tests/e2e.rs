@@ -2829,3 +2829,233 @@ async fn search_global_clusters_abac_and_near_realtime() {
 
     ctx.cleanup().await;
 }
+
+// ==================== 增量21 BOM-01 富行 + BOM-07 汇总 ====================
+
+#[tokio::test]
+async fn bom_lines_info_summary_csv_and_abac() {
+    let ctx = TestCtx::setup("boms21", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "b21ed", "b21ed-pass-123", &["editor"], 0)
+        .await;
+    ctx.create_user_as_admin(&admin, "b21low", "b21low-pass-123", &["editor"], 0)
+        .await;
+    let ed = ctx.login_as("b21ed", "b21ed-pass-123").await;
+    let low = ctx.login_as("b21low", "b21low-pass-123").await;
+
+    let upload = |t: &str, no: &str| {
+        send(
+            &ctx.app,
+            post_docs_multipart(Some(t), no, r#"{"name":"N"}"#, Some("b.dwg"), FILE.to_vec()),
+        )
+    };
+    let part_create = |t: &str, class: &str, name: &str| {
+        send(
+            &ctx.app,
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/v1/parts")
+                .header("authorization", format!("Bearer {t}"))
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(format!(
+                    r#"{{"class_code":"{class}","attrs":{{"name":"{name}","material":"Q235"}}}}"#
+                )))
+                .unwrap(),
+        )
+    };
+
+    // 父件（图纸）+ 子件：自制件/外购件物料 + 图纸
+    let (s, _, _) = upload(&ed, "DWG-B21-P").await;
+    assert_eq!(s, 201);
+    let (s, body, _) = part_create(&ed, "CLS-ZZ", "支架锻件").await;
+    assert_eq!(s, 201, "body={}", String::from_utf8_lossy(&body));
+    let zz_no: String = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["obj_no"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (s, body, _) = part_create(&ed, "CLS-WG", "标准螺栓").await;
+    assert_eq!(s, 201);
+    let wg_no: String = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["obj_no"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (s, _, _) = upload(&ed, "DWG-B21-C").await;
+    assert_eq!(s, 201);
+
+    // 子件 uuid（pool 直查；set_lines/前端编辑器提交均用 id）
+    let id_of = |no: String| {
+        let pool = ctx.pool.clone();
+        async move {
+            sqlx::query_scalar(
+                "SELECT id::text FROM cm_object WHERE obj_no = $1 AND deleted_at IS NULL \
+                 ORDER BY major_ver DESC LIMIT 1",
+            )
+            .bind(no)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    let zz_id: String = id_of(zz_no.clone()).await;
+    let wg_id: String = id_of(wg_no.clone()).await;
+    let dwg_id: String = id_of("DWG-B21-C".into()).await;
+
+    let set_lines = |t: &str, no: &str, body: String| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/boms/{no}/lines"))
+            .header("authorization", format!("Bearer {t}"))
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body))
+            .unwrap()
+    };
+
+    // 结构：父→{自制×2, 外购×3, 图纸C×1}；图纸 C 作子装配下挂外购×5（多路径：3+5×1=8）。
+    // BOM 路由父件限 drawing（docs detail 门控）——part 作父件（部件级装配）后置（台账记）
+    let (s, _, _) = send(
+        &ctx.app,
+        set_lines(
+            &ed,
+            "DWG-B21-P",
+            format!(
+                r#"[{{"line_no":1,"child":"{zz_id}","qty":2}},{{"line_no":2,"child":"{wg_id}","qty":3}},{{"line_no":3,"child":"{dwg_id}","qty":1}}]"#
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(s, 204, "父件结构写入");
+    let (s, _, _) = send(
+        &ctx.app,
+        set_lines(
+            &ed,
+            "DWG-B21-C",
+            format!(r#"[{{"line_no":1,"child":"{wg_id}","qty":5}}]"#),
+        ),
+    )
+    .await;
+    assert_eq!(s, 204, "子装配结构写入（drawing 父件）");
+
+    // ① 富行：三行齐（line_no 序/obj_no/name/qty）
+    let (s, body) = ctx.get_authed("/api/v1/boms/DWG-B21-P/lines", &admin).await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let lines = v.as_array().unwrap();
+    assert_eq!(lines.len(), 3);
+    assert_eq!(lines[0]["child_obj_no"], zz_no);
+    assert_eq!(lines[0]["child_name"], "支架锻件");
+    assert_eq!(lines[0]["qty"], 2);
+    assert_eq!(lines[1]["child_obj_no"], wg_no);
+    assert_eq!(lines[2]["child_obj_no"], "DWG-B21-C");
+    assert_eq!(lines[2]["qty"], 1);
+
+    // ② 汇总：多路径用量（外购=直挂3 + 经图纸C 5×1=8）
+    let (s, body) = ctx
+        .get_authed("/api/v1/boms/DWG-B21-P/summary", &admin)
+        .await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let rows = v.as_array().unwrap();
+    // C 有子边→非叶；叶=ZZ/WG → 汇总恰 2 行
+    assert_eq!(rows.len(), 2, "叶=ZZ(自制)/WG(外购)");
+    let find = |no: &str| -> serde_json::Value {
+        rows.iter()
+            .find(|r| r["obj_no"] == no)
+            .unwrap_or_else(|| panic!("缺 {no}"))
+            .clone()
+    };
+    assert_eq!(find(&zz_no)["qty_total"], 2, "自制件（叶）");
+    assert_eq!(find(&zz_no)["class_name"], "自制件");
+    assert_eq!(
+        find(&wg_no)["qty_total"],
+        8,
+        "外购=直挂3+经图纸C 5×1（多路径和）"
+    );
+    assert_eq!(find(&wg_no)["class_code"], "CLS-WG");
+    assert!(
+        !rows.iter().any(|r| r["obj_no"] == "DWG-B21-C"),
+        "非叶子件不入汇总"
+    );
+
+    // ③ ABAC：外购叶件提密 2 → 低上限用户富行/汇总均不见（且不泄露存在性）
+    sqlx::query("UPDATE cm_object SET secret_level = 2 WHERE obj_no = $1")
+        .bind(&wg_no)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (s, body) = ctx.get_authed("/api/v1/boms/DWG-B21-P/lines", &low).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v.as_array().unwrap().len(), 2, "低上限富行过滤越密级行");
+    let (s, body) = ctx.get_authed("/api/v1/boms/DWG-B21-P/summary", &low).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        v.as_array().unwrap().len(),
+        1,
+        "汇总仅剩 ZZ（越密级叶剔除）"
+    );
+
+    // ④ CSV：BOM 头 + 行齐全
+    let (s, body) = ctx
+        .get_authed("/api/v1/boms/DWG-B21-P/summary?format=csv", &admin)
+        .await;
+    assert_eq!(s, 200);
+    let text = String::from_utf8_lossy(&body);
+    assert!(text.starts_with('\u{FEFF}'), "UTF-8 BOM 前缀");
+    assert!(text.contains("编号,名称,分类码,分类,单台用量"));
+    assert!(text.contains(&zz_no));
+    assert!(text.contains("自制件"));
+
+    // ⑤ as-of：发布 → revise → major=1 快照富行/汇总（live 已改不回溯）
+    let approve = |t: &str, no: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/approve"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let sub = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/v1/docs/DWG-B21-P/submit")
+        .header("authorization", format!("Bearer {admin}"))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let (s, _, _) = send(&ctx.app, sub).await;
+    assert_eq!(s, 200, "提交评审");
+    let (s, _, _) = send(&ctx.app, approve(&admin, "DWG-B21-P")).await;
+    assert_eq!(s, 200, "父件发布（快照冻结）");
+    let revise = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/v1/docs/DWG-B21-P/revise")
+        .header("authorization", format!("Bearer {admin}"))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let (s, _, _) = send(&ctx.app, revise).await;
+    assert_eq!(s, 200, "升版 v2 working");
+    // live 清空（v2 无结构）→ major=1 仍有快照
+    let (s, _, _) = send(&ctx.app, set_lines(&admin, "DWG-B21-P", "[]".into())).await;
+    assert_eq!(s, 204, "v2 清空 live 行");
+    let (s, body) = ctx
+        .get_authed("/api/v1/boms/DWG-B21-P/lines?major=1", &admin)
+        .await;
+    assert_eq!(s, 200, "as-of 富行");
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v.as_array().unwrap().len(), 3, "快照行仍在");
+    let (s, body) = ctx
+        .get_authed("/api/v1/boms/DWG-B21-P/summary?major=1", &admin)
+        .await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        v.as_array().unwrap().len(),
+        2,
+        "as-of 汇总叶=ZZ/WG（C 非叶）"
+    );
+    let (s, _) = ctx
+        .get_authed("/api/v1/boms/DWG-B21-P/summary?major=9", &admin)
+        .await;
+    assert_eq!(s, 400, "无快照 major → 400");
+
+    ctx.cleanup().await;
+}

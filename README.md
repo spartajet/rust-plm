@@ -4,7 +4,7 @@
 
 > 文档体系：[需求 v1.1](docs/PLM-产品需求文档-v1.0.md) · **[部署文档](docs/部署文档.md)** · **[需求符合度评审](docs/review-需求符合度评审.md)** · [迁移注册表](docs/migrations.md) · [ADR×19](docs/adr/README.md) · [概要设计](docs/PLM-概要设计说明书-v0.1.md) · [技术选型 v1.0](docs/PLM-技术选型说明书-v1.0.md) · [Spike 验证](spikes/REPORT.md)
 
-## 当前状态：MVP+ 主线纵切完成（20 个增量，详见 Roadmap）
+## 当前状态：MVP+ 主线纵切完成（21 个增量，详见 Roadmap）
 
 已覆盖：图纸受控/认证/授权(ABAC 密级)/生命周期(三档+Revise 升版)/Webhook 外投/BOM 引擎+版本链(冻结快照+as-of)+历史反查/COD 自动编码/PART 物料主数据(分类树+查重 MVP)/IM 卡片审批(钉钉加签/企微/飞书)/前端工作台(看板/用户管理/角色显隐/中文)。
 
@@ -89,6 +89,10 @@ curl -g -H "Authorization: Bearer $TOKEN" \
   'http://localhost:8080/api/v1/docs?filter[material]=Q235&sort=-updated_at'
 
 # BOM：结构写入 / 展开（NDJSON）/ 反查（循环引用 409 拒绝）
+# 富行读（增量21 BOM-01：编号/名称直读，前端结构编辑器数据源）+ 用量/分类汇总（BOM-07）+ CSV 导出
+curl -g -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/v1/boms/DWG-001/lines?major=1'   # ?major=N=发布快照行（只读）
+curl -g -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/v1/boms/DWG-001/summary'          # 叶子用量（多路径和）+自制/外购分类
+curl -g -H "Authorization: Bearer $TOKEN" -o summary.csv 'http://localhost:8080/api/v1/boms/DWG-001/summary?format=csv'  # UTF-8 BOM 兼容 Excel
 curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json'   http://localhost:8080/api/v1/boms/DWG-001/lines   -d '[{"line_no":1,"child":"<子对象id>","qty":2}]'
 curl -g -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/v1/boms/DWG-001/expand?mode=full'
 curl -g -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/v1/boms/<子对象id>/where-used'

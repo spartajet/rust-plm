@@ -20,6 +20,26 @@ pub struct ExpandRow {
     pub qty_total: i64,
 }
 
+/// 富行（增量21 BOM-01 编辑 UI 数据源）：直接子件 + 编号/名称（子件密级 ABAC 在 SQL 内过滤）
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct LineInfoRow {
+    pub line_no: i32,
+    pub child: Uuid,
+    pub obj_no: String,
+    pub name: Option<String>,
+    pub qty: i64,
+}
+
+/// BOM-07 汇总行：叶子用量（多路径和）+ 分类（part attrs 提升上下文；图纸子件为空）
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct SummaryRow {
+    pub obj_no: String,
+    pub name: Option<String>,
+    pub class_code: Option<String>,
+    pub class_name: Option<String>,
+    pub qty_total: i64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ExpandMode {
@@ -213,6 +233,92 @@ impl BomStore {
                      FROM bom_edge WHERE parent = $1 GROUP BY child ORDER BY child",
                 )
                 .bind(parent)
+                .fetch_all(&self.pool)
+                .await?;
+                Ok(rows)
+            }
+        }
+    }
+
+    /// 富行（增量21）：live=按 line_no；快照域=(release_root, major) 直接子件聚合（快照无稳定行号，line_no=0 占位）。
+    /// 子件密级 ABAC 在 SQL 内（越级行不泄露存在性）。
+    pub async fn lines_info(
+        &self,
+        parent: Uuid,
+        max_secret: i16,
+        snapshot: Option<(Uuid, i32)>,
+    ) -> Result<Vec<LineInfoRow>> {
+        match snapshot {
+            None => {
+                let rows: Vec<LineInfoRow> = sqlx::query_as(
+                    "SELECT e.line_no, e.child, o.obj_no, o.attrs->>'name' AS name, e.qty                      FROM bom_edge e JOIN cm_object o ON o.id = e.child                      WHERE e.parent = $1 AND o.deleted_at IS NULL AND o.secret_level <= $2                      ORDER BY e.line_no",
+                )
+                .bind(parent)
+                .bind(max_secret)
+                .fetch_all(&self.pool)
+                .await?;
+                Ok(rows)
+            }
+            Some((root, major)) => {
+                let released: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM bom_release WHERE parent = $1 AND major = $2",
+                )
+                .bind(parent)
+                .bind(major)
+                .fetch_one(&self.pool)
+                .await?;
+                if released == 0 {
+                    return Err(DomainError::BadRequest(format!("major {major} 无发布快照")));
+                }
+                let rows: Vec<LineInfoRow> = sqlx::query_as(
+                    "SELECT 0 AS line_no, e.child, o.obj_no, o.attrs->>'name' AS name,                             SUM(e.qty)::bigint AS qty                      FROM bom_edge_snapshot e JOIN cm_object o ON o.id = e.child                      WHERE e.release_root = $1 AND e.major = $2 AND e.parent = $1                        AND o.deleted_at IS NULL AND o.secret_level <= $3                      GROUP BY e.child, o.obj_no, o.attrs->>'name' ORDER BY o.obj_no",
+                )
+                .bind(root)
+                .bind(major)
+                .bind(max_secret)
+                .fetch_all(&self.pool)
+                .await?;
+                Ok(rows)
+            }
+        }
+    }
+
+    /// BOM-07 汇总（增量21）：叶子用量（多路径 qty_path 和）+ 分类上下文（part attrs）。
+    /// live=bom_path 闭包；快照域=递归 CTE（与 expand_asof LeafOnly 同构）。子件密级 ABAC 在 SQL 内。
+    pub async fn summary(
+        &self,
+        parent: Uuid,
+        max_secret: i16,
+        snapshot: Option<(Uuid, i32)>,
+    ) -> Result<Vec<SummaryRow>> {
+        match snapshot {
+            None => {
+                let rows: Vec<SummaryRow> = sqlx::query_as(
+                    "SELECT o.obj_no, o.attrs->>'name' AS name,                             o.attrs->>'class_code' AS class_code, o.attrs->>'class_name' AS class_name,                             SUM(p.qty_path)::bigint AS qty_total                      FROM bom_path p JOIN cm_object o ON o.id = p.descendant                      WHERE p.ancestor = $1 AND p.descendant <> p.ancestor                        AND NOT EXISTS (SELECT 1 FROM bom_edge e WHERE e.parent = p.descendant)                        AND o.deleted_at IS NULL AND o.secret_level <= $2                      GROUP BY o.obj_no, o.attrs->>'name', o.attrs->>'class_code', o.attrs->>'class_name'                      ORDER BY o.obj_no",
+                )
+                .bind(parent)
+                .bind(max_secret)
+                .fetch_all(&self.pool)
+                .await?;
+                Ok(rows)
+            }
+            Some((root, major)) => {
+                let released: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM bom_release WHERE parent = $1 AND major = $2",
+                )
+                .bind(parent)
+                .bind(major)
+                .fetch_one(&self.pool)
+                .await?;
+                if released == 0 {
+                    return Err(DomainError::BadRequest(format!("major {major} 无发布快照")));
+                }
+                let rows: Vec<SummaryRow> = sqlx::query_as(
+                    "WITH RECURSIVE t(descendant, qty) AS (                          SELECT child, qty FROM bom_edge_snapshot                              WHERE release_root = $1 AND major = $2 AND parent = $1                          UNION ALL                          SELECT e.child, t.qty * e.qty FROM bom_edge_snapshot e                              JOIN t ON e.release_root = $1 AND e.major = $2                                  AND e.parent = t.descendant                      ) SELECT o.obj_no, o.attrs->>'name' AS name,                               o.attrs->>'class_code' AS class_code, o.attrs->>'class_name' AS class_name,                               SUM(t.qty)::bigint AS qty_total                        FROM t JOIN cm_object o ON o.id = t.descendant                        WHERE t.descendant <> $1                          AND NOT EXISTS (SELECT 1 FROM bom_edge_snapshot e                              WHERE e.release_root = $1 AND e.major = $2 AND e.parent = t.descendant)                          AND o.deleted_at IS NULL AND o.secret_level <= $3                        GROUP BY o.obj_no, o.attrs->>'name', o.attrs->>'class_code', o.attrs->>'class_name'                        ORDER BY o.obj_no",
+                )
+                .bind(root)
+                .bind(major)
+                .bind(max_secret)
                 .fetch_all(&self.pool)
                 .await?;
                 Ok(rows)

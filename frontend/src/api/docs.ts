@@ -175,3 +175,82 @@ export function parseNdjson(text: string): Record<string, unknown>[] {
     .filter((l) => l.trim())
     .map((l) => JSON.parse(l) as Record<string, unknown>);
 }
+
+/// BOM 富行（增量21 BOM-01：直接子件+编号/名称；child_id=提交 set_lines 的 uuid）
+export interface BomLineInfo {
+  line_no: number;
+  child_id: string;
+  child_obj_no: string;
+  child_name?: string | null;
+  qty: number;
+}
+
+export async function bomLines(
+  http: AxiosInstance,
+  objNo: string,
+  major?: number,
+): Promise<BomLineInfo[]> {
+  const q = major ? `?major=${major}` : "";
+  const res = await http.get(`/api/v1/boms/${objNo}/lines${q}`);
+  return res.data;
+}
+
+/// 全量替换 BOM 行（增量21 编辑器保存；循环引用 → 409）
+export async function setBomLines(
+  http: AxiosInstance,
+  objNo: string,
+  lines: { line_no: number; child: string; qty: number }[],
+): Promise<void> {
+  await http.post(`/api/v1/boms/${objNo}/lines`, lines);
+}
+
+/// 编辑态行（qty 可空=待填写）
+export interface BomEditRow {
+  child_id: string;
+  child_obj_no: string;
+  child_name?: string | null;
+  qty: number | null;
+}
+
+/// 纯函数（可单测）：编辑行 → set_lines payload（line_no 重排 1..n；child 去重由 UI 兜底）
+export function buildSetLinesPayload(rows: BomEditRow[]): {
+  line_no: number;
+  child: string;
+  qty: number;
+}[] {
+  return rows.map((r, i) => ({
+    line_no: i + 1,
+    child: r.child_id,
+    qty: r.qty ?? 1,
+  }));
+}
+
+/// BOM-07 汇总行（叶子用量多路径和+分类上下文）
+export interface BomSummaryRow {
+  obj_no: string;
+  name?: string | null;
+  class_code?: string | null;
+  class_name?: string | null;
+  qty_total: number;
+}
+
+export async function bomSummary(
+  http: AxiosInstance,
+  objNo: string,
+  major?: number,
+): Promise<BomSummaryRow[]> {
+  const q = major ? `?major=${major}` : "";
+  const res = await http.get(`/api/v1/boms/${objNo}/summary${q}`);
+  return res.data;
+}
+
+/// CSV 下载（后端 text/csv + UTF-8 BOM）
+export async function downloadBomSummaryCsv(
+  http: AxiosInstance,
+  objNo: string,
+  major?: number,
+): Promise<Blob> {
+  const q = major ? `?major=${major}&format=csv` : "?format=csv";
+  const res = await http.get(`/api/v1/boms/${objNo}/summary${q}`, { responseType: "blob" });
+  return res.data as Blob;
+}

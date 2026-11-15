@@ -3,7 +3,7 @@
 
 pub mod store;
 
-pub use store::{BomStore, ExpandMode, ExpandRow, LineInput};
+pub use store::{BomStore, ExpandMode, ExpandRow, LineInfoRow, LineInput, SummaryRow};
 
 /// 多 crate 迁移链
 pub fn migrator() -> sqlx::migrate::Migrator {

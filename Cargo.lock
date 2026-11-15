@@ -563,6 +563,7 @@ dependencies = [
  "tantivy",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
