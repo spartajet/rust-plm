@@ -31,7 +31,9 @@ RUN mkdir -p crates/core-model/src crates/core-files/src crates/mod-doc/src \
 
 # ② 真实源码 + 迁移目录（sqlx::migrate! 编译期读取）→ 重建（缓存命中则只重编业务 crate）。
 # touch 全部 .rs：COPY 保留构建上下文时戳（早于①桩层 RUN 时戳），cargo 会误判桩产物仍新鲜而跳过重编
+# templates/：增量24 starter.json 经 include_str! 编译期嵌入——构建态必须存在（运行态不需要）
 COPY crates ./crates
+COPY templates ./templates
 RUN find crates -name '*.rs' -exec touch {} + && cargo build --release -p plm-server
 
 FROM debian:bookworm-slim

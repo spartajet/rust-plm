@@ -3367,6 +3367,14 @@ async fn sec_params_manage_and_audit_trail() {
     // handler 返回 Vec<SysParamDto> 直接序列化为顶层数组
     let arr = v.as_array().expect("顶层数组");
     assert_eq!(arr.len(), 3, "三种子参数");
+    // 系统内部键过滤（增量24 checklist 借 sys_param 持久化 impl_checklist_done——不混入面板）
+    sqlx::query("INSERT INTO sys_param(key, value) VALUES ('impl_checklist_done', '[\"training\"]') ON CONFLICT (key) DO NOTHING")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (_, body) = ctx.get_authed("/api/v1/sec/params", &admin).await;
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v.as_array().unwrap().len(), 3, "内部键不混入参数面板");
     for k in ["password_min_length", "lock_threshold", "lock_minutes"] {
         assert!(arr.iter().any(|r| r["key"] == k), "含 {k}");
     }
@@ -3449,6 +3457,329 @@ async fn sec_params_manage_and_audit_trail() {
     // ⑥ 还原（避免影响同库其他断言；cleanup 后库删无谓但语义完整）
     let (s, _, _) = send(&ctx.app, put("password_min_length", 8)).await;
     assert_eq!(s, 204);
+
+    ctx.cleanup().await;
+}
+
+// ==================== 增量24 AGL-05 模板包 + AGL-09 实施向导 ====================
+
+#[tokio::test]
+async fn template_export_starter_import_roundtrip() {
+    let ctx = TestCtx::setup("tpl", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "tplview", "tplview-pass-123", &["viewer"], 0)
+        .await;
+    let view = ctx.login_as("tplview", "tplview-pass-123").await;
+
+    let post = |t: &str, uri: &str, body: String| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("authorization", format!("Bearer {t}"))
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body))
+            .unwrap()
+    };
+
+    // ① 内置 Starter 包可取（随二进制分发）且 format/schema 自洽
+    let (s, body) = ctx
+        .get_authed("/api/v1/meta/template/starter", &admin)
+        .await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let starter: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(starter["format"], "rustplm-template");
+    assert_eq!(starter["version"], 1);
+    assert!(starter["types"].as_array().unwrap().len() >= 2);
+    assert!(starter["classes"].as_array().unwrap().len() >= 2);
+
+    // ② 导出：含种子类型/属性/分类（ABAC 无关——sec:manage 全量配置面）
+    let (s, body) = ctx.get_authed("/api/v1/meta/template/export", &admin).await;
+    assert_eq!(s, 200);
+    let exported: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(exported["format"], "rustplm-template");
+    let ex_types = exported["types"].as_array().unwrap();
+    assert!(ex_types.iter().any(|t| t["code"] == "drawing"));
+    assert!(ex_types.iter().any(|t| t["code"] == "part"));
+    let part_t = ex_types.iter().find(|t| t["code"] == "part").unwrap();
+    assert!(part_t["attrs"].as_array().unwrap().len() >= 4);
+    let ex_classes = exported["classes"].as_array().unwrap();
+    assert!(ex_classes.iter().any(|c| c["code"] == "CLS-ZZ"));
+
+    // ③ viewer 403（sec:manage 门控）
+    let (s, _) = ctx.get_authed("/api/v1/meta/template/export", &view).await;
+    assert_eq!(s, 403);
+
+    // ④ dry_run：对已有种子导入 starter → 全冲突报告，不落库（无新增类型）
+    let dry_body = serde_json::json!({"template": starter, "mode": "dry_run"});
+    let (s, body, _) = send(
+        &ctx.app,
+        post(&admin, "/api/v1/meta/template/import", dry_body.to_string()),
+    )
+    .await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let dry: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(dry["applied_types"].as_array().unwrap().is_empty());
+    let confs = dry["conflicts"].as_array().unwrap();
+    assert!(confs
+        .iter()
+        .any(|c| c["kind"] == "type_exists" && c["key"] == "drawing"));
+    let before: i64 = sqlx::query_scalar("SELECT count(*) FROM cm_type")
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+    let _ = before;
+
+    // ⑤ merge 新内容：新类型+属性+新分类 → applied；再 merge 一次 → 全冲突（幂等 skip）
+    let mut new_pkg = starter.clone();
+    new_pkg["types"] = serde_json::json!([
+        {
+            "code": "fixture",
+            "name": "工装",
+            "base_type": "document",
+            "config": {"flow_tier": "minimal", "cod_rule": {"prefix": "GZ-", "date_fmt": "yyyyMMdd", "seq_digits": 3}},
+            "attrs": [
+                {"code": "name", "name": "名称", "data_type": "text", "required": true, "sort_no": 1},
+                {"code": "venue", "name": "工位", "data_type": "text", "required": false, "sort_no": 2}
+            ]
+        }
+    ]);
+    new_pkg["classes"] = serde_json::json!([
+        {"code": "CLS-GZ", "name": "工装夹具", "parent_code": null,
+         "cod_rule": {"prefix": "GZ-FL-", "date_fmt": "none", "seq_digits": 4}}
+    ]);
+    let merge_body = serde_json::json!({"template": new_pkg, "mode": "merge"});
+    let (s, body, _) = send(
+        &ctx.app,
+        post(
+            &admin,
+            "/api/v1/meta/template/import",
+            merge_body.to_string(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let merged: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(merged["applied_types"], serde_json::json!(["fixture"]));
+    assert_eq!(merged["applied_classes"], serde_json::json!(["CLS-GZ"]));
+    assert!(merged["conflicts"].as_array().unwrap().is_empty());
+    // 落库实证：类型+属性+分类+config 全带入
+    let n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM cm_attr WHERE type_id = (SELECT id FROM cm_type WHERE code='fixture')",
+    )
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(n, 2);
+    let rule: serde_json::Value =
+        sqlx::query_scalar("SELECT config->'cod_rule' FROM cm_type WHERE code = 'fixture'")
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
+    assert_eq!(rule["prefix"], "GZ-");
+    let (s, body, _) = send(
+        &ctx.app,
+        post(
+            &admin,
+            "/api/v1/meta/template/import",
+            merge_body.to_string(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 200);
+    let again: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(again["applied_types"].as_array().unwrap().is_empty());
+    assert!(
+        again["conflicts"].as_array().unwrap().len() >= 2,
+        "重复导入全冲突"
+    );
+
+    // ⑥ audit 留痕（merge 才记；dry_run 不记）
+    let mut ok = false;
+    for _ in 0..20 {
+        let n: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE action='template.import'")
+                .fetch_one(&ctx.pool)
+                .await
+                .unwrap();
+        if n >= 1 {
+            ok = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(ok, "template.import 留痕落库（两次 merge ≥1）");
+
+    // ⑦ 坏包 400
+    let (s, body, _) = send(
+        &ctx.app,
+        post(
+            &admin,
+            "/api/v1/meta/template/import",
+            r#"{"template":{"format":"other","version":9,"types":[],"classes":[]},"mode":"merge"}"#
+                .into(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 400);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["code"], "MDL-BAD-REQUEST");
+    let (s, _, _) = send(
+        &ctx.app,
+        post(
+            &admin,
+            "/api/v1/meta/template/import",
+            r#"{"template":{"format":"rustplm-template","version":1,"types":[],"classes":[]},"mode":"bogus"}"#.into(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 400);
+
+    // ⑧ viewer 导入 403
+    let (s, _, _) = send(
+        &ctx.app,
+        post(
+            &view,
+            "/api/v1/meta/template/import",
+            merge_body.to_string(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 403);
+
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn impl_checklist_auto_manual_and_order() {
+    let ctx = TestCtx::setup("ck", 1024 * 1024).await;
+    let admin = ctx.login().await;
+
+    // ① 初始：org=1（仅 admin）→ org/perms/data 未 done；coding/types 种子即 done（CLS-ZZ 挂规则/attr=5 种子）
+    let (s, body) = ctx.get_authed("/api/v1/meta/impl-checklist", &admin).await;
+    assert_eq!(s, 200);
+    let steps: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let arr = steps.as_array().unwrap();
+    assert_eq!(arr.len(), 8, "八步");
+    let get = |k: &str| -> serde_json::Value {
+        arr.iter()
+            .find(|r| r["key"] == k)
+            .unwrap_or_else(|| panic!("缺 {k}"))
+            .clone()
+    };
+    assert_eq!(get("org")["done"], false, "仅 admin 一人");
+    assert_eq!(get("perm")["done"], false);
+    assert_eq!(get("coding")["done"], true, "种子分类挂规则");
+    assert_eq!(get("data")["done"], false);
+    assert_eq!(get("training")["done"], false);
+    assert_eq!(get("training")["auto"], false, "培训为人工步");
+    assert!(get("org")["hint"].as_str().unwrap().len() > 4, "每步含指引");
+
+    // ② manual 步按序约束：跳过 training 直接 cutover → 400
+    let complete = |t: &str, step: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/meta/impl-checklist/{step}/complete"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let (s, body, _) = send(&ctx.app, complete(&admin, "cutover")).await;
+    assert_eq!(s, 400, "前置 training 未完成");
+    assert!(String::from_utf8_lossy(&body).contains("training"));
+
+    // ③ auto 步标记 complete → 400（系统自动判定）
+    let (s, _, _) = send(&ctx.app, complete(&admin, "org")).await;
+    assert_eq!(s, 400);
+
+    // ④ 造数据翻转 auto 步：建用户→org+perm done；上传→data done
+    ctx.create_user_as_admin(&admin, "cked", "cked-pass-123", &["editor"], 0)
+        .await;
+    let ed = ctx.login_as("cked", "cked-pass-123").await;
+    let (s, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&ed),
+            "DWG-CK-1",
+            r#"{"name":"N"}"#,
+            Some("k.dwg"),
+            FILE.to_vec(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201);
+    // flow 步：显式设档位（种子 config 无 flow_tier——该步语义即"确认审批档位"）
+    let ft = axum::http::Request::builder()
+        .method("PUT")
+        .uri("/api/v1/meta/types/drawing/flow-tier")
+        .header("authorization", format!("Bearer {admin}"))
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(r#"{"tier":"standard"}"#))
+        .unwrap();
+    let (s, _, _) = send(&ctx.app, ft).await;
+    assert_eq!(s, 204);
+    let (s, body) = ctx.get_authed("/api/v1/meta/impl-checklist", &admin).await;
+    assert_eq!(s, 200);
+    let steps: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let arr = steps.as_array().unwrap();
+    let get =
+        |k: &str| -> serde_json::Value { arr.iter().find(|r| r["key"] == k).unwrap().clone() };
+    assert_eq!(get("org")["done"], true, "建成员后 org 翻转");
+    assert_eq!(get("perm")["done"], true, "授角色后 perm 翻转");
+    assert_eq!(get("data")["done"], true, "上传后 data 翻转");
+    assert_eq!(get("flow")["done"], true, "显式设档后 flow 翻转");
+
+    // ⑤ manual 链：training → cutover（按序成功；audit 留痕+sys_param 持久化）
+    let (s, _, _) = send(&ctx.app, complete(&admin, "training")).await;
+    assert_eq!(s, 204);
+    let (s, _, _) = send(&ctx.app, complete(&admin, "cutover")).await;
+    assert_eq!(s, 204);
+    let (_, body) = ctx.get_authed("/api/v1/meta/impl-checklist", &admin).await;
+    let steps: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let arr = steps.as_array().unwrap();
+    assert_eq!(
+        arr.iter().filter(|r| r["done"] == true).count(),
+        8,
+        "全 done"
+    );
+    let persisted: String =
+        sqlx::query_scalar("SELECT value FROM sys_param WHERE key='impl_checklist_done'")
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
+    assert!(persisted.contains("training") && persisted.contains("cutover"));
+    let mut ok = false;
+    for _ in 0..20 {
+        let n: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log WHERE action='impl-checklist.complete'",
+        )
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+        if n >= 2 {
+            ok = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(ok, "complete 留痕两行");
+
+    // ⑥ 无 token → 401（GET 认证即可）
+    let r = axum::http::Request::builder()
+        .method("GET")
+        .uri("/api/v1/meta/impl-checklist")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let (s, _, _) = send(&ctx.app, r).await;
+    assert_eq!(s, 401);
+
+    // ⑦ viewer 也能 GET（全员可见）；但 complete 需 sec:manage → 403
+    ctx.create_user_as_admin(&admin, "ckview", "ckview-pass-123", &["viewer"], 0)
+        .await;
+    let view = ctx.login_as("ckview", "ckview-pass-123").await;
+    let (s, _) = ctx.get_authed("/api/v1/meta/impl-checklist", &view).await;
+    assert_eq!(s, 200, "向导全员可见");
+    let (s, _, _) = send(&ctx.app, complete(&view, "training")).await;
+    assert_eq!(s, 403, "complete 需 sec:manage");
 
     ctx.cleanup().await;
 }

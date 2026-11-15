@@ -3,6 +3,7 @@
 pub mod audit;
 pub mod auth;
 pub mod boms;
+pub mod checklist;
 pub mod docs;
 pub mod im;
 pub mod infra;
@@ -11,6 +12,7 @@ pub mod parts;
 pub mod search;
 pub mod sec_params;
 pub mod sec_users;
+pub mod template;
 pub mod todos;
 pub mod webhooks;
 
@@ -110,6 +112,19 @@ pub fn build(state: AppState) -> Router {
             "/api/v1/sec/params/{key}",
             axum::routing::put(sec_params::set_param),
         )
+        // AGL-05 模板包（增量24）：配置面导出/内置包/导入（冲突检测+dry_run）
+        .route(
+            "/api/v1/meta/template/export",
+            get(template::export_template),
+        )
+        .route(
+            "/api/v1/meta/template/starter",
+            get(template::starter_template),
+        )
+        .route(
+            "/api/v1/meta/template/import",
+            post(template::import_template).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
         .route("/api/v1/audit", get(audit::search_audit))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -143,6 +158,22 @@ pub fn build(state: AppState) -> Router {
             state.clone(),
             require_perm("docs", "approve"),
         ));
+    // AGL-09 实施向导（增量24）：GET 认证即可（向导全员可见）；complete 需 sec:manage
+    let checklist_get = Router::new()
+        .route("/api/v1/meta/impl-checklist", get(checklist::get_checklist))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            require_authn,
+        ));
+    let checklist_complete = Router::new()
+        .route(
+            "/api/v1/meta/impl-checklist/{step}/complete",
+            post(checklist::complete_step),
+        )
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            require_perm("sec", "manage"),
+        ));
 
     let public = Router::new()
         .route("/healthz", get(infra::healthz))
@@ -155,6 +186,8 @@ pub fn build(state: AppState) -> Router {
     public
         .merge(meta_get)
         .merge(meta_put)
+        .merge(checklist_get)
+        .merge(checklist_complete)
         .merge(auth)
         .merge(docs_rw)
         .merge(docs_r)
