@@ -4,7 +4,19 @@ import { ElMessage } from "element-plus";
 import { onMounted, onUnmounted, ref, watch } from "vue";
 import { extractApiError } from "../api/http";
 import { http } from "../api/index";
-import { createUser, grantRole, listRoles, listUsers, revokeRole, type SecRole, type SecUser } from "../api/sec";
+import {
+  createUser,
+  grantRole,
+  listParams,
+  listRoles,
+  listUsers,
+  revokeRole,
+  setParam,
+  paramLabel,
+  type SecRole,
+  type SecUser,
+  type SysParam,
+} from "../api/sec";
 
 const users = ref<SecUser[]>([]);
 const roles = ref<SecRole[]>([]);
@@ -47,7 +59,43 @@ async function load() {
   }
 }
 
-onMounted(load);
+// ==================== SYS-04 安全参数面板（增量23；canManageSec 同权限门） ====================
+const params = ref<SysParam[]>([]);
+const paramDraft = ref<Record<string, number>>({});
+const paramSaving = ref<Record<string, boolean>>({});
+
+async function loadParams() {
+  try {
+    params.value = await listParams(http);
+    paramDraft.value = Object.fromEntries(params.value.map((p) => [p.key, Number(p.value)]));
+  } catch (e) {
+    // 无权限等场景静默（面板不渲染数据即可）
+    void e;
+  }
+}
+
+async function saveParam(key: string) {
+  const v = paramDraft.value[key];
+  if (!Number.isInteger(v) || v <= 0) {
+    ElMessage.warning("须为正整数");
+    return;
+  }
+  paramSaving.value[key] = true;
+  try {
+    await setParam(http, key, v);
+    ElMessage.success("已保存");
+    await loadParams();
+  } catch (e) {
+    ElMessage.error(extractApiError(e));
+  } finally {
+    paramSaving.value[key] = false;
+  }
+}
+
+onMounted(() => {
+  load();
+  loadParams();
+});
 
 async function submit() {
   if (!uName.value || !uPass.value) {
@@ -137,6 +185,46 @@ async function toggleRole(user: SecUser, role: string, has: boolean) {
       style="margin-top: 12px"
       @current-change="load"
     />
+
+    <!-- SYS-04 安全参数（增量23；后端 sec:manage 门控） -->
+    <el-card style="margin-top: 16px" data-test="params-card">
+      <template #header>
+        <span>安全参数（密码策略 / 登录锁定）</span>
+      </template>
+      <el-table :data="params" size="small" data-test="params-table">
+        <el-table-column label="参数" min-width="200">
+          <template #default="{ row }">{{ paramLabel(row.key) }}</template>
+        </el-table-column>
+        <el-table-column label="键" min-width="160" prop="key" />
+        <el-table-column label="值" width="180">
+          <template #default="{ row }">
+            <el-input-number
+              v-model="paramDraft[row.key]"
+              :min="1"
+              size="small"
+              :data-test="`param-input-${row.key}`"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column label="修改人" width="110">
+          <template #default="{ row }">{{ row.updated_by ?? "-" }}</template>
+        </el-table-column>
+        <el-table-column label="" width="90">
+          <template #default="{ row }">
+            <el-button
+              link
+              type="primary"
+              size="small"
+              :data-test="`param-save-${row.key}`"
+              :loading="!!paramSaving[row.key]"
+              @click="saveParam(row.key)"
+            >
+              保存
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
 
     <el-dialog v-model="dlgVisible" title="新建用户" width="440px">
       <el-form label-width="90px">
