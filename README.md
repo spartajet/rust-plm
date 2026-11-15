@@ -2,7 +2,7 @@
 
 面向**制造业中小微企业**的敏捷高效 PLM——Rust 单二进制 + PostgreSQL，一台 2C4G 小服务器跑全公司。
 
-> 文档体系：[需求 v1.1](docs/PLM-产品需求文档-v1.0.md) · **[部署文档](docs/部署文档.md)** · [迁移注册表](docs/migrations.md) · [ADR×19](docs/adr/README.md) · [概要设计](docs/PLM-概要设计说明书-v0.1.md) · [技术选型 v1.0](docs/PLM-技术选型说明书-v1.0.md) · [Spike 验证](spikes/REPORT.md)
+> 文档体系：[需求 v1.1](docs/PLM-产品需求文档-v1.0.md) · **[部署文档](docs/部署文档.md)** · **[需求符合度评审](docs/review-需求符合度评审.md)** · [迁移注册表](docs/migrations.md) · [ADR×19](docs/adr/README.md) · [概要设计](docs/PLM-概要设计说明书-v0.1.md) · [技术选型 v1.0](docs/PLM-技术选型说明书-v1.0.md) · [Spike 验证](spikes/REPORT.md)
 
 ## 当前状态：MVP+ 主线纵切完成（17 个增量，详见 Roadmap）
 
