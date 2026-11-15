@@ -1,0 +1,47 @@
+{
+  "format": "rustplm-template",
+  "version": 1,
+  "name": "Starter 基础包",
+  "description": "小微起步配置：图纸+物料类型、核心属性、自制/外购分类挂编码规则、标准三级审批",
+  "types": [
+    {
+      "code": "drawing",
+      "name": "图文档",
+      "base_type": "doc",
+      "config": {
+        "flow_tier": "standard",
+        "require_comment": false
+      },
+      "attrs": [
+        { "code": "name", "name": "名称", "data_type": "text", "required": true, "sort_no": 1 },
+        { "code": "material", "name": "材料", "data_type": "text", "required": false, "sort_no": 2 }
+      ]
+    },
+    {
+      "code": "part",
+      "name": "物料",
+      "base_type": "part",
+      "config": { "title_attr": "name" },
+      "attrs": [
+        { "code": "name", "name": "名称", "data_type": "text", "required": true, "sort_no": 1 },
+        { "code": "material", "name": "材料", "data_type": "text", "required": false, "sort_no": 2 },
+        { "code": "spec", "name": "规格", "data_type": "text", "required": false, "sort_no": 3 },
+        { "code": "model", "name": "型号", "data_type": "text", "required": false, "sort_no": 4 }
+      ]
+    }
+  ],
+  "classes": [
+    {
+      "code": "CLS-ZZ",
+      "name": "自制件",
+      "parent_code": null,
+      "cod_rule": { "prefix": "WL-ZZ-", "date_fmt": "none", "seq_digits": 5 }
+    },
+    {
+      "code": "CLS-WG",
+      "name": "外购件",
+      "parent_code": null,
+      "cod_rule": { "prefix": "WL-WG-", "date_fmt": "none", "seq_digits": 5 }
+    }
+  ]
+}
