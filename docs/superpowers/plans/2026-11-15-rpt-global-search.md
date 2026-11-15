@@ -52,3 +52,12 @@
 - 后端 e2e 新增 ≥6 钉全绿；`cargo test --workspace` 全绿（基线 155）；clippy 0 新警告；Vitest/Playwright 全绿（基线 27/11）；OpenAPI 含 search 端点与 schema。
 - 近实测钉：上传后 ≤3s 搜索可命中（测试内轮询断言）。
 - Dockerfile 含 core-search 桩层；CI（fmt/clippy/test/docker）全绿。
+
+---
+
+## 对账台账（执行后回填）
+
+- T1 完成（aaee453）：tantivy 0.27 API 与 ADR 时代（0.22）差异大——BooleanQuery 元组序翻转/add_string_field 移除/Index::exists 需 Directory/commit &mut self（writer 改 tokio Mutex）；QueryParser PhraseQuery 语义诊断实证后弃用（改逐 term 析取）；jеiba tokenize 用 Search 模式带偏移。
+- T2 完成（98b11c0）：e2e BM25 排序不稳定→集合断言；harness 暴露 search 句柄供近实时钉。
+- T3 完成（d5df27e）：**计划外清偿——MainLayout 为死组件**（增量19「菜单」声明未生效）→ router 改根布局 children 接线，既有 URL 保留；board 测试初渲竞态（全串匹配钉）；纯 ASCII 混合查询语义（分词碎片泛匹配诊断实证）；Windows AV 锁→commit 退避重试+e2e 数据目录移出项目树；parts 测试数据累积挤出第一页→Parts 页加名称筛选（UX 增强）。
+- T4 完成：README/部署文档/评审报告（RPT-01 ✅、RPT-03 🟡）/migrations.md 七条裁定已更新。
