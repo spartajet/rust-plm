@@ -46,3 +46,13 @@
 ## 验收标准
 - e2e 新增 ≥7 钉；后端 168+ 全绿/clippy 0/fmt 过；Vitest 34+/Playwright 15+ 两轮全绿；OpenAPI 注册五端点+模板/Checklist schema。
 - starter.json 与导出格式同一 schema（导入导出往返自洽——e2e 导出→清库→导入等价性钉或结构断言）。
+
+
+---
+
+## 对账台账（执行后回填）
+
+- T1 完成（db664ea）：include_str! 路径 ../../../ 多退一级（routes → workspace 根）；serde 强类型校验模板结构（坏包 400）；dry_run 与 merge 同一冲突检测代码路径。
+- T2 完成（db664ea）：checklist GET 起初误挂 sec_mgmt 组（viewer 403 被钉拦下）——拆独立组 GET require_authn/complete require_perm；auto 步阈值语义=代码为权威；e2e flow 步翻转补 PUT flow-tier（种子 config 无显式 flow_tier——正是该步语义）。
+- T3 完成（8f5ee3e）：**impl_checklist_done 借 sys_param 混入参数面板第 4 行可编辑行**（list_params 全量返回未过滤——security params Playwright 钉 4≠3 拦下）；list_params 过滤内部键+e2e 钉；python replace 静默 no-op 第三次（读代码 grep 核对后 Read+Edit 直改——教训累计固化：多行 SQL/JSON 串替换禁用 python）。
+- T4 完成：README/部署文档/评审报告（AGL-05 增补、AGL-09 ⬜→🟡、S5 场景大半）/migrations.md 五裁定。
