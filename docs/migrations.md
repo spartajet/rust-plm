@@ -21,6 +21,7 @@
 | 0013 | core-events | 0013_outbox_topic_idx.sql | event_outbox topic 部分索引 + error 列 |
 | 0014 | core-model | 0014_cod_counter.sql | cod_counter 取号计数器（COD-02 并发无重号） |
 | 0015 | core-model | 0015_part_class.sql | cm_class 分类树 + part 类型/示例分类种子（PART-01/02） |
+| 0016 | core-events | 0016_audit_log.sql | audit_log 审计日志（SYS-01 append-only） |
 
 ## Outbox payload 契约（增量13 定版）
 

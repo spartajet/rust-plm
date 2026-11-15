@@ -25,6 +25,8 @@ pub struct AppState {
     pub bom: Arc<core_bom::BomStore>,
     /// 物料服务（增量17 PART）
     pub parts: Arc<mod_part::PartService>,
+    /// 审计服务（增量18 SYS-01）
+    pub audit: Arc<core_events::AuditService>,
     /// IM 回调 HMAC 密钥（增量10；空串=端点 503 关闭——未配置即不可用）
     pub im_secret: String,
     /// IM id → PLM username 映射（增量10）
@@ -72,6 +74,7 @@ pub fn bom_release_hook(bom: Arc<core_bom::BomStore>) -> Arc<dyn core_version::R
         crate::routes::parts::list_parts,
         crate::routes::parts::duplicates,
         crate::routes::parts::class_tree,
+        crate::routes::audit::search_audit,
     ),
     components(schemas(
         crate::routes::docs::FileInfoDto,

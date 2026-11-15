@@ -1,5 +1,6 @@
 //! 路由装配：唯一 build 函数（R-D4）。
 
+pub mod audit;
 pub mod auth;
 pub mod boms;
 pub mod docs;
@@ -87,6 +88,7 @@ pub fn build(state: AppState) -> Router {
             delete(webhooks::delete_webhook),
         )
         .route("/api/v1/sec/webhooks/dead", get(webhooks::dead_events))
+        .route("/api/v1/audit", get(audit::search_audit))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             require_perm("sec", "manage"),
@@ -139,6 +141,10 @@ pub fn build(state: AppState) -> Router {
         .merge(docs_lc_write)
         .merge(docs_lc_approve)
         .merge(sec_mgmt)
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::audit_mw::audit_mw,
+        ))
         .layer(axum::middleware::from_fn(crate::error::trace_mw))
         .layer(axum::extract::DefaultBodyLimit::max(
             state.max_upload as usize,
