@@ -2326,3 +2326,174 @@ async fn todos_center_three_boxes_and_abac() {
 
     ctx.cleanup().await;
 }
+
+#[tokio::test]
+async fn lifecycle_comment_record_and_require_switch() {
+    let ctx = TestCtx::setup("cmt", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "cmted", "cmted-pass-123", &["editor"], 0)
+        .await;
+    let ed = ctx.login_as("cmted", "cmted-pass-123").await;
+
+    let upload = |t: &str, no: &str| {
+        send(
+            &ctx.app,
+            post_docs_multipart(Some(t), no, r#"{"name":"N"}"#, Some("c.dwg"), FILE.to_vec()),
+        )
+    };
+    let sub = |t: &str, no: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/submit"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let act_json = |t: &str, no: &str, act: &str, body: Option<&str>| {
+        let bld = axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/{act}"))
+            .header("authorization", format!("Bearer {t}"));
+        match body {
+            Some(s) => bld
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(s.to_string()))
+                .unwrap(),
+            None => bld.body(axum::body::Body::empty()).unwrap(),
+        }
+    };
+
+    // ① approve 带 JSON 意见 → 200；audit 显式行含 comment/from/to
+    let (s, _, _) = upload(&ed, "DWG-CMT-1").await;
+    assert_eq!(s, 201);
+    let (s, _, _) = send(&ctx.app, sub(&ed, "DWG-CMT-1")).await;
+    assert_eq!(s, 200);
+    let (s, body, _) = send(
+        &ctx.app,
+        act_json(&admin, "DWG-CMT-1", "approve", Some(r#"{"comment":"质量合格，准予发布"}"#)),
+    )
+    .await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let mut ok = false;
+    for _ in 0..20 {
+        let n: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log WHERE action='approve' AND object='DWG-CMT-1'",
+        )
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+        if n == 1 {
+            ok = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(ok, "approve 审计行须落库");
+    let row: serde_json::Value =
+        sqlx::query("SELECT detail FROM audit_log WHERE action='approve' AND object='DWG-CMT-1'")
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap()
+            .get("detail");
+    assert_eq!(row["comment"], "质量合格，准予发布");
+    assert_eq!(row["from"], "review");
+    assert_eq!(row["to"], "released");
+
+    // ② reject 带意见 → working；audit reject 行含 comment
+    let (s, _, _) = upload(&ed, "DWG-CMT-2").await;
+    assert_eq!(s, 201);
+    let (s, _, _) = send(&ctx.app, sub(&ed, "DWG-CMT-2")).await;
+    assert_eq!(s, 200);
+    let (s, body, _) = send(
+        &ctx.app,
+        act_json(&admin, "DWG-CMT-2", "reject", Some(r#"{"comment":"尺寸标注缺失"}"#)),
+    )
+    .await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["state"], "working");
+    for _ in 0..20 {
+        let n: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log WHERE action='reject' AND object='DWG-CMT-2' \
+             AND detail->>'comment' = '尺寸标注缺失'",
+        )
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+        if n == 1 {
+            ok = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(ok, "reject 审计行须含意见");
+
+    // ③ 开启 require_comment（tier+开关同请求生效）→ 无意见 approve 400 CommentRequired
+    let (s, _, _) = upload(&ed, "DWG-CMT-3").await;
+    assert_eq!(s, 201);
+    let (s, _, _) = send(&ctx.app, sub(&ed, "DWG-CMT-3")).await;
+    assert_eq!(s, 200);
+    let sw = axum::http::Request::builder()
+        .method("PUT")
+        .uri("/api/v1/meta/types/drawing/flow-tier")
+        .header("authorization", format!("Bearer {admin}"))
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(r#"{"tier":"standard","require_comment":true}"#))
+        .unwrap();
+    let (s, _, _) = send(&ctx.app, sw).await;
+    assert_eq!(s, 204);
+    // 热刷新等待（registry NOTIFY/兜底轮询 ≤3s；与 flow_tier 测试同约定）
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    // submit 不受开关约束（提交无意见输入）
+    let (s, _, _) = upload(&ed, "DWG-CMT-4").await;
+    assert_eq!(s, 201);
+    let (s, _, _) = send(&ctx.app, sub(&ed, "DWG-CMT-4")).await;
+    assert_eq!(s, 200);
+    // 无意见 approve → 400 + 稳定错误码
+    let (s, body, _) = send(&ctx.app, act_json(&admin, "DWG-CMT-3", "approve", None)).await;
+    assert_eq!(s, 400, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["code"], "MDL-LCS-COMMENT-REQUIRED");
+    // 带意见 → 200
+    let (s, body, _) = send(
+        &ctx.app,
+        act_json(&admin, "DWG-CMT-3", "approve", Some(r#"{"comment":"ok"}"#)),
+    )
+    .await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    // 空串意见同样视为缺失
+    let (s, body, _) = send(&ctx.app, act_json(&admin, "DWG-CMT-4", "approve", Some(r#"{"comment":"  "}"#))).await;
+    assert_eq!(s, 400, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["code"], "MDL-LCS-COMMENT-REQUIRED");
+
+    // ④ IM 回调豁免（HMAC 可信路径，卡片无意见输入）——开关开启下无意见仍 200
+    let (s, _, _) = upload(&ed, "DWG-CMT-5").await;
+    assert_eq!(s, 201);
+    let (s, _, _) = send(&ctx.app, sub(&ed, "DWG-CMT-5")).await;
+    assert_eq!(s, 200);
+    let body = serde_json::json!({"user": "im-admin", "obj_no": "DWG-CMT-5", "action": "approve"});
+    let (s, _, _) = send(&ctx.app, im_action(&body.to_string(), Some(&im_sign_hex("im-test-secret", &body.to_string())))).await;
+    assert_eq!(s, 200, "IM 回调无意见须豁免开关");
+
+    // ⑤ 关闭开关 → 无意见 approve 照旧（可逆）
+    let sw = axum::http::Request::builder()
+        .method("PUT")
+        .uri("/api/v1/meta/types/drawing/flow-tier")
+        .header("authorization", format!("Bearer {admin}"))
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(r#"{"require_comment":false}"#))
+        .unwrap();
+    let (s, _, _) = send(&ctx.app, sw).await;
+    assert_eq!(s, 204);
+    // 热刷新等待（关闭开关同 ≤3s）
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    let (s, _, _) = upload(&ed, "DWG-CMT-6").await;
+    assert_eq!(s, 201);
+    let (s, _, _) = send(&ctx.app, sub(&ed, "DWG-CMT-6")).await;
+    assert_eq!(s, 200);
+    let (s, _, _) = send(&ctx.app, act_json(&admin, "DWG-CMT-6", "approve", None)).await;
+    assert_eq!(s, 200);
+
+    ctx.cleanup().await;
+}

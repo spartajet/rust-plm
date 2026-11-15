@@ -350,6 +350,22 @@ fn pct_encode(s: &str) -> String {
 
 // ==================== 生命周期端点（增量3） ====================
 
+/// 生命周期动作可选 body（增量19 WF-02 意见）：{"comment": "..."}；无 body/无 JSON content-type → None（向后兼容）
+#[derive(Deserialize, ToSchema)]
+pub struct LcBody {
+    pub comment: Option<String>,
+}
+
+/// 类型 require_comment 开关读取（cm_type.config.require_comment；缺省 false）
+async fn require_comment_of(st: &AppState, type_code: &str) -> Result<bool, core_model::DomainError> {
+    let td = st.registry.type_def(type_code)?;
+    Ok(td
+        .config
+        .get("require_comment")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false))
+}
+
 async fn do_transition(
     st: &AppState,
     tid: &crate::error::TraceId,
@@ -357,6 +373,7 @@ async fn do_transition(
     ip: Option<String>,
     obj_no: &str,
     ev: core_version::LifecycleEvent,
+    comment: Option<String>,
 ) -> Result<axum::Json<serde_json::Value>, ApiError> {
     // 终审 I1：生命周期端点同受密级 ABAC 约束（越级 404 不泄露存在性）
     let d = st
@@ -370,6 +387,18 @@ async fn do_transition(
             &tid.0,
         ));
     }
+    // WF-02 审批意见必填开关（增量19）：仅约束 approve/reject（需要意见的动作）；
+    // IM 回调路径在 im.rs 内不经过此函数（豁免，台账记裁定）
+    let comment = comment.map(|c| c.trim().to_string()).filter(|c| !c.is_empty());
+    if (matches!(ev, core_version::LifecycleEvent::Approve)
+        || matches!(ev, core_version::LifecycleEvent::Reject))
+        && comment.is_none()
+        && require_comment_of(st, &d.object.type_code)
+            .await
+            .map_err(|e| ApiError::new(e, &tid.0))?
+    {
+        return Err(ApiError::new(core_model::DomainError::CommentRequired, &tid.0));
+    }
     let old_state = d.object.state.clone();
     let o = st
         .service
@@ -382,7 +411,7 @@ async fn do_transition(
         user.username.clone(),
         ev.as_str().to_string(),
         Some(obj_no.to_string()),
-        Some(json!({"from": old_state, "to": o.state})),
+        Some(json!({"from": old_state, "to": o.state, "comment": comment})),
         Some(tid.0.clone()),
         ip,
     );
@@ -395,7 +424,8 @@ macro_rules! lc_endpoint {
             post,
             path = $path_lit,
             params(("obj_no" = String, Path)),
-            responses((status = 200, description = $doc_lit), (status = 403), (status = 404), (status = 409))
+            request_body = Option<LcBody>,
+            responses((status = 200, description = $doc_lit), (status = 400), (status = 403), (status = 404), (status = 409))
         )]
         pub async fn $fn_name(
             State(st): State<AppState>,
@@ -403,8 +433,10 @@ macro_rules! lc_endpoint {
             Extension(user): Extension<core_sec::AuthUser>,
             Extension(ip): Extension<crate::audit_mw::ClientIp>,
             Path(obj_no): Path<String>,
+            body: Option<Json<LcBody>>,
         ) -> Result<axum::Json<serde_json::Value>, ApiError> {
-            do_transition(&st, &tid, &user, ip.0, &obj_no, $ev).await
+            let comment = body.and_then(|Json(b)| b.comment);
+            do_transition(&st, &tid, &user, ip.0, &obj_no, $ev, comment).await
         }
     };
 }

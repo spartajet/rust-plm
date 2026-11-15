@@ -81,6 +81,7 @@ pub fn bom_release_hook(bom: Arc<core_bom::BomStore>) -> Arc<dyn core_version::R
         crate::routes::docs::FileInfoDto,
         crate::routes::docs::DocResponse,
         crate::routes::docs::ListResponse,
+        crate::routes::docs::LcBody,
         crate::routes::todos::TodoItemDto,
         crate::routes::infra::Healthz,
         crate::routes::auth::LoginReq,
