@@ -2065,29 +2065,29 @@ async fn audit_log_records_and_searches() {
     assert!(ok, "兜底+显式埋点须落库");
 
     // flow-tier 行语义：含 from/to + 操作人 admin
-    let row: (String, serde_json::Value) = sqlx::query_as(
-        "SELECT username, detail FROM audit_log WHERE action='flow-tier.change'",
-    )
-    .fetch_one(&ctx.pool)
-    .await
-    .unwrap();
+    let row: (String, serde_json::Value) =
+        sqlx::query_as("SELECT username, detail FROM audit_log WHERE action='flow-tier.change'")
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
     assert_eq!(row.0, "admin");
     assert_eq!(row.1["from"], "standard");
     assert_eq!(row.1["to"], "minimal");
 
     // login.fail 行存在
-    let n: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE action='login.fail'")
-            .fetch_one(&ctx.pool)
-            .await
-            .unwrap();
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE action='login.fail'")
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
     assert_eq!(n, 1);
 
     // 检索端点：action 过滤 + 权限（viewer 403）
     ctx.create_user_as_admin(&admin, "audview", "audview-pass-123", &["viewer"], 0)
         .await;
     let view = ctx.login_as("audview", "audview-pass-123").await;
-    let (s, body) = ctx.get_authed("/api/v1/audit?action=flow-tier.change", &admin).await;
+    let (s, body) = ctx
+        .get_authed("/api/v1/audit?action=flow-tier.change", &admin)
+        .await;
     assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(v["total"], 1);

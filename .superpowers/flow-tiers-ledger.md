@@ -141,3 +141,9 @@ Final: fixed I2 class_tree 算法重写——旧两轮挂子依赖"父码字典�
 Final: Ruling: 环/自环成员不入树（WITH RECURSIVE 锚定根+enabled 下滤，环父不可达自然终止）；**分类管理 UI 增量必须加建类环检测守卫**（本裁定为未来增量前置要求）。
 Final: fixed M1 parts 四端点+CreatePartReq 注册 OpenAPI / M2 test-results+playwright-report 出库+gitignore（增量8 M1 同族第三次重演——构建产物入库警示）。
 Final: minor (deferred): M4 create 响应 duplicates 无行级 ABAC（与 duplicates 端点不一致——今日全 part 密级 0 不可达，PART-05 密级化时对齐）；M3 0015 双目录镜像（mod-part 副本冗余，漂移即 VersionMismatch——registry 记账+分类管理增量收敛单副本）；M5 查重 confirm 分支零自动化覆盖（Playwright flaky 环境下反復验证成本高，语义由 duplicates API 钉覆盖）。
+[增量18 SYS-01 审计日志 追加台账]
+Final: Task1-2 完成——0016 append-only 表（应用层零 UPDATE/DELETE，REVOKE 裁定沿用）/AuditService（spawn 异步写不阻塞+多维检索）/audit_mw 兜底埋点（2xx http：method+path+status+user+trace_id+ip）+显式埋点（login.ok/login.fail 含错误码/flow-tier.change 含 from-to+操作人）/GET /audit 检索端点（sec:manage）+前端 /admin/audit 页（筛选+分页）。后端 152+前端 24+e2e 27。
+Final: Ruling: 4xx 仅显式安全事件留痕（login.fail），普通 4xx/5xx 噪声不入库——审计语义=安全与合规动作而非错误日志。
+Final: Ruling: 登录失败审计记录 username 按请求原文（未验证也留痕——防爆破溯源依据）。
+Final: Ruling: download 显式埋点本轮未加（download_doc handler 未插桩）——deferred 至下载审计补钉（openapi 已有 handler 位置明确）。
+Final: minor (deferred): 审计报告 Excel 导出（RPT-04 导出框架联动）；audit detail JSON 前端展示格式化；append-only REVOKE 多角色部署时执行（同 migrations.md 裁定）。

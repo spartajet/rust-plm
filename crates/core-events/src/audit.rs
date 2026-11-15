@@ -3,6 +3,18 @@
 use serde::Serialize;
 use sqlx::PgPool;
 
+/// 检索过滤器（增量18：终审 clippy>7 参收敛）
+#[derive(Debug, Default, Clone)]
+pub struct AuditFilter {
+    pub username: Option<String>,
+    pub action: Option<String>,
+    pub object: Option<String>,
+    pub from: Option<chrono::DateTime<chrono::Utc>>,
+    pub to: Option<chrono::DateTime<chrono::Utc>>,
+    pub page: u32,
+    pub size: u32,
+}
+
 pub struct AuditService {
     pool: PgPool,
 }
@@ -59,14 +71,9 @@ impl AuditService {
     /// 多维检索（SYS-01：按人/动作/对象/时间窗；分页）
     pub async fn search(
         &self,
-        username: Option<&str>,
-        action: Option<&str>,
-        object: Option<&str>,
-        from: Option<chrono::DateTime<chrono::Utc>>,
-        to: Option<chrono::DateTime<chrono::Utc>>,
-        page: u32,
-        size: u32,
+        f: &AuditFilter,
     ) -> Result<(Vec<AuditRow>, i64), core_model::DomainError> {
+        let (page, size) = (f.page, f.size);
         let rows: Vec<AuditRow> = sqlx::query_as(
             "SELECT id, at, username, action, object, detail, trace_id, ip FROM audit_log \
              WHERE ($1::text IS NULL OR username = $1) \
@@ -76,11 +83,11 @@ impl AuditService {
                AND ($5::timestamptz IS NULL OR at <= $5) \
              ORDER BY id DESC LIMIT $6 OFFSET $7",
         )
-        .bind(username.filter(|s| !s.trim().is_empty()))
-        .bind(action.filter(|s| !s.trim().is_empty()))
-        .bind(object.filter(|s| !s.trim().is_empty()))
-        .bind(from)
-        .bind(to)
+        .bind(f.username.as_deref().filter(|s| !s.trim().is_empty()))
+        .bind(f.action.as_deref().filter(|s| !s.trim().is_empty()))
+        .bind(f.object.as_deref().filter(|s| !s.trim().is_empty()))
+        .bind(f.from)
+        .bind(f.to)
         .bind(size as i64)
         .bind(i64::from(page.saturating_sub(1)) * i64::from(size))
         .fetch_all(&self.pool)
@@ -94,11 +101,11 @@ impl AuditService {
                AND ($4::timestamptz IS NULL OR at >= $4) \
                AND ($5::timestamptz IS NULL OR at <= $5)",
         )
-        .bind(username.filter(|s| !s.trim().is_empty()))
-        .bind(action.filter(|s| !s.trim().is_empty()))
-        .bind(object.filter(|s| !s.trim().is_empty()))
-        .bind(from)
-        .bind(to)
+        .bind(f.username.as_deref().filter(|s| !s.trim().is_empty()))
+        .bind(f.action.as_deref().filter(|s| !s.trim().is_empty()))
+        .bind(f.object.as_deref().filter(|s| !s.trim().is_empty()))
+        .bind(f.from)
+        .bind(f.to)
         .fetch_one(&self.pool)
         .await
         .map_err(|e| core_model::DomainError::Db(e.to_string()))?;

@@ -125,7 +125,10 @@ impl TestCtx {
             pool.clone(),
             objects.clone() as Arc<dyn core_model::ObjectStore>,
         ));
-        core_events::migrator().run(&pool).await.expect("core-events 迁移失败");
+        core_events::migrator()
+            .run(&pool)
+            .await
+            .expect("core-events 迁移失败");
         let audit = Arc::new(core_events::AuditService::new(pool.clone()));
         // 发布冻结注入（增量9，与 main 同源——api_gateway::bom_release_hook）
         core_events::migrator()

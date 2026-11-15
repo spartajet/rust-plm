@@ -45,17 +45,18 @@ pub async fn search_audit(
     };
     let from = parse_ts(&q.from)?;
     let to = parse_ts(&q.to)?;
+    let filter = core_events::AuditFilter {
+        username: q.username.clone().filter(|s| !s.trim().is_empty()),
+        action: q.action.clone().filter(|s| !s.trim().is_empty()),
+        object: q.object.clone().filter(|s| !s.trim().is_empty()),
+        from,
+        to,
+        page: q.page.unwrap_or(1).max(1),
+        size: q.size.unwrap_or(50).clamp(1, 200),
+    };
     let (items, total) = st
         .audit
-        .search(
-            q.username.as_deref(),
-            q.action.as_deref(),
-            q.object.as_deref(),
-            from,
-            to,
-            q.page.unwrap_or(1).max(1),
-            q.size.unwrap_or(50).clamp(1, 200),
-        )
+        .search(&filter)
         .await
         .map_err(|e| ApiError::new(e, &tid.0))?;
     Ok(Json(json!({

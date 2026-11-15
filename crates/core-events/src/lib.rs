@@ -4,7 +4,7 @@ pub mod audit;
 pub mod dispatch;
 pub mod repo;
 
-pub use audit::AuditService;
+pub use audit::{AuditFilter, AuditRow, AuditService};
 pub use dispatch::EventDispatcher;
 pub use repo::{WebhookRepo, WebhookSub};
 

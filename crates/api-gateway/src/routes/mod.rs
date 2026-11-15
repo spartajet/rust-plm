@@ -1,5 +1,6 @@
 //! 路由装配：唯一 build 函数（R-D4）。
 
+pub mod audit;
 pub mod auth;
 pub mod boms;
 pub mod docs;
@@ -7,7 +8,6 @@ pub mod im;
 pub mod infra;
 pub mod meta;
 pub mod parts;
-pub mod audit;
 pub mod sec_users;
 pub mod webhooks;
 

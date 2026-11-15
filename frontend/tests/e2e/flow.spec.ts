@@ -357,6 +357,26 @@ test("role visibility: editor sees upload, viewer does not; neither sees admin m
   await expect(page.locator(".el-pagination__total")).toHaveText(/\d+/);
 });
 
+test("audit page: filter by action and paginated list (SYS-01)", async ({ page }) => {
+  await page.goto("/login");
+  await page.fill('[data-test="username"]', "admin");
+  await page.fill('[data-test="password"]', ADMIN_PW);
+  await page.click('[data-test="login-btn"]');
+  await page.waitForURL("/");
+  await page.goto("/admin/audit");
+  // 筛选登录失败（本 run 至少产生过 1 条——前置测试若没有则此 run 前面旅程不含失败登录，
+  // 改按 action=http 兜底查询必有数据）
+  // el-select 非原生 select——键盘导航选首项（http）
+  await page.click('[data-test="audit-action"]');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-test="audit-action"]')).toContainText('HTTP', { timeout: 10_000 });
+  await expect(page.locator('[data-test="audit-table"] .el-table__row').first()).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(page.locator(".el-pagination__total")).toContainText("共");
+});
+
 test("state filter writes back to URL and survives reload", async ({ page }) => {
   await page.goto("/login");
   await page.fill('[data-test="username"]', "admin");

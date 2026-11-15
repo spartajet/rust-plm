@@ -7,11 +7,7 @@ use axum::extract::{Request, State};
 use axum::middleware::Next;
 use axum::response::Response;
 
-pub async fn audit_mw(
-    State(st): State<AppState>,
-    req: Request,
-    next: Next,
-) -> Response {
+pub async fn audit_mw(State(st): State<AppState>, req: Request, next: Next) -> Response {
     let method = req.method().clone().to_string();
     let path = req.uri().path().to_string();
     let ip = req

@@ -11,6 +11,8 @@ export const router = createRouter({
     { path: "/parts", component: () => import("../pages/Parts.vue") },
     // 用户管理（增量11；后端 sec:manage 门控——无权限者 API 403 提示）
     { path: "/admin/users", component: () => import("../pages/UserAdmin.vue") },
+    // 审计日志（增量18 SYS-01）
+    { path: "/admin/audit", component: () => import("../pages/Audit.vue") },
   ],
 });
 

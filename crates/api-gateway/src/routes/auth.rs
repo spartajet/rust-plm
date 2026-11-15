@@ -52,7 +52,7 @@ pub async fn login(
     // 审计埋点（增量18 SYS-01）：登录成功/失败均留痕（安全事件）
     let result = st.sec.login(&req.username, &req.password).await;
     match &result {
-        Ok(p) => st.audit.record(
+        Ok(_) => st.audit.record(
             req.username.clone(),
             "login.ok",
             None,
