@@ -252,3 +252,158 @@ pub struct LineInputDto {
     pub child: uuid::Uuid,
     pub qty: i64,
 }
+
+// ==================== 增量21：BOM-01 富行 + BOM-07 汇总 ====================
+
+#[derive(Deserialize)]
+pub struct LinesQuery {
+    /// 发布 major：as-of 快照行（只读）；缺省=live 可编辑行
+    pub major: Option<i32>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct LineInfoDto {
+    pub line_no: i32,
+    pub child_id: String,
+    pub child_obj_no: String,
+    pub child_name: Option<String>,
+    pub qty: i64,
+}
+
+/// GET /api/v1/boms/{obj_no}/lines?major=N — 直接子件富行（docs:read；子件密级 ABAC 在 SQL）
+#[utoipa::path(
+    get, path = "/api/v1/boms/{obj_no}/lines",
+    params(("obj_no" = String, Path), ("major" = i32, Query, description = "发布 major：as-of 快照行（只读）；缺省=live")),
+    responses((status = 200, body = Vec<LineInfoDto>), (status = 400, description = "major 无快照"), (status = 404))
+)]
+pub async fn lines_boms(
+    State(st): State<AppState>,
+    Extension(tid): Extension<crate::error::TraceId>,
+    Extension(user): Extension<AuthUser>,
+    Path(obj_no): Path<String>,
+    Query(q): Query<LinesQuery>,
+) -> Result<Json<Vec<LineInfoDto>>, ApiError> {
+    let obj = st
+        .service
+        .detail(&obj_no)
+        .await
+        .map_err(|e| ApiError::new(e, &tid.0))?;
+    // 密级 ABAC（越级 404 不泄露存在性；与 expand/set_lines 同语义）
+    if obj.object.secret_level > user.max_secret_level {
+        return Err(ApiError::new(
+            core_model::DomainError::ObjNotFound(format!("docs:{obj_no}")),
+            &tid.0,
+        ));
+    }
+    let snapshot = match q.major {
+        Some(m) => Some((obj.object.id, m)),
+        None => None,
+    };
+    let rows = st
+        .bom
+        .lines_info(obj.object.id, user.max_secret_level, snapshot)
+        .await
+        .map_err(|e| ApiError::new(e, &tid.0))?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| LineInfoDto {
+                line_no: r.line_no,
+                child_id: r.child.to_string(),
+                child_obj_no: r.obj_no,
+                child_name: r.name,
+                qty: r.qty,
+            })
+            .collect(),
+    ))
+}
+
+#[derive(Deserialize)]
+pub struct SummaryQuery {
+    /// 发布 major：as-of 快照汇总；缺省=live
+    pub major: Option<i32>,
+    /// format=csv → 附件下载（UTF-8 BOM 兼容 Excel）
+    pub format: Option<String>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct SummaryDto {
+    pub obj_no: String,
+    pub name: Option<String>,
+    pub class_code: Option<String>,
+    pub class_name: Option<String>,
+    pub qty_total: i64,
+}
+
+/// GET /api/v1/boms/{obj_no}/summary?major=N[&format=csv] — BOM-07 用量/分类汇总（docs:read）
+#[utoipa::path(
+    get, path = "/api/v1/boms/{obj_no}/summary",
+    params(("obj_no" = String, Path), ("major" = i32, Query), ("format" = String, Query, description = "csv → 附件下载")),
+    responses((status = 200, body = Vec<SummaryDto>), (status = 400), (status = 404))
+)]
+pub async fn summary_boms(
+    State(st): State<AppState>,
+    Extension(tid): Extension<crate::error::TraceId>,
+    Extension(user): Extension<AuthUser>,
+    Path(obj_no): Path<String>,
+    Query(q): Query<SummaryQuery>,
+) -> Result<Response, ApiError> {
+    let obj = st
+        .service
+        .detail(&obj_no)
+        .await
+        .map_err(|e| ApiError::new(e, &tid.0))?;
+    if obj.object.secret_level > user.max_secret_level {
+        return Err(ApiError::new(
+            core_model::DomainError::ObjNotFound(format!("docs:{obj_no}")),
+            &tid.0,
+        ));
+    }
+    let snapshot = match q.major {
+        Some(m) => Some((obj.object.id, m)),
+        None => None,
+    };
+    let rows = st
+        .bom
+        .summary(obj.object.id, user.max_secret_level, snapshot)
+        .await
+        .map_err(|e| ApiError::new(e, &tid.0))?;
+    if q.format.as_deref() == Some("csv") {
+        // UTF-8 BOM（Excel 直开不乱码）；字段内引号/逗号转义
+        let mut body = String::from("\u{FEFF}编号,名称,分类码,分类,单台用量\n");
+        for r in &rows {
+            let esc = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
+            body.push_str(&format!(
+                "{},{},{},{},{}\n",
+                esc(&r.obj_no),
+                esc(r.name.as_deref().unwrap_or("")),
+                esc(r.class_code.as_deref().unwrap_or("")),
+                esc(r.class_name.as_deref().unwrap_or("")),
+                r.qty_total
+            ));
+        }
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            header::CONTENT_TYPE,
+            "text/csv; charset=utf-8".parse().unwrap(),
+        );
+        headers.insert(
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"summary-{obj_no}.csv\"")
+                .parse()
+                .unwrap(),
+        );
+        return Ok((StatusCode::OK, headers, body).into_response());
+    }
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| SummaryDto {
+                obj_no: r.obj_no,
+                name: r.name,
+                class_code: r.class_code,
+                class_name: r.class_name,
+                qty_total: r.qty_total,
+            })
+            .collect::<Vec<_>>(),
+    )
+    .into_response())
+}

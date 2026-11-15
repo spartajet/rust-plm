@@ -368,8 +368,10 @@ pub fn degraded_app(
         )),
         audit: Arc::new(core_events::AuditService::new(bad_pool.clone())),
         search: Arc::new(
-            core_search::SearchService::open(&std::env::temp_dir().join("plmsrv-degraded-search-v2"))
-                .expect("search open"),
+            core_search::SearchService::open(
+                &std::env::temp_dir().join("plmsrv-degraded-search-v2"),
+            )
+            .expect("search open"),
         ),
         im_secret: String::new(),
         im_user_map: Default::default(),
