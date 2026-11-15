@@ -57,7 +57,15 @@
 
 ## 对账台账（执行后回填）
 
-- T1 完成（aaee453）：tantivy 0.27 API 与 ADR 时代（0.22）差异大——BooleanQuery 元组序翻转/add_string_field 移除/Index::exists 需 Directory/commit &mut self（writer 改 tokio Mutex）；QueryParser PhraseQuery 语义诊断实证后弃用（改逐 term 析取）；jеiba tokenize 用 Search 模式带偏移。
+- T1 完成（aaee453）：tantivy 0.27 API 与 ADR 时代（0.22）差异大——BooleanQuery 元组序翻转/add_string_field 移除/Index::exists 需 Directory/commit &mut self（writer 改 tokio Mutex）；QueryParser PhraseQuery 语义诊断实证后弃用（改逐 term 析取）；jieba tokenize 用 Search 模式带偏移。
 - T2 完成（98b11c0）：e2e BM25 排序不稳定→集合断言；harness 暴露 search 句柄供近实时钉。
 - T3 完成（d5df27e）：**计划外清偿——MainLayout 为死组件**（增量19「菜单」声明未生效）→ router 改根布局 children 接线，既有 URL 保留；board 测试初渲竞态（全串匹配钉）；纯 ASCII 混合查询语义（分词碎片泛匹配诊断实证）；Windows AV 锁→commit 退避重试+e2e 数据目录移出项目树；parts 测试数据累积挤出第一页→Parts 页加名称筛选（UX 增强）。
 - T4 完成：README/部署文档/评审报告（RPT-01 ✅、RPT-03 🟡）/migrations.md 七条裁定已更新。
+
+### 终审修复轮（FIX-THEN-MERGE → PASS）
+- I1-1 清偿：**DB 密级权威复核**——search_groups/search_page 命中行回查最新活版本 secret_level（每页 ≤100 行），带外提密/删除立即剔除 fail-closed（不等索引自愈）；total 仍索引侧计数（偏高方向安全，注释明示）；失实注释更正；e2e 新钉「带外提密→立即不可见（low）/admin 不受影响」。
+- M1-1：secret_filter max<0 → 恒假 term（空 BooleanQuery=match-all 陷阱）。
+- M1-2：计划文档西里尔 е → ASCII。
+- M1-3：flow.spec PT 死变量删除。
+- M1-4（后置记账）：default-active 在 /docs/:objNo 不高亮图纸菜单——纯 UX。
+- 修复轮后：fmt/clippy/后端164/前端29/Playwright 12 两轮全绿（parts 查重确认弹窗条件处理——历史 run material=304 累积触发 duplicates OR 匹配的又一数据累积钉）。

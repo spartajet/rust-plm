@@ -313,8 +313,18 @@ impl SearchService {
         BooleanQuery::new(clauses)
     }
 
-    /// ABAC：密级 0..=max 枚举 term（查询侧过滤；命中后 stored 复核双保险）
+    /// ABAC：密级 0..=max 枚举 term（查询侧过滤；命中后 stored 复核 + DB 权威复核三保险）。
+    /// max<0 → 恒假 term（空 BooleanQuery 在 tantivy 0.27 是 match-all——fail-open 陷阱，终审 M1-1）
     fn secret_filter(&self, max_secret: i16) -> BooleanQuery {
+        if max_secret < 0 {
+            return BooleanQuery::new(vec![(
+                Occur::Must,
+                Box::new(TermQuery::new(
+                    Term::from_field_u64(self.f.f_secret, u64::MAX),
+                    tantivy::schema::IndexRecordOption::Basic,
+                )) as Box<dyn tantivy::query::Query>,
+            )]);
+        }
         let clauses: Vec<(Occur, Box<dyn tantivy::query::Query>)> = (0..=i64::from(max_secret))
             .map(|lvl| {
                 let tq: Box<dyn tantivy::query::Query> = Box::new(TermQuery::new(
@@ -359,7 +369,8 @@ impl SearchService {
             .get_first(self.f.f_secret)
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as i16;
-        // stored 复核（防索引陈旧越密级——fail-closed）
+        // stored 复核（索引内序反防护；对索引陈旧——提密后未扫描——无防护，权威复核在
+        // enrich_with_db_secret 的 DB 回查，终审 I1-1 硬化）
         if secret > max_secret {
             return None;
         }
@@ -406,9 +417,44 @@ impl SearchService {
             .map_err(|e| DomainError::Internal(e.to_string()))? as u64)
     }
 
-    /// 聚类检索（RPT-01 主路径）：每类型独立计数+取前 per_group 条
-    pub fn search_groups(
+    /// DB 密级权威复核（终审 I1-1 硬化）：命中行回查最新活版本 secret_level——
+    /// 索引陈旧（带外提密后未及扫描）时 fail-closed 剔除；对象已删同样剔除。
+    /// total 仍为索引侧计数（偏高方向安全——多计不泄露内容，页面 items 精确）。
+    async fn recheck_db_secret(
         &self,
+        pool: &PgPool,
+        hits: Vec<SearchHit>,
+        max_secret: i16,
+    ) -> Result<Vec<SearchHit>, DomainError> {
+        if hits.is_empty() {
+            return Ok(hits);
+        }
+        let nos: Vec<String> = hits.iter().map(|h| h.obj_no.clone()).collect();
+        let rows: Vec<(String, i16)> = sqlx::query_as(
+            "SELECT DISTINCT ON (obj_no) obj_no, secret_level FROM cm_object \
+             WHERE obj_no = ANY($1) AND deleted_at IS NULL \
+             ORDER BY obj_no, major_ver DESC, minor_ver DESC, iteration DESC",
+        )
+        .bind(&nos)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| DomainError::Db(e.to_string()))?;
+        let latest: std::collections::HashMap<String, i16> = rows.into_iter().collect();
+        Ok(hits
+            .into_iter()
+            .filter(|h| {
+                latest
+                    .get(&h.obj_no)
+                    .map(|s| *s <= max_secret)
+                    .unwrap_or(false)
+            })
+            .collect())
+    }
+
+    /// 聚类检索（RPT-01 主路径）：每类型独立计数+取前 per_group 条；DB 密级权威复核
+    pub async fn search_groups(
+        &self,
+        pool: &PgPool,
         q: &str,
         max_secret: i16,
         per_group: usize,
@@ -425,7 +471,7 @@ impl SearchService {
                 Vec::new()
             } else {
                 let top = TopDocs::with_limit(per_group).order_by_score();
-                searcher
+                let raw: Vec<SearchHit> = searcher
                     .search(&query, &top)
                     .map_err(|e| DomainError::Internal(e.to_string()))?
                     .into_iter()
@@ -433,7 +479,8 @@ impl SearchService {
                         let doc: TantivyDocument = searcher.doc(addr).ok()?;
                         self.hit_of(&doc, max_secret)
                     })
-                    .collect()
+                    .collect();
+                self.recheck_db_secret(pool, raw, max_secret).await?
             };
             groups.push(GroupResult {
                 type_code: t.to_string(),
@@ -444,9 +491,10 @@ impl SearchService {
         Ok(groups)
     }
 
-    /// 单类型钻取分页（q 命中该类型的平铺列表）
-    pub fn search_page(
+    /// 单类型钻取分页（q 命中该类型的平铺列表）；DB 密级权威复核
+    pub async fn search_page(
         &self,
+        pool: &PgPool,
         q: &str,
         type_code: &str,
         max_secret: i16,
@@ -465,7 +513,7 @@ impl SearchService {
             let top = TopDocs::with_limit(size as usize)
                 .and_offset(off as usize)
                 .order_by_score();
-            searcher
+            let raw: Vec<SearchHit> = searcher
                 .search(&query, &top)
                 .map_err(|e| DomainError::Internal(e.to_string()))?
                 .into_iter()
@@ -473,7 +521,8 @@ impl SearchService {
                     let doc: TantivyDocument = searcher.doc(addr).ok()?;
                     self.hit_of(&doc, max_secret)
                 })
-                .collect()
+                .collect();
+            self.recheck_db_secret(pool, raw, max_secret).await?
         };
         Ok((items, total))
     }

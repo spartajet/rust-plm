@@ -101,7 +101,8 @@ pub async fn search(
         None | Some("") => {
             let gs = st
                 .search
-                .search_groups(&query, user.max_secret_level, 10)
+                .search_groups(&st.pool, &query, user.max_secret_level, 10)
+                .await
                 .map_err(|e| ApiError::new(e, &tid.0))?;
             (gs, 1, 10)
         }
@@ -117,7 +118,8 @@ pub async fn search(
             }
             let (items, total) = st
                 .search
-                .search_page(&query, t, user.max_secret_level, page, size)
+                .search_page(&st.pool, &query, t, user.max_secret_level, page, size)
+                .await
                 .map_err(|e| ApiError::new(e, &tid.0))?;
             (
                 vec![core_search::GroupResult {

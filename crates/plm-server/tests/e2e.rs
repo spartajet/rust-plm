@@ -2768,6 +2768,40 @@ async fn search_global_clusters_abac_and_near_realtime() {
         .collect();
     assert!(!all_nos.contains(&"DWG-SRCH-2"), "越密级绝不出现");
 
+    // ④' 终审 I1-1 硬化钉：带外提密（SQL 直改、updated_at 不动——索引陈旧窗口模拟）
+    // → DB 权威复核立即剔除（低上限用户 items 空；admin 不受影响）
+    let (s, _, _) = upload(&ed, "DWG-SRCH-4", "普通垫片").await;
+    assert_eq!(s, 201);
+    let _ = ctx.search.scan_once(&ctx.pool, &mut wm).await.unwrap();
+    let (s, body) = ctx.get_authed("/api/v1/search?q=普通垫片", &low).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        v["groups"][0]["items"].as_array().unwrap().len(),
+        1,
+        "提密前可见"
+    );
+    sqlx::query("UPDATE cm_object SET secret_level = 2 WHERE obj_no = 'DWG-SRCH-4'")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (s, body) = ctx.get_authed("/api/v1/search?q=普通垫片", &low).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        v["groups"][0]["items"].as_array().unwrap().len(),
+        0,
+        "带外提密后 DB 复核立即剔除（不等索引自愈）"
+    );
+    let (s, body) = ctx.get_authed("/api/v1/search?q=普通垫片", &admin).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        v["groups"][0]["items"].as_array().unwrap().len(),
+        1,
+        "admin 上限内不受复核影响"
+    );
+
     // ⑤ 钻取分页 + 非法 type
     let (s, body) = ctx
         .get_authed("/api/v1/search?q=轴承&type=drawing&page=1&size=1", &admin)

@@ -89,14 +89,7 @@ async fn rebuild_cluster_substring_abac_and_scan() {
     assert_eq!(svc.raw_text_term_hits("q235").unwrap(), 4);
     assert_eq!(svc.raw_text_term_hits("Q235").unwrap(), 0, "统一小写");
     // ① 聚类：双类型命中；端盖不命中
-    for dbg_q in ["轴承", "端盖", "六角轴承座", "DWG-S1", "Q235"] {
-        let g = svc.search_groups(dbg_q, 3, 10).unwrap();
-        eprintln!(
-            "DBG q={dbg_q} drawing_total={} part_total={}",
-            g[0].total, g[1].total
-        );
-    }
-    let groups = svc.search_groups("轴承", 3, 10).unwrap();
+    let groups = svc.search_groups(&pool, "轴承", 3, 10).await.unwrap();
     let drawing = groups.iter().find(|g| g.type_code == "drawing").unwrap();
     let part = groups.iter().find(|g| g.type_code == "part").unwrap();
     assert_eq!(drawing.total, 1, "drawing 组恰 DWG-S1");
@@ -107,23 +100,29 @@ async fn rebuild_cluster_substring_abac_and_scan() {
     assert_eq!(groups.len(), SEARCH_TYPES.len());
 
     // ② 子串（jieba 未收录「承座」，bigram 兜底命中）
-    let groups = svc.search_groups("承座", 3, 10).unwrap();
+    let groups = svc.search_groups(&pool, "承座", 3, 10).await.unwrap();
     let drawing = groups.iter().find(|g| g.type_code == "drawing").unwrap();
     assert_eq!(drawing.total, 1);
     assert_eq!(drawing.items[0].obj_no, "DWG-S1");
 
     // ③ 编号精确（term）
-    let (items, total) = svc.search_page("DWG-S1", "drawing", 3, 1, 10).unwrap();
+    let (items, total) = svc
+        .search_page(&pool, "DWG-S1", "drawing", 3, 1, 10)
+        .await
+        .unwrap();
     assert_eq!(total, 1);
     assert_eq!(items[0].obj_no, "DWG-S1");
 
     // ④ ABAC：上限 0 → 密级 2 的「保密轴承」不可见（查询侧过滤+stored 复核双保险）
-    let groups = svc.search_groups("轴承", 0, 10).unwrap();
+    let groups = svc.search_groups(&pool, "轴承", 0, 10).await.unwrap();
     let part = groups.iter().find(|g| g.type_code == "part").unwrap();
     assert_eq!(part.total, 1, "上限 0 仅 P-1");
     assert_eq!(part.items[0].obj_no, "P-1");
     // 钻取分页同样过滤
-    let (_it, t) = svc.search_page("轴承", "part", 0, 1, 10).unwrap();
+    let (_it, t) = svc
+        .search_page(&pool, "轴承", "part", 0, 1, 10)
+        .await
+        .unwrap();
     assert_eq!(t, 1);
 
     // ⑤ 增量扫描：新对象入库 → scan_once 回放 → 可检索
@@ -131,7 +130,10 @@ async fn rebuild_cluster_substring_abac_and_scan() {
     let mut wm = chrono::Utc::now() - chrono::Duration::hours(1);
     let replayed = svc.scan_once(&pool, &mut wm).await.unwrap();
     assert!(replayed >= 4, "水位早于全部行——至少回放既有 4 件");
-    let (it, t) = svc.search_page("带轮", "drawing", 3, 1, 10).unwrap();
+    let (it, t) = svc
+        .search_page(&pool, "带轮", "drawing", 3, 1, 10)
+        .await
+        .unwrap();
     assert_eq!(t, 1);
     assert_eq!(it[0].obj_no, "DWG-S3");
     // 水位推进后再扫：重叠窗内既有行幂等重放（≤4），结果不变
@@ -140,7 +142,10 @@ async fn rebuild_cluster_substring_abac_and_scan() {
         replayed2 <= 5,
         "重叠窗幂等重放不扩大（4 既有+1 新增全在窗内）"
     );
-    let (_it2, t2) = svc.search_page("带轮", "drawing", 3, 1, 10).unwrap();
+    let (_it2, t2) = svc
+        .search_page(&pool, "带轮", "drawing", 3, 1, 10)
+        .await
+        .unwrap();
     assert_eq!(t2, 1, "重放不改结果");
 
     // 确定性零回放：插入 updated_at 在水位 +10s 的行 → 扫描收编并推水位 → 再扫为 0
@@ -153,7 +158,10 @@ async fn rebuild_cluster_substring_abac_and_scan() {
     .unwrap();
     let replayed3 = svc.scan_once(&pool, &mut wm).await.unwrap();
     assert!(replayed3 >= 1, "future 行收编（窗含既有重叠行）");
-    let (it3, t3) = svc.search_page("带轮2", "drawing", 3, 1, 10).unwrap();
+    let (it3, t3) = svc
+        .search_page(&pool, "带轮2", "drawing", 3, 1, 10)
+        .await
+        .unwrap();
     assert_eq!(t3, 2, "OR 析取：同步带轮/同步带轮2 双命中");
     assert!(it3.iter().any(|i| i.obj_no == "DWG-S4"));
     let replayed4 = svc.scan_once(&pool, &mut wm).await.unwrap();
@@ -186,7 +194,7 @@ async fn multi_instance_second_open_is_degraded_readonly() {
         svc2.rebuild_full(&pool).await.is_err(),
         "degraded 写入必须报错"
     );
-    let groups = svc2.search_groups("减速器", 3, 10).unwrap();
+    let groups = svc2.search_groups(&pool, "减速器", 3, 10).await.unwrap();
     let drawing = groups.iter().find(|g| g.type_code == "drawing").unwrap();
     assert_eq!(drawing.total, 1, "degraded 实例查询仍可用");
     assert_eq!(drawing.items[0].obj_no, "DWG-D1");

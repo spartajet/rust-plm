@@ -38,6 +38,14 @@ test("parts: create with class coding and dedup warning (PART-01/02/05)", async 
   await page.fill('[data-test="part-name"]', baseName);
   await page.fill('[data-test="part-material"]', "304");
   await page.click('[data-test="part-submit"]');
+  // 查重确认弹窗条件处理（增量20：历史 run 物料 material=304 累积 → duplicates OR 材料匹配
+  // → 弹「仍要创建」拦住 POST；无相似件时无弹窗——3s 内出现则点确认）
+  const dupConfirm = page.locator('.el-message-box__btns .el-button--primary:has-text("仍要创建")');
+  try {
+    await dupConfirm.click({ timeout: 3000 });
+  } catch {
+    /* 无弹窗继续 */
+  }
   // 取证：捕获 POST /parts 真实状态码（全套/单跑行为差异的根因证据）
   const postDone = page
     .waitForResponse((r) => r.url().includes("/api/v1/parts") && r.request().method() === "POST")
@@ -489,8 +497,7 @@ test("global search: topbar query clusters drawings and parts (RPT-01)", async (
 
   // 造数（browser fetch 直连）：图纸「六角轴承座」+ 物料「六角轴承」
   const NO = `DWG-FE-SE-${Date.now()}`;
-  const PT = `PT-FE-SE-${Date.now()}`;
-  const setup = await page.evaluate(async ({ NO, PT }) => {
+  const setup = await page.evaluate(async ({ NO }) => {
     const api = (window as unknown as { E2E_API: string }).E2E_API;
     const t = localStorage.getItem("rustplm_token") ?? "";
     const ah = { Authorization: `Bearer ${t}` };
@@ -507,7 +514,7 @@ test("global search: topbar query clusters drawings and parts (RPT-01)", async (
     });
     if (pr.status !== 201) return `part ${pr.status}`;
     return "ok";
-  }, { NO, PT });
+  }, { NO });
   expect(setup).toBe("ok");
 
   // 等扫描器（2s 周期）收编新行——轮询搜索 API 确定性就绪（并行满载下固定 sleep 不足）
