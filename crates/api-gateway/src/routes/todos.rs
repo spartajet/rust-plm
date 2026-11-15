@@ -1,5 +1,6 @@
 //! /api/v1/todos 路由（增量19 WF-03 待办中心）：待办/已办/我发起三盒统一查询。
-//! 门控 docs:read（与 GET /docs 同层）；数据面 ABAC 密级过滤在 DocService::todos 内。
+//! 门控 docs:read（与 GET /docs 同层）；数据面 ABAC：todo/mine 盒密级过滤行，
+//! done 盒保留本人动作史、对象名/态仅上限内回显（终审 I1-1 裁定，见 docs/migrations.md）。
 
 use crate::error::ApiError;
 use crate::state::AppState;

@@ -327,11 +327,12 @@ const LATEST_CTE: &str = "latest AS ( \
      ORDER BY obj_no, major_ver DESC, minor_ver DESC, iteration DESC)";
 
 impl DocService {
-    /// WF-03 待办中心三盒查询（ABAC 密级过滤；分页）。
+    /// WF-03 待办中心三盒查询（分页；todo/mine 盒 ABAC 密级过滤）。
     /// - Todo：state IN (review,checked) 且 secret≤上限 且 updated_by IS DISTINCT FROM me
     ///   （与 strict maker-checker 呼应——自己的提交不出现在自己的待办）。
-    /// - Done：audit_log 中 username=me 的 lifecycle 六动作行（依赖 do_transition/im 回调显式埋点）。
-    /// - Mine：created_by=me。
+    /// - Done：audit_log 中 username=me 的 lifecycle 六动作行（依赖 do_transition/im 回调显式埋点；
+    ///   动作史行保留，对象当前名/态仅在上限内回显——终审 I1-1 裁定）。
+    /// - Mine：created_by=me（同样受密级过滤）。
     pub async fn todos(
         &self,
         b: TodoBox,
@@ -376,6 +377,8 @@ impl DocService {
                 Ok((rows, total))
             }
             TodoBox::Done => {
+                // 终审 I1-1/M1-2：LATERAL 联查限定 drawing 域 + 当前密级上限内才回显对象名/态
+                // （审计行本身保留——本人动作史；对象事后提密则 state/name 折叠为 NULL，fail-closed）
                 let list_sql = format!(
                     "SELECT a.object AS obj_no, l.name, l.state, \
                             NULL::int4 AS major_ver, NULL::int4 AS minor_ver, NULL::int2 AS secret_level, \
@@ -386,13 +389,16 @@ impl DocService {
                        SELECT DISTINCT ON (obj_no) obj_no, state, attrs->>'name' AS name \
                        FROM cm_object \
                        WHERE obj_no = a.object AND deleted_at IS NULL \
+                         AND type_id = (SELECT id FROM cm_type WHERE code = 'drawing') \
+                         AND secret_level <= $2 \
                        ORDER BY obj_no, major_ver DESC, minor_ver DESC, iteration DESC \
                      ) l ON true \
                      WHERE a.username = $1 AND a.action IN {LC_ACTIONS} AND a.object IS NOT NULL \
-                     ORDER BY a.id DESC LIMIT $2 OFFSET $3"
+                     ORDER BY a.id DESC LIMIT $3 OFFSET $4"
                 );
                 let rows: Vec<TodoItem> = sqlx::query_as(&list_sql)
                     .bind(username)
+                    .bind(max_secret_level)
                     .bind(size as i64)
                     .bind(off)
                     .fetch_all(&self.pool)

@@ -49,3 +49,5 @@
 - **IM 回调豁免意见必填开关**：IM 卡片无意见输入，HMAC 可信路径；Web 端 do_transition 强制。台账留此豁免。
 - **上传 owner=actor 同源**：cm_object INSERT 复用 $5（owner）落 created_by/updated_by——上传链现传 actor 使"我发起"盒成立；owner 语义收窄为独立字段留待后续。
 - **audit 双行共存语义**：lc 动作行（action=submit/approve/…，带 object/from/to/comment）与 audit_mw http 兜底行（action=http）并存；已办盒按 action IN 六动作过滤，互不干扰。
+- **已办盒密级语义（增量19 终审 I1-1）**：done 盒=本人动作史（audit 行保留）；对象当前名/态仅在其密级≤查询者上限时回显（LATERAL 内过滤，事后提密则折叠 NULL，fail-closed）；且 LATERAL 限定 drawing 域（跨类型同号不串行）。
+- **upload() 便捷路径 actor=None（终审 M1-4）**：仅测试/CLI 使用，其创建对象 created_by 为 NULL 不进"我发起"盒；生产路径（upload_doc）已穿 actor。

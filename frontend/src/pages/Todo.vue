@@ -42,10 +42,6 @@ watch(box, () => {
   load();
 });
 
-function switchBox(b: TodoBox) {
-  box.value = b;
-}
-
 function openDetail(row: TodoItem) {
   router.push(`/docs/${row.obj_no}`);
 }
@@ -94,7 +90,7 @@ async function doBatchApprove() {
         :name="b"
       >
         <template #label>
-          <span :data-test="`tab-${b}`" @click="switchBox(b)">{{ BOX_LABEL[b] }}</span>
+          <span :data-test="`tab-${b}`">{{ BOX_LABEL[b] }}</span>
         </template>
       </el-tab-pane>
     </el-tabs>
