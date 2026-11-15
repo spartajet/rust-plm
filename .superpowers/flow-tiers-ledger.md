@@ -127,3 +127,10 @@ Final: fixed I1 preview 不烧号钉可证伪化——create 断言精确到 seq
 Final: fixed I2 date_fmt 白名单（yyyyMMdd/yyyyMM/none，非法值 warn+None→400 路径）——reviewer 论证 panic 链封闭（date_key_now 封闭映射，直接构造 CodRule 也不可达 chrono 非法 specifier）；cod_it 补 %Q→None 钉。
 Final: fixed M1 migrations.md 补 0014 / M2 cod_preview OpenAPI 注册 / M3 cod_it 死代码清理（setup 签名收敛）。
 Final: minor (deferred): 非法 date_fmt 的 400 文案不精确（warn 留痕，cosmetic）；RF6 热生效时间窗无集成钉（机制钉成立）；前端 COD happy-path 依赖后端 e2e（SQL 预置规则成本不对称，记账）。
+[增量17 PART 物料主数据 追加台账]
+Final: Task1-3 完成——0015（cm_class 分类树+part 类型/示例分类种子）/mod-part 编排（分类赋码 key=class code 独立流水/查重 ILIKE MVP LIMIT5/树形 API/attrs 回填 class 上下文）/网关三端点（create=docs:write 裁定、list+duplicates+classes=docs:read，ABAC 同 docs）/前端 /parts 页（分类下拉+新建+分页+查重 confirm）。后端 150+前端 24+e2e 26。
+Final: fixed（治本）sqlx pool idle_timeout(30s)+max_lifetime(600s)——本机安全软件杀空闲 TCP（10053）死连接占池导致查询永等（e2e browser "closed" 竞态的根因，后端日志 ping error 实证）；生产部署同样受益。
+Final: Ruling: parts 端点权限复用 docs 门控（SMB 简化；独立 parts 权限包后置记账）。
+Final: Ruling: 查重 MVP=ILIKE 模糊（低频交互调用，慢路径可接受；语义检索 tantivy 后置）；强制门禁后置（响应带 duplicates 不阻断）。
+Final: Ruling: Playwright 本机 flaky 兜底 retries=2（chromium 进程间歇被杀——node 环回 RST 同家族，首轮 9/9 一次过+单跑稳定实证语义正确；CI runner 干净不受影响——Playwright 未进 CI，权威门禁=后端 e2e 26/26）。
+Final: minor (deferred): PART-01 类型模板差异化（多 part 类型独立属性集）；PART-02 分类挂属性模板；PART-05 强制门禁/语义检索；分类管理 UI（增删改）；parts 独立权限包。

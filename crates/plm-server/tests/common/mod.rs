@@ -81,6 +81,9 @@ pub async fn migrated(
 
     let pool = PgPoolOptions::new()
         .max_connections(4)
+        // 本机安全软件杀空闲 TCP（10053）——死连接占池（增量16 e2e 实证），回收机制必须开启
+        .idle_timeout(std::time::Duration::from_secs(30))
+        .max_lifetime(std::time::Duration::from_secs(600))
         .connect(&swap_db(&admin_url, &db))
         .await
         .unwrap();

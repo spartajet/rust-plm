@@ -78,6 +78,9 @@ async fn main() -> Result<()> {
 
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(8)
+        // 本机安全软件会杀空闲 TCP 连接（10053）——死连接占池导致查询永等（增量16 e2e 实证）
+        .idle_timeout(std::time::Duration::from_secs(30))
+        .max_lifetime(std::time::Duration::from_secs(600))
         .connect(&cfg.database_url)
         .await
         .context("连接 PostgreSQL 失败")?;
