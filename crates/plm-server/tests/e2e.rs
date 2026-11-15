@@ -2497,3 +2497,128 @@ async fn lifecycle_comment_record_and_require_switch() {
 
     ctx.cleanup().await;
 }
+
+#[tokio::test]
+async fn batch_approve_partial_results_and_guards() {
+    let ctx = TestCtx::setup("bat", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "bated", "bated-pass-123", &["editor"], 0)
+        .await;
+    let ed = ctx.login_as("bated", "bated-pass-123").await;
+
+    let upload = |t: &str, no: &str| {
+        send(
+            &ctx.app,
+            post_docs_multipart(Some(t), no, r#"{"name":"N"}"#, Some("b.dwg"), FILE.to_vec()),
+        )
+    };
+    let sub = |t: &str, no: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/submit"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    for no in ["DWG-BAT-1", "DWG-BAT-2", "DWG-BAT-3"] {
+        let (s, _, _) = upload(&ed, no).await;
+        assert_eq!(s, 201);
+        let (s, _, _) = send(&ctx.app, sub(&ed, no)).await;
+        assert_eq!(s, 200);
+    }
+
+    let batch = |t: &str, body: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/docs/batch-approve")
+            .header("authorization", format!("Bearer {t}"))
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body.to_string()))
+            .unwrap()
+    };
+
+    // ① 混合批次：两件成功 + 不存在编号逐项报错（不中断批次）
+    let (s, body, _) = send(
+        &ctx.app,
+        batch(
+            &admin,
+            r#"{"obj_nos":["DWG-BAT-1","DWG-BAT-2","DWG-NOPE-404"]}"#,
+        ),
+    )
+    .await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let items = v["items"].as_array().unwrap();
+    assert_eq!(items.len(), 3);
+    let find = |no: &str| items.iter().find(|i| i["obj_no"] == no).unwrap();
+    assert_eq!(find("DWG-BAT-1")["ok"], true);
+    assert_eq!(find("DWG-BAT-1")["state"], "released");
+    assert_eq!(find("DWG-BAT-2")["ok"], true);
+    assert_eq!(find("DWG-NOPE-404")["ok"], false);
+    assert_eq!(find("DWG-NOPE-404")["error"], "MDL-OBJ-NOT-FOUND");
+    // 审计：两件 approve 行（含 from/to）
+    for _ in 0..20 {
+        let n: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log WHERE action='approve' AND object LIKE 'DWG-BAT-%'",
+        )
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+        if n == 2 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action='approve' AND object LIKE 'DWG-BAT-%'",
+    )
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(n, 2, "批量审批两件须各留审计行");
+
+    // ② editor 无 docs:approve → 403
+    let (s, _, _) = send(&ctx.app, batch(&ed, r#"{"obj_nos":["DWG-BAT-3"]}"#)).await;
+    assert_eq!(s, 403);
+
+    // ③ 超上限 50 → 400
+    let many: Vec<String> = (0..51).map(|i| format!("\"DWG-X{i}\"")).collect();
+    let (s, _, _) = send(
+        &ctx.app,
+        batch(&admin, &format!("{{\"obj_nos\":[{}]}}", many.join(","))),
+    )
+    .await;
+    assert_eq!(s, 400);
+
+    // ④ 空批次 → 400
+    let (s, _, _) = send(&ctx.app, batch(&admin, r#"{"obj_nos":[]}"#)).await;
+    assert_eq!(s, 400);
+
+    // ⑤ require_comment 开启：批量无意见 → 逐项 ok:false CommentRequired；带意见 → 成功
+    let sw = axum::http::Request::builder()
+        .method("PUT")
+        .uri("/api/v1/meta/types/drawing/flow-tier")
+        .header("authorization", format!("Bearer {admin}"))
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(r#"{"require_comment":true}"#))
+        .unwrap();
+    let (s, _, _) = send(&ctx.app, sw).await;
+    assert_eq!(s, 204);
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    let (s, body, _) = send(&ctx.app, batch(&admin, r#"{"obj_nos":["DWG-BAT-3"]}"#)).await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["items"][0]["ok"], false);
+    assert_eq!(v["items"][0]["error"], "MDL-LCS-COMMENT-REQUIRED");
+    let (s, body, _) = send(
+        &ctx.app,
+        batch(&admin, r#"{"obj_nos":["DWG-BAT-3"],"comment":"批量放行"}"#),
+    )
+    .await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["items"][0]["ok"], true);
+    assert_eq!(v["items"][0]["state"], "released");
+
+    ctx.cleanup().await;
+}

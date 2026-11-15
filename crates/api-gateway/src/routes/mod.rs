@@ -51,6 +51,7 @@ pub fn build(state: AppState) -> Router {
         ));
     let docs_lc_approve = Router::new()
         .route("/api/v1/docs/{obj_no}/approve", post(docs::approve_doc))
+        .route("/api/v1/docs/batch-approve", post(docs::batch_approve))
         .route("/api/v1/docs/{obj_no}/obsolete", post(docs::obsolete_doc))
         .route("/api/v1/docs/{obj_no}/release", post(docs::release_doc))
         .layer(axum::middleware::from_fn_with_state(
