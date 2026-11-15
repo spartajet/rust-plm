@@ -708,6 +708,15 @@ test("doc preview: png inline with watermark, dwg falls back to download hint (D
   await expect(page.locator('[data-test="preview-img"]')).toBeVisible({ timeout: 10_000 });
   await expect(page.locator('[data-test="preview-watermark"]')).toBeVisible();
   await expect(page.locator('[data-test="preview-watermark"]')).toContainText("admin");
+  // 终审 I1 回归钉：水印 overlay 样式真实落地（absolute+pointer-events none——computed style
+  // 断言，纯文本可见性断言拦不住 CSS 缺失——增量22 修复轮实证过的盲区）
+  const wmStyle = await page.evaluate(() => {
+    const wm = document.querySelector('[data-test="preview-watermark"]');
+    const wrap = document.querySelector('[data-test="preview-area"]');
+    const cs = getComputedStyle(wm as Element);
+    return { pos: cs.position, pe: cs.pointerEvents, wrapPos: getComputedStyle(wrap as Element).position };
+  });
+  expect(wmStyle).toEqual({ pos: "absolute", pe: "none", wrapPos: "relative" });
   await page.click('[data-test="preview-close"]');
   await expect(page.locator('[data-test="preview-img"]')).toHaveCount(0);
 

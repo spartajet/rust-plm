@@ -3167,9 +3167,51 @@ async fn doc_preview_inline_whitelist_and_abac() {
         .to_string();
     assert_eq!(ct, "image/png");
 
-    // ③ DWG → 415 预览不支持（SVG 同理排除；前端提示走下载）
+    // ③ DWG → 415 预览不支持（前端提示走下载）
     let (s, _, _) = send(&ctx.app, req(&admin, "DWG-PRE-DWG")).await;
     assert_eq!(s, 415);
+    // 终审 M2 补钉：SVG 双路径均 415（mime=image/svg+xml 直传；octet-stream+.svg 扩展名兜底）
+    let (s, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&ed),
+            "DWG-PRE-SVG1",
+            r#"{"name":"矢量"}"#,
+            Some("s.svg"),
+            b"<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>".to_vec(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201);
+    // multipart content-type 由文件扩展名推断不可控——直接 SQL 置 image/svg+xml 钉 mime 路径
+    sqlx::query(
+        "UPDATE file_object SET mime = 'image/svg+xml' WHERE hash =          (SELECT fr.hash FROM file_ref fr JOIN cm_object o ON o.id = fr.object_id WHERE o.obj_no = 'DWG-PRE-SVG1')",
+    )
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    let (s, _, _) = send(&ctx.app, req(&admin, "DWG-PRE-SVG1")).await;
+    assert_eq!(s, 415, "SVG mime 路径排除");
+    let (s, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&ed),
+            "DWG-PRE-SVG2",
+            r#"{"name":"矢量2"}"#,
+            Some("t.svg"),
+            b"<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>".to_vec(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201);
+    sqlx::query(
+        "UPDATE file_object SET mime = NULL WHERE hash =          (SELECT fr.hash FROM file_ref fr JOIN cm_object o ON o.id = fr.object_id WHERE o.obj_no = 'DWG-PRE-SVG2')",
+    )
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    let (s, _, _) = send(&ctx.app, req(&admin, "DWG-PRE-SVG2")).await;
+    assert_eq!(s, 415, "SVG 扩展名兜底路径排除");
 
     // ④ ABAC：提密 → 低上限用户 404 不泄露存在性
     sqlx::query("UPDATE cm_object SET secret_level = 2 WHERE obj_no = 'DWG-PRE-PDF'")
@@ -3180,6 +3222,28 @@ async fn doc_preview_inline_whitelist_and_abac() {
     assert_eq!(s, 404);
     let (s, _, _) = send(&ctx.app, req(&admin, "DWG-PRE-PDF")).await;
     assert_eq!(s, 200, "admin 不受影响");
+
+    // 终审 M2 补钉：无附件对象 → 404（detail 200 但 file_ref 缺失）
+    let (s, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&ed),
+            "DWG-PRE-NOFILE",
+            r#"{"name":"空壳"}"#,
+            Some("n.dwg"),
+            FILE.to_vec(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201);
+    sqlx::query(
+        "DELETE FROM file_ref WHERE object_id =          (SELECT id FROM cm_object WHERE obj_no = 'DWG-PRE-NOFILE' AND deleted_at IS NULL)",
+    )
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    let (s, _, _) = send(&ctx.app, req(&admin, "DWG-PRE-NOFILE")).await;
+    assert_eq!(s, 404, "无附件 preview 404");
 
     ctx.cleanup().await;
 }

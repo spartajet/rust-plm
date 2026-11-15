@@ -388,7 +388,8 @@ pub async fn preview_doc(
         .map_err(|e| ApiError::new(e, &tid.0))?;
 
     let mut headers = HeaderMap::new();
-    headers.insert(header::CONTENT_TYPE, ct.parse().unwrap());
+    // ct 来自编译期白名单常量——expect 表达不可失败意图（终审 I-3）
+    headers.insert(header::CONTENT_TYPE, ct.parse().expect("whitelisted mime"));
     headers.insert(
         header::CONTENT_DISPOSITION,
         format!(

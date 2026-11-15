@@ -113,6 +113,10 @@ const watermarkText = computed(
   () => `${auth.username} · 密级${doc.value?.object.secret_level ?? 0} · ${new Date().toISOString().slice(0, 16)}`,
 );
 
+// 终审 M1：previewDoc 在途时导航离开——onBeforeUnmount 先行（previewState 尚空），
+// promise 兑现后 createObjectURL 无人释放；disposed 闸门拦截
+let previewDisposed = false;
+
 async function doPreview() {
   previewLoading.value = true;
   try {
@@ -124,13 +128,12 @@ async function doPreview() {
       ElMessage.error(await extractBlobApiError(e));
       return;
     }
+    if (previewDisposed) return;
     const { blob, mime } = result;
     const kind = mime === "application/pdf" ? "pdf" : "image";
     const url = URL.createObjectURL(blob);
     if (previewState.value) URL.revokeObjectURL(previewState.value.url);
     previewState.value = { url, kind };
-  } catch (e) {
-    ElMessage.error(extractApiError(e));
   } finally {
     previewLoading.value = false;
   }
@@ -142,6 +145,7 @@ function closePreview() {
 }
 
 onBeforeUnmount(() => {
+  previewDisposed = true;
   if (previewState.value) URL.revokeObjectURL(previewState.value.url);
 });
 
@@ -365,6 +369,8 @@ function back() {
           style="max-width: 100%; display: block"
           data-test="preview-img"
         />
+        <!-- 终审 I-1 备案：不加 sandbox——内容经后端 MIME 白名单（仅 pdf 到 iframe）+nosniff
+             双闸，无同源脚本执行路径；加 sandbox 会破坏浏览器 PDF 查看器（裁定互链 migrations.md） -->
         <iframe
           v-else
           :src="previewState.url"
@@ -571,3 +577,35 @@ function back() {
     </el-card>
   </div>
 </template>
+
+<style scoped>
+/* 增量22 终审 I1 清偿：水印 overlay 真实落样式（T2 时 python replace 静默 no-op——
+   原文件无 <style scoped> 块可锚定；此后新增样式一律用 Edit 直写） */
+.preview-wrap {
+  position: relative;
+  margin-top: 12px;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  padding: 8px;
+  overflow: hidden;
+}
+.watermark {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: space-around;
+  justify-content: space-around;
+}
+.wm-item {
+  display: inline-block;
+  margin: 18px;
+  opacity: 0.12;
+  transform: rotate(-18deg);
+  font-size: 14px;
+  white-space: nowrap;
+}
+</style>

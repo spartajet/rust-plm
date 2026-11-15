@@ -38,3 +38,10 @@
 - T1 完成（77a34eb）：RED 先行（404→GREEN）；send 助手不带 headers——断言改 oneshot 直取；DomainError::PreviewUnsupported（415 MDL-DOC-PREVIEW-UNSUPPORTED）。
 - T2 完成（37342cf）：**e2e 三层排障**——①测试自身 MIME 传错（DWG 也传 image/png）；②extractApiError 无法解析 blob 错误体（新增 extractBlobApiError 异步解析）；③内容寻址 mime 固化首传语义（同字节复用旧 mime——改唯一字节钉）。前端 blob 直开+水印 overlay+objectURL 生命周期（onBeforeUnmount）。
 - T3 完成：README/部署文档/评审报告（DOC-05 ⬜→🟡）/migrations.md 四条裁定。
+
+### 终审修复轮（FIX-THEN-MERGE → 清偿）
+- **I1**：水印 CSS 从未落地——T2 时 python replace('<style scoped>') 静默 no-op（原文件无该字符串可锚定；又是 heredoc/python 静默替换失败家族，教训：新增样式块一律 Edit/heredoc 直写）。修复轮 scoped CSS 补齐（absolute+inset+pointer-events:none+rotate 平铺）+ computed style 回归钉（pos=absolute/pe=none/wrapPos=relative——纯可见性断言拦不住 CSS 缺失的盲区固化）。
+- M1：previewDoc 在途导航竞态——previewDisposed 闸门（onBeforeUnmount 先行时 promise 兑现不 createObjectURL）。
+- M2：e2e 补 SVG 双路径 415（mime 直改 image/svg+xml + mime NULL 扩展名兜底）与无附件 404（DELETE file_ref）钉。
+- I-3：whitelisted mime expect 表达不可失败意图；I-1 备案：iframe 不加 sandbox 裁定注释（migrations.md 互链）；I-2 TOCTOU 与全站 download 同模式备案。
+- 修复轮后：后端 166/clippy 0/fmt 过/前端 32/Playwright 14×2 全绿。
