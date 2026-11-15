@@ -72,9 +72,7 @@ pub async fn set_flow_tier(
         .map_err(|e| ApiError::new(e, &tid.0))?;
     if req.tier.is_none() && req.require_comment.is_none() {
         return Err(ApiError::new(
-            core_model::DomainError::BadRequest(
-                "tier 与 require_comment 至少提供一项".into(),
-            ),
+            core_model::DomainError::BadRequest("tier 与 require_comment 至少提供一项".into()),
             &tid.0,
         ));
     }
@@ -104,11 +102,7 @@ pub async fn set_flow_tier(
         .registry
         .type_def(&code)
         .ok()
-        .and_then(|td| {
-            td.config
-                .get("require_comment")
-                .and_then(|v| v.as_bool())
-        })
+        .and_then(|td| td.config.get("require_comment").and_then(|v| v.as_bool()))
         .unwrap_or(false);
     // UPDATE 触发 cm_meta_changed → TypeRegistry 热刷新（≤3s）；合并未提供的键
     let mut patch = serde_json::Map::new();
@@ -127,7 +121,11 @@ pub async fn set_flow_tier(
     .await
     .map_err(|e| ApiError::new(core_model::DomainError::Db(e.to_string()), &tid.0))?;
     // 审计埋点（增量18 SYS-01）：配置变更留痕（含新旧档位/意见开关+操作人）
-    let old_rc_json = if old_rc { serde_json::json!(true) } else { serde_json::json!(false) };
+    let old_rc_json = if old_rc {
+        serde_json::json!(true)
+    } else {
+        serde_json::json!(false)
+    };
     let new_rc_json = req
         .require_comment
         .map(|rc| serde_json::json!(rc))

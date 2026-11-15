@@ -357,7 +357,10 @@ pub struct LcBody {
 }
 
 /// 类型 require_comment 开关读取（cm_type.config.require_comment；缺省 false）
-async fn require_comment_of(st: &AppState, type_code: &str) -> Result<bool, core_model::DomainError> {
+async fn require_comment_of(
+    st: &AppState,
+    type_code: &str,
+) -> Result<bool, core_model::DomainError> {
     let td = st.registry.type_def(type_code)?;
     Ok(td
         .config
@@ -385,7 +388,9 @@ async fn transition_once(
     }
     // WF-02 审批意见必填开关（增量19）：仅约束 approve/reject（需要意见的动作）；
     // IM 回调路径在 im.rs 内不经过此函数（豁免，台账记裁定）
-    let comment = comment.map(|c| c.trim().to_string()).filter(|c| !c.is_empty());
+    let comment = comment
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty());
     if (matches!(ev, core_version::LifecycleEvent::Approve)
         || matches!(ev, core_version::LifecycleEvent::Reject))
         && comment.is_none()
@@ -463,8 +468,16 @@ pub async fn batch_approve(
     }
     let mut items = Vec::with_capacity(req.obj_nos.len());
     for no in &req.obj_nos {
-        match transition_once(&st, &tid, &user, ip.0.clone(), no, core_version::LifecycleEvent::Approve, req.comment.clone())
-            .await
+        match transition_once(
+            &st,
+            &tid,
+            &user,
+            ip.0.clone(),
+            no,
+            core_version::LifecycleEvent::Approve,
+            req.comment.clone(),
+        )
+        .await
         {
             Ok(o) => items.push(json!({"obj_no": no, "ok": true, "state": o.state})),
             Err(e) => items.push(json!({"obj_no": no, "ok": false, "error": e.code()})),

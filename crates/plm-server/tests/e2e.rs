@@ -2216,11 +2216,17 @@ async fn todos_center_three_boxes_and_abac() {
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(v["total"], 2);
     let items = v["items"].as_array().unwrap();
-    let t1 = items.iter().find(|i| i["obj_no"] == "DWG-TODO-1").expect("待办含 TODO-1");
+    let t1 = items
+        .iter()
+        .find(|i| i["obj_no"] == "DWG-TODO-1")
+        .expect("待办含 TODO-1");
     assert_eq!(t1["submitter"], "todoed");
     assert_eq!(t1["name"], "轴承座");
     assert_eq!(t1["state"], "review");
-    let ts = items.iter().find(|i| i["obj_no"] == "DWG-TODO-S").expect("待办含 TODO-S");
+    let ts = items
+        .iter()
+        .find(|i| i["obj_no"] == "DWG-TODO-S")
+        .expect("待办含 TODO-S");
     assert_eq!(ts["submitter"], "todolow");
 
     // 待办盒（editor）：自己的提交不算待办；密级 2 件越权不可见 → 空
@@ -2312,7 +2318,9 @@ async fn todos_center_three_boxes_and_abac() {
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let ed_done = v["items"].as_array().unwrap();
     assert!(
-        ed_done.iter().any(|i| i["obj_no"] == "DWG-TODO-1" && i["action"] == "submit"),
+        ed_done
+            .iter()
+            .any(|i| i["obj_no"] == "DWG-TODO-1" && i["action"] == "submit"),
         "editor 已办含自己的提交行"
     );
     assert!(
@@ -2370,7 +2378,12 @@ async fn lifecycle_comment_record_and_require_switch() {
     assert_eq!(s, 200);
     let (s, body, _) = send(
         &ctx.app,
-        act_json(&admin, "DWG-CMT-1", "approve", Some(r#"{"comment":"质量合格，准予发布"}"#)),
+        act_json(
+            &admin,
+            "DWG-CMT-1",
+            "approve",
+            Some(r#"{"comment":"质量合格，准予发布"}"#),
+        ),
     )
     .await;
     assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
@@ -2406,7 +2419,12 @@ async fn lifecycle_comment_record_and_require_switch() {
     assert_eq!(s, 200);
     let (s, body, _) = send(
         &ctx.app,
-        act_json(&admin, "DWG-CMT-2", "reject", Some(r#"{"comment":"尺寸标注缺失"}"#)),
+        act_json(
+            &admin,
+            "DWG-CMT-2",
+            "reject",
+            Some(r#"{"comment":"尺寸标注缺失"}"#),
+        ),
     )
     .await;
     assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
@@ -2438,7 +2456,9 @@ async fn lifecycle_comment_record_and_require_switch() {
         .uri("/api/v1/meta/types/drawing/flow-tier")
         .header("authorization", format!("Bearer {admin}"))
         .header("content-type", "application/json")
-        .body(axum::body::Body::from(r#"{"tier":"standard","require_comment":true}"#))
+        .body(axum::body::Body::from(
+            r#"{"tier":"standard","require_comment":true}"#,
+        ))
         .unwrap();
     let (s, _, _) = send(&ctx.app, sw).await;
     assert_eq!(s, 204);
@@ -2462,7 +2482,11 @@ async fn lifecycle_comment_record_and_require_switch() {
     .await;
     assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
     // 空串意见同样视为缺失
-    let (s, body, _) = send(&ctx.app, act_json(&admin, "DWG-CMT-4", "approve", Some(r#"{"comment":"  "}"#))).await;
+    let (s, body, _) = send(
+        &ctx.app,
+        act_json(&admin, "DWG-CMT-4", "approve", Some(r#"{"comment":"  "}"#)),
+    )
+    .await;
     assert_eq!(s, 400, "body={}", String::from_utf8_lossy(&body));
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(v["code"], "MDL-LCS-COMMENT-REQUIRED");
@@ -2473,7 +2497,14 @@ async fn lifecycle_comment_record_and_require_switch() {
     let (s, _, _) = send(&ctx.app, sub(&ed, "DWG-CMT-5")).await;
     assert_eq!(s, 200);
     let body = serde_json::json!({"user": "im-admin", "obj_no": "DWG-CMT-5", "action": "approve"});
-    let (s, _, _) = send(&ctx.app, im_action(&body.to_string(), Some(&im_sign_hex("im-test-secret", &body.to_string())))).await;
+    let (s, _, _) = send(
+        &ctx.app,
+        im_action(
+            &body.to_string(),
+            Some(&im_sign_hex("im-test-secret", &body.to_string())),
+        ),
+    )
+    .await;
     assert_eq!(s, 200, "IM 回调无意见须豁免开关");
 
     // ⑤ 关闭开关 → 无意见 approve 照旧（可逆）
