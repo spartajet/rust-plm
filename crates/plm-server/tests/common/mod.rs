@@ -81,6 +81,9 @@ pub async fn migrated(
 
     let pool = PgPoolOptions::new()
         .max_connections(4)
+        // 本机安全软件杀空闲 TCP（10053）——死连接占池（增量16 e2e 实证），回收机制必须开启
+        .idle_timeout(std::time::Duration::from_secs(30))
+        .max_lifetime(std::time::Duration::from_secs(600))
         .connect(&swap_db(&admin_url, &db))
         .await
         .unwrap();
@@ -106,7 +109,7 @@ impl TestCtx {
         let service = Arc::new(DocService::new(
             pool.clone(),
             registry.clone(),
-            objects,
+            objects.clone(),
             files,
         ));
         let sec = Arc::new(SecService::new(pool.clone(), "test-jwt-secret".to_string()));
@@ -114,6 +117,14 @@ impl TestCtx {
             .await
             .unwrap();
         let bom = Arc::new(core_bom::BomStore::new(pool.clone()));
+        mod_part::migrator()
+            .run(&pool)
+            .await
+            .expect("mod-part 迁移失败");
+        let parts = Arc::new(mod_part::PartService::new(
+            pool.clone(),
+            objects.clone() as Arc<dyn core_model::ObjectStore>,
+        ));
         // 发布冻结注入（增量9，与 main 同源——api_gateway::bom_release_hook）
         core_events::migrator()
             .run(&pool)
@@ -131,6 +142,7 @@ impl TestCtx {
             sec,
             lifecycle,
             bom,
+            parts,
             im_secret: "im-test-secret".into(),
             im_user_map: [
                 ("im-admin".to_string(), "admin".to_string()),
@@ -321,7 +333,7 @@ pub fn degraded_app(
     let service = Arc::new(DocService::new(
         bad_pool.clone(),
         registry.clone(),
-        objects,
+        objects.clone(),
         files,
     ));
     let sec = Arc::new(SecService::new(bad_pool.clone(), "degraded-secret".into()));
@@ -330,11 +342,15 @@ pub fn degraded_app(
     api_gateway::router(AppState {
         registry,
         service,
-        pool: bad_pool,
+        pool: bad_pool.clone(),
         max_upload,
         sec,
         lifecycle,
         bom,
+        parts: Arc::new(mod_part::PartService::new(
+            bad_pool.clone(),
+            objects.clone(),
+        )),
         im_secret: String::new(),
         im_user_map: Default::default(),
     })

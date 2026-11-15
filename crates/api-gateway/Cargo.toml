@@ -27,3 +27,4 @@ core-sec = { path = "../core-sec" }
 core-version = { path = "../core-version" }
 core-events = { path = "../core-events" }
 core-bom = { path = "../core-bom" }
+mod-part = { path = "../mod-part" }

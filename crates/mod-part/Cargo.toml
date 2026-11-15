@@ -1,0 +1,18 @@
+[package]
+name = "mod-part"
+version = "0.1.0"
+edition = "2021"
+description = "RustPLM 物料主数据编排（PART-01/02/05 纵切）：分类赋码/查重/列表"
+
+[dependencies]
+tokio = { workspace = true }
+sqlx = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+core-model = { path = "../core-model" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

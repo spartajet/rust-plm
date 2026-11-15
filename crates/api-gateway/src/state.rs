@@ -6,6 +6,8 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use utoipa::OpenApi;
 
+// mod_part 经 Cargo 依赖引入（AppState 字段）
+
 use core_model::TypeRegistry;
 
 #[derive(Clone)]
@@ -21,6 +23,8 @@ pub struct AppState {
     pub lifecycle: Arc<core_version::LifecycleStore>,
     /// BOM 引擎（增量6）
     pub bom: Arc<core_bom::BomStore>,
+    /// 物料服务（增量17 PART）
+    pub parts: Arc<mod_part::PartService>,
     /// IM 回调 HMAC 密钥（增量10；空串=端点 503 关闭——未配置即不可用）
     pub im_secret: String,
     /// IM id → PLM username 映射（增量10）
@@ -64,6 +68,10 @@ pub fn bom_release_hook(bom: Arc<core_bom::BomStore>) -> Arc<dyn core_version::R
         crate::routes::meta::get_type,
         crate::routes::meta::set_flow_tier,
         crate::routes::meta::cod_preview,
+        crate::routes::parts::create_part,
+        crate::routes::parts::list_parts,
+        crate::routes::parts::duplicates,
+        crate::routes::parts::class_tree,
     ),
     components(schemas(
         crate::routes::docs::FileInfoDto,
@@ -78,6 +86,7 @@ pub fn bom_release_hook(bom: Arc<core_bom::BomStore>) -> Arc<dyn core_version::R
         crate::routes::meta::TypeMeta,
         crate::routes::meta::SetFlowTierReq,
         crate::routes::boms::LineInputDto,
+        crate::routes::parts::CreatePartReq,
     ))
 )]
 pub struct ApiDocHolder;

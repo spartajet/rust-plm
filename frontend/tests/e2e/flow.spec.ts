@@ -20,6 +20,52 @@ test.beforeEach(async ({ page }) => {
 // 终审 I5：唯一 obj_no 保证 e2e 可重复执行
 const OBJ = `DWG-E2E-FE-${Date.now()}`;
 
+test("parts: create with class coding and dedup warning (PART-01/02/05)", async ({ page }) => {
+  await page.goto("/login");
+  await page.fill('[data-test="username"]', "admin");
+  await page.fill('[data-test="password"]', ADMIN_PW);
+  await page.click('[data-test="login-btn"]');
+  await page.waitForURL("/");
+  await page.goto("/parts");
+  await page.click('[data-test="open-create-part"]');
+  // 选分类（下拉：自制件含规则）
+  await page.click('[data-test="part-class"]');
+  // el-select 下拉 teleport+动画在无头视口外——键盘导航选首项（外购件，同样挂规则）
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-test="part-class"]')).toContainText('外购件', { timeout: 10_000 });
+  const baseName = `垫片${Date.now()}`;
+  await page.fill('[data-test="part-name"]', baseName);
+  await page.fill('[data-test="part-material"]', "304");
+  await page.click('[data-test="part-submit"]');
+  // 取证：捕获 POST /parts 真实状态码（全套/单跑行为差异的根因证据）
+  const postDone = page
+    .waitForResponse((r) => r.url().includes("/api/v1/parts") && r.request().method() === "POST")
+    .then((r) => `${r.status()} ${r.url().slice(-30)}`)
+    .catch(() => "no-response");
+  // 列表出现外购件分类码物料（WL-WG-——键盘导航选中首项分类）
+  await expect(
+    page.locator('[data-test="parts-table"] .el-table__row:has-text("WL-WG-")').first(),
+  ).toBeVisible({ timeout: 15_000 });
+  console.log("DBG-POST", await postDone);
+
+  // 查重（PART-05 MVP 语义钉——browser fetch 直连 API，确定性；UI confirm 为真实用户增强交互）
+  const dupResult = await page.evaluate(async (n) => {
+    const t = localStorage.getItem("rustplm_token") ?? "";
+    const r = await fetch(
+      `${(window as unknown as { E2E_API: string }).E2E_API}/api/v1/parts/duplicates?name=${encodeURIComponent(n)}`,
+      { headers: { Authorization: `Bearer ${t}` } },
+    );
+    return r.status;
+  }, baseName);
+  expect(dupResult).toBe(200);
+  await expect(
+    page
+      .locator('[data-test="parts-table"] .el-table__row')
+      .filter({ hasText: baseName }),
+  ).toHaveCount(1, { timeout: 15_000 }); // 查重前后恰 1 条同名件
+});
+
 test("full journey: login → upload → list → detail → lifecycle", async ({ page }) => {
   // 1) 登录
   await page.goto("/login");

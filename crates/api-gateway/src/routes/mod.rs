@@ -6,6 +6,7 @@ pub mod docs;
 pub mod im;
 pub mod infra;
 pub mod meta;
+pub mod parts;
 pub mod sec_users;
 pub mod webhooks;
 
@@ -18,6 +19,7 @@ pub fn build(state: AppState) -> Router {
     // 鉴权（谁）→ 授权（能做什么）两层
     let docs_rw = Router::new()
         .route("/api/v1/docs", post(docs::upload_doc))
+        .route("/api/v1/parts", post(parts::create_part))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             require_perm("docs", "write"),
@@ -27,6 +29,10 @@ pub fn build(state: AppState) -> Router {
         .route("/api/v1/docs/{obj_no}", get(docs::get_doc))
         .route("/api/v1/docs/{obj_no}/file", get(docs::download_doc))
         .route("/api/v1/docs/{obj_no}/versions", get(docs::versions_doc))
+        // 物料读端点（增量17 终审 C1 修正：docs:read 门控——require_perm 回填真实密级上限）
+        .route("/api/v1/parts", get(parts::list_parts))
+        .route("/api/v1/parts/duplicates", get(parts::duplicates))
+        .route("/api/v1/classes", get(parts::class_tree))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             require_perm("docs", "read"),
