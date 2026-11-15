@@ -74,6 +74,7 @@ pub fn bom_release_hook(bom: Arc<core_bom::BomStore>) -> Arc<dyn core_version::R
         crate::routes::parts::list_parts,
         crate::routes::parts::duplicates,
         crate::routes::parts::class_tree,
+        crate::routes::audit::search_audit,
     ),
     components(schemas(
         crate::routes::docs::FileInfoDto,

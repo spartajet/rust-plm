@@ -2092,6 +2092,54 @@ async fn audit_log_records_and_searches() {
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(v["total"], 1);
     assert_eq!(v["items"][0]["action"], "flow-tier.change");
+
+    // 终审 I1：多维检索——username 组合
+    let (s, body) = ctx
+        .get_authed("/api/v1/audit?username=admin&action=http", &admin)
+        .await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        v["total"].as_i64().unwrap() >= 1,
+        "admin 的 http 兜底行存在"
+    );
+    let (s, body) = ctx
+        .get_authed("/api/v1/audit?username=audview&action=http", &admin)
+        .await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 0, "audview 未发 authed 请求，http 行为 0");
+
+    // 时间窗：from=未来 → 空
+    let (s, body) = ctx
+        .get_authed("/api/v1/audit?from=2099-01-01T00:00:00Z", &admin)
+        .await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 0, "未来时间窗为空");
+
+    // 分页：size=1 两页不同行（offset 语义）
+    let (s, body) = ctx.get_authed("/api/v1/audit?page=1&size=1", &admin).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["items"].as_array().unwrap().len(), 1);
+    assert!(v["total"].as_i64().unwrap() >= 2);
+    let p1 = v["items"][0]["id"].as_i64().unwrap();
+    let (s, body) = ctx.get_authed("/api/v1/audit?page=2&size=1", &admin).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let p2 = v["items"][0]["id"].as_i64().unwrap();
+    assert_ne!(p1, p2, "page=2 不得与 page=1 同行");
+
+    // RF1 强化：GET /docs 兜底行 path 值级归因
+    let n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action='http' AND detail->>'path'='/api/v1/docs'",
+    )
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert!(n >= 1, "GET /docs 兜底行 path 归因");
+
     let (s, rbody) = ctx.get_authed("/api/v1/audit", &view).await;
     assert_eq!(s, 403, "viewer 无 sec:manage 必须 403");
     let v: serde_json::Value = serde_json::from_slice(&rbody).unwrap();

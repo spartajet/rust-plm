@@ -7,7 +7,11 @@ use axum::extract::{Request, State};
 use axum::middleware::Next;
 use axum::response::Response;
 
-pub async fn audit_mw(State(st): State<AppState>, req: Request, next: Next) -> Response {
+/// 客户端 IP（audit_mw 解析后插入 extensions——显式埋点 handler 复用；终审 M2）
+#[derive(Clone)]
+pub struct ClientIp(pub Option<String>);
+
+pub async fn audit_mw(State(st): State<AppState>, mut req: Request, next: Next) -> Response {
     let method = req.method().clone().to_string();
     let path = req.uri().path().to_string();
     let ip = req
@@ -15,6 +19,7 @@ pub async fn audit_mw(State(st): State<AppState>, req: Request, next: Next) -> R
         .get("x-forwarded-for")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.split(',').next().unwrap_or("").trim().to_string());
+    req.extensions_mut().insert(ClientIp(ip.clone()));
     let tid = req
         .extensions()
         .get::<crate::error::TraceId>()
@@ -27,6 +32,16 @@ pub async fn audit_mw(State(st): State<AppState>, req: Request, next: Next) -> R
         .and_then(|raw| core_sec::strip_bearer(raw).ok())
         .and_then(|t| st.sec.parse_access(t).ok())
         .map(|c| c.username);
+
+    // 豁免清单（终审 M3/M4）：健康探针/OpenAPI 噪声不入库；auth 显式埋点免双行；
+    // /audit 查询自身不入库（否则自增行破坏分页快照）。显式事件仍由 handler 直写。
+    const SKIP: [&str; 4] = ["/healthz", "/api/docs", "/api/v1/audit", "/api/v1/auth"];
+    if SKIP
+        .iter()
+        .any(|p| path == *p || path.starts_with(&format!("{p}/")))
+    {
+        return next.run(req).await;
+    }
 
     let res = next.run(req).await;
 

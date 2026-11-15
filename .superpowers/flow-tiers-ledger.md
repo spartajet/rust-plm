@@ -147,3 +147,10 @@ Final: Ruling: 4xx 仅显式安全事件留痕（login.fail），普通 4xx/5xx 
 Final: Ruling: 登录失败审计记录 username 按请求原文（未验证也留痕——防爆破溯源依据）。
 Final: Ruling: download 显式埋点本轮未加（download_doc handler 未插桩）——deferred 至下载审计补钉（openapi 已有 handler 位置明确）。
 Final: minor (deferred): 审计报告 Excel 导出（RPT-04 导出框架联动）；audit detail JSON 前端展示格式化；append-only REVOKE 多角色部署时执行（同 migrations.md 裁定）。
+[增量18 终审修复轮台账]
+Final: fixed I1 检索多维钉补齐——username 组合（admin http 行存在/audview=0）/时间窗（from=2099 空）/分页 offset 语义（page=1/2 不同 id）/RF1 强化 path 值级归因（GET /docs detail->>path 钉）。
+Final: fixed M3+M4（治本）audit_mw 豁免清单——/healthz+//api/docs（探针/OpenAPI 噪声，1.7 万行/天治理）/api/v1/audit（**审计查询自身不入库——自增行破坏分页快照**，分页竞态根因）/api/v1/auth（显式埋点免双行）。附收益：分页断言确定性恢复。
+Final: fixed M2 login 显式埋点带 IP——audit_mw 解析 x-forwarded-for 后插 ClientIp extension（handler 复用），login.ok/fail 均带（防爆破溯源闭环）。
+Final: fixed M1 search_audit 注册 OpenAPI（state.rs paths，第三次同族已入台账纪律）。
+Final: Ruling（I2）: 显式埋点词表收窄为 3 处（login 成败/flow-tier.change）——其余敏感操作暂由 http 兜底行覆盖（trace/method/path/status 全留痕，action 维度检索盲区记账）；download 埋点 deferred（handler 位置明确）；全量词表按 PRD 12 名在后续增量按需补齐（逐个加显式埋点=低价值高频改动，按审计消费需求驱动）。
+Final: minor (deferred): 响应信封 echo page/size 为原始值非 clamp 值（cosmetic）；e2e append-only 静态守卫为注释无断言（grep 已实证）；前端 from/to 时间筛选未透传（端点已支持）。

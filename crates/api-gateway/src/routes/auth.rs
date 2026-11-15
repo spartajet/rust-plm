@@ -47,6 +47,7 @@ fn dto(p: TokenPair) -> TokenPairDto {
 pub async fn login(
     State(st): State<AppState>,
     Extension(tid): Extension<crate::error::TraceId>,
+    Extension(ip): Extension<crate::audit_mw::ClientIp>,
     Json(req): Json<LoginReq>,
 ) -> Result<Json<TokenPairDto>, ApiError> {
     // 审计埋点（增量18 SYS-01）：登录成功/失败均留痕（安全事件）
@@ -58,7 +59,7 @@ pub async fn login(
             None,
             None,
             Some(tid.0.clone()),
-            None,
+            ip.0.clone(),
         ),
         Err(e) => st.audit.record(
             req.username.clone(),
@@ -66,7 +67,7 @@ pub async fn login(
             None,
             Some(serde_json::json!({"error": e.code()})),
             Some(tid.0.clone()),
-            None,
+            ip.0.clone(),
         ),
     }
     let p = result.map_err(|e| ApiError::new(e, &tid.0))?;
