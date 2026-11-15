@@ -7,7 +7,7 @@
     {
       "code": "drawing",
       "name": "图文档",
-      "base_type": "doc",
+      "base_type": "document",
       "config": {
         "flow_tier": "standard",
         "require_comment": false

@@ -92,7 +92,11 @@ fn meta(key: &str) -> (&'static str, &'static str, bool) {
         "org" => ("组织成员", "用户管理中创建真实成员账号（≥2 人）", true),
         "perm" => ("权限配置", "为成员授予 editor/viewer 角色", true),
         "coding" => ("编码规则", "物料分类上配置编码规则（自动赋码）", true),
-        "types" => ("类型建模", "为类型添加自定义属性（超出种子属性）", true),
+        "types" => (
+            "类型建模",
+            "完成类型属性建模（属性总数 ≥5 即视为完成，含种子）",
+            true,
+        ),
         "flow" => (
             "流程绑定",
             "在元数据中确认审批档位（minimal/standard/strict）",

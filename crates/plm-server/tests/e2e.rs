@@ -3535,7 +3535,7 @@ async fn template_export_starter_import_roundtrip() {
         {
             "code": "fixture",
             "name": "工装",
-            "base_type": "doc",
+            "base_type": "document",
             "config": {"flow_tier": "minimal", "cod_rule": {"prefix": "GZ-", "date_fmt": "yyyyMMdd", "seq_digits": 3}},
             "attrs": [
                 {"code": "name", "name": "名称", "data_type": "text", "required": true, "sort_no": 1},

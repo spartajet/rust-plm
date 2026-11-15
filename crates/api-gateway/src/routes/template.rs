@@ -194,6 +194,28 @@ pub async fn import_template(
 
     // 类型：存在即 skip（部分合并语义复杂且危险——向导如实报告，裁定见 migrations.md）
     for t in &pkg.types {
+        // 终审 C1-1：base_type/attrs.data_type 白名单校验（非法值落库毒化 TypeRegistry——
+        // 热刷新整快照失败+重启砖化，真库探针实证；校验前置使毒包 400 不落库）
+        if core_model::BaseType::parse(&t.base_type).is_none() {
+            return Err(ApiError::new(
+                core_model::DomainError::BadRequest(format!(
+                    "类型 {} base_type 非法: {}（合法 part|document|change|project|bom|generic）",
+                    t.code, t.base_type
+                )),
+                &tid.0,
+            ));
+        }
+        for a in &t.attrs {
+            if core_model::DataType::parse(&a.data_type).is_none() {
+                return Err(ApiError::new(
+                    core_model::DomainError::BadRequest(format!(
+                        "类型 {} 属性 {} data_type 非法: {}",
+                        t.code, a.code, a.data_type
+                    )),
+                    &tid.0,
+                ));
+            }
+        }
         let exists: Option<uuid::Uuid> =
             sqlx::query_scalar("SELECT id FROM cm_type WHERE code = $1")
                 .bind(&t.code)
@@ -266,13 +288,22 @@ pub async fn import_template(
             None => None,
         };
         if merge {
+            // 终审 I1-1：cod_rule shape 归一——模板 flat 形 {prefix,...} 包一层 {"cod_rule":{...}}
+            // （唯一消费者 CodRule::from_config 要求 nested 形；不归一则导入分类自动赋码功能性死亡）
+            let rule = c.cod_rule.as_ref().map(|r| {
+                if r.get("cod_rule").is_some() {
+                    r.clone()
+                } else {
+                    json!({ "cod_rule": r })
+                }
+            });
             sqlx::query(
                 "INSERT INTO cm_class(code, name, parent_id, cod_rule) VALUES ($1, $2, $3, $4::jsonb)",
             )
             .bind(&c.code)
             .bind(&c.name)
             .bind(parent_id)
-            .bind(&c.cod_rule)
+            .bind(&rule)
             .execute(pool)
             .await
             .map_err(|e| ApiError::new(core_model::DomainError::Db(e.to_string()), &tid.0))?;

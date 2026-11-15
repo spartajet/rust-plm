@@ -475,10 +475,14 @@ impl SecService {
         value: i64,
         actor: Option<uuid::Uuid>,
     ) -> Result<String> {
-        let old: Option<String> = sqlx::query_scalar("SELECT value FROM sys_param WHERE key = $1")
-            .bind(key)
-            .fetch_optional(&self.pool)
-            .await?;
+        // 事务（增量23 终审 M2——587cd4d 提交信息失实经增量24 终审抓出后真实落地；
+        // FOR UPDATE 行锁：并发 PUT 下 audit from 不跳中间值）
+        let mut tx = self.pool.begin().await?;
+        let old: Option<String> =
+            sqlx::query_scalar("SELECT value FROM sys_param WHERE key = $1 FOR UPDATE")
+                .bind(key)
+                .fetch_optional(&mut *tx)
+                .await?;
         let Some(old) = old else {
             return Err(DomainError::BadRequest(format!("未知参数键: {key}")));
         };
@@ -488,8 +492,9 @@ impl SecService {
         .bind(key)
         .bind(value.to_string())
         .bind(actor)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        tx.commit().await?;
         Ok(old)
     }
 

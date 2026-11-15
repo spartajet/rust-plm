@@ -56,3 +56,12 @@
 - T2 完成（db664ea）：checklist GET 起初误挂 sec_mgmt 组（viewer 403 被钉拦下）——拆独立组 GET require_authn/complete require_perm；auto 步阈值语义=代码为权威；e2e flow 步翻转补 PUT flow-tier（种子 config 无显式 flow_tier——正是该步语义）。
 - T3 完成（8f5ee3e）：**impl_checklist_done 借 sys_param 混入参数面板第 4 行可编辑行**（list_params 全量返回未过滤——security params Playwright 钉 4≠3 拦下）；list_params 过滤内部键+e2e 钉；python replace 静默 no-op 第三次（读代码 grep 核对后 Read+Edit 直改——教训累计固化：多行 SQL/JSON 串替换禁用 python）。
 - T4 完成：README/部署文档/评审报告（AGL-05 增补、AGL-09 ⬜→🟡、S5 场景大半）/migrations.md 五裁定。
+
+### 终审（FIX-THEN-MERGE）修复轮
+- **C1-1**：import 校验 base_type/data_type（BaseType/DataType::parse 白名单，非法 400 不落库——毒行落库毒化 Registry 热刷新+重启砖化，reviewer 真库重启实证）；starter.json "doc"→"document"；e2e 钉 merge 后 GET /meta/types/{code} 200（热刷新）+毒包 400 未落库。
+- **C1-2**：Dockerfile 补 COPY templates ./templates（include_str! 构建态需要——reviewer 指出 CI docker job 必红）。
+- **I1-1**：分类 cod_rule shape 归一（模板 flat 包一层 nested——CodRule::from_config 消费者要求；不归一则导入分类自动赋码死亡）；e2e 钉导入分类建物料 201+前缀 GZ-FL- 命中。
+- **I1-2**：markDone 静态导入+真正 ElMessage.error（原 catch 动态 import 后弃置=死兜底）。
+- M1：importStarter 死条件移除（dry 后恒 merge——服务端冲突跳过安全）；M2：types 步 hint 文案对齐代码语义（attr≥5 含种子）；M3/M4 记账（import/complete 包 tx 后续增量）。
+- **跨增量抓漏**：23 M2「set_param 事务化」587cd4d 提交信息称已修但 python replace 静默 no-op 实未落地——本轮真实修复（FOR UPDATE 事务），台账留痕。python 静默替换失败至此第四次，规矩最终固化：**跨行/含特殊字符的字符串替换一律 Read+Edit 直写**。
+- 修复轮后：后端 170/clippy 0/fmt 过/Vitest 36/Playwright 16×2 全绿。

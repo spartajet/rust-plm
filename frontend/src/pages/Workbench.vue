@@ -6,6 +6,7 @@ import { useRouter } from "vue-router";
 import { http } from "../api/index";
 import { listDocs } from "../api/docs";
 import { stateLabel, stateTagType } from "../utils/flowUi";
+import { extractApiError } from "../api/http";
 import {
   getChecklist,
   completeStep,
@@ -51,28 +52,22 @@ async function markDone(key: string) {
     await completeStep(http, key);
     await loadWizard();
   } catch (e) {
-    import("../api/http").then(({ extractApiError }) => {
-      // 动态引入兜底：错误提示
-      void e;
-    });
+    // 终审 I1-2：失败必须可见（400 按序约束/403 无权限——原静默吞为死兜底）
+    ElMessage.error(extractApiError(e));
   }
 }
 
-/// 一键导入 Starter 包：dry_run 预检 → 展示冲突 → 用户确认后 merge
+/// 一键导入 Starter 包：dry_run 预检展示冲突 → 恒 merge（服务端冲突项自动跳过，安全；
+/// 终审 M1：原“有可应用项才 merge”条件死代码——dry 响应 applied 恒空，退化为零冲突才 merge）
 async function importStarter() {
   importingStarter.value = true;
   try {
     const pkg = await getStarter(http);
-    const dry = await importTemplate(http, pkg, "dry_run");
-    importReport.value = dry;
-    if (dry.conflicts.length === 0 || dry.applied_types.length > 0 || dry.applied_classes.length > 0) {
-      // 无冲突或有可应用项：直接 merge（冲突项自动跳过）
-      const merged = await importTemplate(http, pkg, "merge");
-      importReport.value = merged;
-    }
+    await importTemplate(http, pkg, "dry_run");
+    const merged = await importTemplate(http, pkg, "merge");
+    importReport.value = merged;
     await loadWizard(); // coding/types 步可能被模板翻转
   } catch (e) {
-    const { extractApiError } = await import("../api/http");
     ElMessage.error(extractApiError(e));
   } finally {
     importingStarter.value = false;
