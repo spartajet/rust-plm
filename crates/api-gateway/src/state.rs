@@ -68,6 +68,10 @@ pub fn bom_release_hook(bom: Arc<core_bom::BomStore>) -> Arc<dyn core_version::R
         crate::routes::meta::get_type,
         crate::routes::meta::set_flow_tier,
         crate::routes::meta::cod_preview,
+        crate::routes::parts::create_part,
+        crate::routes::parts::list_parts,
+        crate::routes::parts::duplicates,
+        crate::routes::parts::class_tree,
     ),
     components(schemas(
         crate::routes::docs::FileInfoDto,
@@ -82,6 +86,7 @@ pub fn bom_release_hook(bom: Arc<core_bom::BomStore>) -> Arc<dyn core_version::R
         crate::routes::meta::TypeMeta,
         crate::routes::meta::SetFlowTierReq,
         crate::routes::boms::LineInputDto,
+        crate::routes::parts::CreatePartReq,
     ))
 )]
 pub struct ApiDocHolder;

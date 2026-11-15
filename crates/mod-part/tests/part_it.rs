@@ -179,6 +179,35 @@ async fn class_tree_nests_children() {
 }
 
 #[tokio::test]
+async fn class_tree_handles_out_of_order_codes() {
+    // 终审 I2 回归钉：非根父类下 code 字典序靠前的子分类不得静默丢失（旧算法前提=父码先于子码）
+    let (svc, pool, admin_url, db) = setup("i2").await;
+    sqlx::query("INSERT INTO cm_class(code, name, parent_id) VALUES ('CLS-ZZ-AAA', '前置子', (SELECT id FROM cm_class WHERE code='CLS-ZZ-JGJ'))")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let tree = svc.class_tree().await.unwrap();
+    // 递归找 CLS-ZZ-JGJ 的 children
+    fn find<'a>(n: &'a mod_part::ClassNode, code: &str) -> Option<&'a mod_part::ClassNode> {
+        if n.code == code {
+            return Some(n);
+        }
+        n.children.iter().find_map(|c| find(c, code))
+    }
+    let zz = find(&tree[0], "CLS-ZZ")
+        .or_else(|| tree.iter().find_map(|n| find(n, "CLS-ZZ")))
+        .unwrap();
+    let jgj = find(zz, "CLS-ZZ-JGJ").expect("JGJ 须在树中");
+    let names: Vec<&str> = jgj.children.iter().map(|c| c.code.as_str()).collect();
+    assert!(
+        names.contains(&"CLS-ZZ-AAA"),
+        "乱序子分类（AAA）不得静默丢失: {names:?}"
+    );
+    pool.close().await;
+    drop_db(&admin_url, &db).await;
+}
+
+#[tokio::test]
 async fn unknown_class_and_missing_rule_are_400() {
     let (svc, pool, admin_url, db) = setup("err").await;
     let e = svc

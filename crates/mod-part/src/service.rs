@@ -10,7 +10,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 /// 分类节点（树形）
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ClassNode {
     pub id: Uuid,
     pub code: String,
@@ -56,17 +56,25 @@ impl PartService {
             name: String,
             has_rule: bool,
         }
+        // WITH RECURSIVE 计算深度（根 0）；ORDER BY depth DESC——深的先遍历（挂子算法依赖）
         let rows: Vec<Row> = sqlx::query_as(
-            "SELECT id, parent_id, code, name, (cod_rule IS NOT NULL) AS has_rule              FROM cm_class WHERE enabled ORDER BY code",
+            "WITH RECURSIVE t AS (                  SELECT id, parent_id, code, name, (cod_rule IS NOT NULL) AS has_rule, 0 AS depth                  FROM cm_class WHERE parent_id IS NULL AND enabled                  UNION ALL                  SELECT c.id, c.parent_id, c.code, c.name, (c.cod_rule IS NOT NULL) AS has_rule, t.depth + 1                  FROM cm_class c JOIN t ON c.parent_id = t.id WHERE c.enabled              ) SELECT id, parent_id, code, name, has_rule FROM t ORDER BY depth DESC, code",
         )
         .fetch_all(&self.pool)
         .await
         .map_err(|e| core_model::DomainError::Db(e.to_string()))?;
-        // 平铺节点
-        let mut flat: Vec<(ClassNode, Option<Uuid>)> = rows
+        // 终审 I2 重写：顺序无关（HashMap+挂子——父码字典序前提不再需要；
+        // 孤儿（父缺失/禁用/环）不进根列表=不可达分类不出现在树中）
+        let parent_of: std::collections::HashMap<Uuid, Uuid> = rows
+            .iter()
+            .filter_map(|r| r.parent_id.map(|p| (r.id, p)))
+            .collect();
+        let ordered: Vec<Uuid> = rows.iter().map(|r| r.id).collect();
+        let mut nodes: std::collections::HashMap<Uuid, ClassNode> = rows
             .into_iter()
             .map(|r| {
                 (
+                    r.id,
                     ClassNode {
                         id: r.id,
                         code: r.code,
@@ -74,43 +82,24 @@ impl PartService {
                         has_rule: r.has_rule,
                         children: Vec::new(),
                     },
-                    r.parent_id,
                 )
             })
             .collect();
-        // id → 下标
-        let idx: std::collections::HashMap<Uuid, usize> = flat
-            .iter()
-            .enumerate()
-            .map(|(i, (n, _))| (n.id, i))
-            .collect();
-        // 倒序挂子（子先处理完再被父收集——depth 任意）
-        for i in (0..flat.len()).rev() {
-            let parent_id = flat[i].1;
-            if let Some(pid) = parent_id {
-                if let Some(&pi) = idx.get(&pid) {
-                    let node = std::mem::replace(
-                        &mut flat[i].0,
-                        ClassNode {
-                            id: Uuid::nil(),
-                            code: String::new(),
-                            name: String::new(),
-                            has_rule: false,
-                            children: Vec::new(),
-                        },
-                    );
-                    flat[pi].0.children.push(node);
+        // 挂子：SQL 已按 depth DESC 排序——正序遍历=深的先 remove 挂入父（任意树形正确；兄弟按 code 稳定）
+        let mut roots: Vec<ClassNode> = Vec::new();
+        for id in &ordered {
+            if let Some(node) = nodes.remove(id) {
+                match parent_of.get(id).and_then(|p| nodes.get_mut(p)) {
+                    // 有可见父 → 挂入（node 为最新——已含此前挂入的孙辈）
+                    Some(pn) => pn.children.push(node),
+                    // 无父（根）或父不可见（孤儿不上树）→ 进根列表
+                    None => roots.push(node),
                 }
             }
         }
-        Ok(flat
-            .into_iter()
-            .filter(|(n, parent)| {
-                let _ = n;
-                parent.is_none()
-            })
-            .map(|(n, _)| n)
-            .collect())
+        // 环节点残留 nodes（不进树，防死循环）
+        let _ = nodes;
+        Ok(roots)
     }
 }
 

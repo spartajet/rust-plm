@@ -1967,6 +1967,43 @@ async fn parts_create_duplicates_tree_and_permissions() {
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(v["total"], 1, "越密级物料不得出现在 viewer 列表");
 
+    // 终审 C1：admin（真实上限 3）仍可见密级 2 物料（require_perm 回填生效——非硬编码 0）
+    let (s, body) = ctx.get_authed("/api/v1/parts", &admin).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 2, "admin 真实密级上限必须生效（C1）");
+    let (s, body) = ctx
+        .get_authed("/api/v1/parts/duplicates?name=支座", &admin)
+        .await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        v.as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["obj_no"] == "WL-ZZ-00001"),
+        "admin duplicates 也须可见（C1）"
+    );
+
+    // 终审 C1：零角色用户（经 revoke 端点回收——casbin reload 生效路径）→ 403
+    ctx.create_user_as_admin(&admin, "seconly", "seconly-pass-123", &["editor"], 0)
+        .await;
+    for r in ["editor"] {
+        let req = axum::http::Request::builder()
+            .method("DELETE")
+            .uri(format!("/api/v1/sec/users/seconly/roles/{r}"))
+            .header("authorization", format!("Bearer {admin}"))
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let (s, _, _) = send(&ctx.app, req).await;
+        assert_eq!(s, 204, "revoke {r}");
+    }
+    let sec_user = ctx.login_as("seconly", "seconly-pass-123").await;
+    let (s, rbody) = ctx.get_authed("/api/v1/parts", &sec_user).await;
+    assert_eq!(s, 403, "零角色用户无 docs:read 必须 403");
+    let v: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
+    assert_eq!(v["code"], "MDL-SEC-FORBIDDEN");
+
     // 分类树
     let (s, body) = ctx.get_authed("/api/v1/classes", &admin).await;
     assert_eq!(s, 200);

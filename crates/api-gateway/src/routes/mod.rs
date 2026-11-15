@@ -29,6 +29,10 @@ pub fn build(state: AppState) -> Router {
         .route("/api/v1/docs/{obj_no}", get(docs::get_doc))
         .route("/api/v1/docs/{obj_no}/file", get(docs::download_doc))
         .route("/api/v1/docs/{obj_no}/versions", get(docs::versions_doc))
+        // 物料读端点（增量17 终审 C1 修正：docs:read 门控——require_perm 回填真实密级上限）
+        .route("/api/v1/parts", get(parts::list_parts))
+        .route("/api/v1/parts/duplicates", get(parts::duplicates))
+        .route("/api/v1/classes", get(parts::class_tree))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             require_perm("docs", "read"),
@@ -102,10 +106,6 @@ pub fn build(state: AppState) -> Router {
             "/api/v1/meta/types/{code}/cod-preview",
             get(meta::cod_preview),
         )
-        .route("/api/v1/parts/duplicates", get(parts::duplicates))
-        .route("/api/v1/classes", get(parts::class_tree))
-        // 物料创建走 docs:write（SMB 简化裁定）；路由层在 docs_rw 组后单独挂权限层
-        .route("/api/v1/parts", get(parts::list_parts))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             require_authn,
