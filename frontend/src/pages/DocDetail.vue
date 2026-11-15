@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { ElMessage } from "element-plus";
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { extractApiError } from "../api/http";
+import { extractApiError, extractBlobApiError } from "../api/http";
 import { http } from "../api/index";
 import {
+  previewDoc,
   bomExpand,
   bomLines,
   bomSummary,
@@ -103,6 +104,46 @@ const bomSummaryRows = ref<BomSummaryRow[]>([]);
 const bomSummaryLoaded = ref(false);
 // 折叠展开态（终审 M1-3：major 切换时若面板开着须自动刷新，避免误导性空态）
 const summaryOpen = ref<string[]>([]);
+
+// ==================== DOC-05 在线预览（增量22） ====================
+const previewState = ref<{ url: string; kind: "pdf" | "image" } | null>(null);
+const previewLoading = ref(false);
+// 水印（overlay 起步：用户+密级+分钟级时间；服务端内嵌水印后置——台账裁定）
+const watermarkText = computed(
+  () => `${auth.username} · 密级${doc.value?.object.secret_level ?? 0} · ${new Date().toISOString().slice(0, 16)}`,
+);
+
+async function doPreview() {
+  previewLoading.value = true;
+  try {
+    let result: { blob: Blob; mime: string };
+    try {
+      result = await previewDoc(http, objNo);
+    } catch (e) {
+      // 415 等错误体为 blob——异步解出后端 message（"该格式不支持在线预览…"）
+      ElMessage.error(await extractBlobApiError(e));
+      return;
+    }
+    const { blob, mime } = result;
+    const kind = mime === "application/pdf" ? "pdf" : "image";
+    const url = URL.createObjectURL(blob);
+    if (previewState.value) URL.revokeObjectURL(previewState.value.url);
+    previewState.value = { url, kind };
+  } catch (e) {
+    ElMessage.error(extractApiError(e));
+  } finally {
+    previewLoading.value = false;
+  }
+}
+
+function closePreview() {
+  if (previewState.value) URL.revokeObjectURL(previewState.value.url);
+  previewState.value = null;
+}
+
+onBeforeUnmount(() => {
+  if (previewState.value) URL.revokeObjectURL(previewState.value.url);
+});
 
 const bomEditable = computed(() => auth.canWrite && bomMajor.value === 0);
 
@@ -304,6 +345,43 @@ function back() {
           升新版
         </el-button>
         <el-button v-if="doc.file" @click="download">下载文件（{{ doc.file.name }}）</el-button>
+        <el-button
+          v-if="doc.file"
+          type="primary"
+          plain
+          data-test="preview-btn"
+          :loading="previewLoading"
+          @click="doPreview"
+        >
+          在线预览
+        </el-button>
+      </div>
+
+      <!-- DOC-05 预览区（blob 直开 + 平铺水印 overlay） -->
+      <div v-if="previewState" class="preview-wrap" data-test="preview-area">
+        <img
+          v-if="previewState.kind === 'image'"
+          :src="previewState.url"
+          style="max-width: 100%; display: block"
+          data-test="preview-img"
+        />
+        <iframe
+          v-else
+          :src="previewState.url"
+          style="width: 100%; height: 520px; border: 0"
+          data-test="preview-frame"
+        />
+        <div class="watermark" data-test="preview-watermark">
+          <span v-for="i in 24" :key="i" class="wm-item">{{ watermarkText }}</span>
+        </div>
+        <el-button
+          link
+          style="position: absolute; top: 4px; right: 8px"
+          data-test="preview-close"
+          @click="closePreview"
+        >
+          关闭预览
+        </el-button>
       </div>
     </el-card>
 

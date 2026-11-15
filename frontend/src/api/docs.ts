@@ -254,3 +254,13 @@ export async function downloadBomSummaryCsv(
   const res = await http.get(`/api/v1/boms/${objNo}/summary${q}`, { responseType: "blob" });
   return res.data as Blob;
 }
+
+/// 在线预览（增量22 DOC-05）：blob + content-type（MIME 白名单由后端把关；415=不支持）
+export async function previewDoc(
+  http: AxiosInstance,
+  objNo: string,
+): Promise<{ blob: Blob; mime: string }> {
+  const res = await http.get(`/api/v1/docs/${objNo}/preview`, { responseType: "blob" });
+  const ct = (res.headers?.["content-type"] as string | undefined) ?? "";
+  return { blob: res.data as Blob, mime: ct.split(";")[0].trim() };
+}
