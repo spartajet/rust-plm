@@ -29,3 +29,12 @@
 
 ## 验收标准
 - e2e 新增 ≥4 钉；后端 165+ 全绿/clippy 0/fmt 过；Vitest 32+/Playwright 13+ 两轮全绿；OpenAPI 注册 preview。
+
+
+---
+
+## 对账台账（执行后回填）
+
+- T1 完成（77a34eb）：RED 先行（404→GREEN）；send 助手不带 headers——断言改 oneshot 直取；DomainError::PreviewUnsupported（415 MDL-DOC-PREVIEW-UNSUPPORTED）。
+- T2 完成（37342cf）：**e2e 三层排障**——①测试自身 MIME 传错（DWG 也传 image/png）；②extractApiError 无法解析 blob 错误体（新增 extractBlobApiError 异步解析）；③内容寻址 mime 固化首传语义（同字节复用旧 mime——改唯一字节钉）。前端 blob 直开+水印 overlay+objectURL 生命周期（onBeforeUnmount）。
+- T3 完成：README/部署文档/评审报告（DOC-05 ⬜→🟡）/migrations.md 四条裁定。

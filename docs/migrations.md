@@ -73,3 +73,11 @@
 - **成本估算后置**：物料无价格属性（PART 属性建模扩展时补）。
 - **搜索索引目录 search→search-v2**：schema 加 obj_id 不兼容旧索引——一次性废弃重建（旧目录残留无害）；后续 schema 变更同策略版本化。
 - **汇总 total 语义**：summary 行集经 ABAC SQL 内过滤精确；CSV 与 JSON 同源。
+
+## 增量22（DOC-05 在线预览）：无新迁移
+
+**裁定**：
+- **MIME 白名单 inline**：pdf/png/jpeg/gif/webp（mime 精确匹配优先、扩展名兜底）；**SVG 明确排除**——image/svg+xml 可内嵌 `<script>`，inline 直开有存储型 XSS 面（svg 预览需求出现时走净化转换）；其余格式 415 走下载。
+- **水印=前端 overlay 起步**（用户+密级+分钟级时间，pointer-events:none 平铺）——防截屏威慑有限，**服务端内嵌水印**（PDF 处理库/图片合成）后置台账；PRD 的 IP 维度前端不可得，随服务端水印一并后置。
+- **file_object.mime 固化首传语义**：内容寻址去重（ON CONFLICT hash DO NOTHING）下同字节后传不更新 mime——预览白名单按首传 mime/扩展名判定（同字节同格式，语义自洽；e2e 用唯一字节钉）。
+- CAD→PDF 转换（ADR-0018 DWG 预览）后置 V1.0。
