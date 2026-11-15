@@ -143,7 +143,7 @@ PLM_DATA_DIR=./data HTTP_PORT=8080 cargo run -p plm-server
 TEST_DATABASE_URL=postgres://postgres:root@localhost:5432/postgres cargo test --workspace
 
 # 4) API 契约变更后刷新 OpenAPI 快照基线（TQ-02 门禁；git diff 审阅契约面变更）
-UPDATE_OPENAPI_SNAPSHOT=1 TEST_DATABASE_URL=postgres://postgres:root@localhost:5432/postgres   cargo test -p plm-server --test e2e openapi_snapshot
+UPDATE_OPENAPI_SNAPSHOT=1 TEST_DATABASE_URL=postgres://postgres:root@localhost:5432/postgres cargo test -p plm-server --test e2e openapi_snapshot
 ```
 
 配置项（环境变量，见 [.env.example](.env.example)）：`DATABASE_URL`（必填）、`PLM_DATA_DIR`（默认 `data`）、`HTTP_PORT`（默认 8080）、`PLM_MAX_UPLOAD`（默认 200MB）、`PLM_ADMIN_PASSWORD`（首启 admin 密码，缺省随机生成并打印一次）、`PLM_JWT_SECRET`（JWT 密钥，缺省 `data_dir/jwt.key` 文件复用；多实例必须相同）。

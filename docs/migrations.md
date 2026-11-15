@@ -106,3 +106,4 @@
 **裁定**：
 - **自写结构化对比替代 oasdiff**：PRD 提名 oasdiff（go 二进制）——引入外部工具链成本高；自写覆盖破坏面主集（删端点/删 method/删 schema/删属性/删必填字段）；类型变更/响应运行时校验不在对比面（台账记）。
 - **基线随仓库**：crates/plm-server/tests/openapi-snapshot.json 进 review diff——契约变更显式可见；更新流=UPDATE_OPENAPI_SNAPSHOT=1 单测重写。
+- **注册面缺口台账（终审 I1-1）**：OpenAPI 注册 26/42 路由——docs 生命周期 7 条（submit/approve/reject/release/revise/obsolete/versions）、boms expand/where-used、im/actions、sec/users/roles/webhooks×3 等未注册（门禁不感知其删除/变更）；后续增量补 #[utoipa::path] 注解+注册后自动被同一门禁接管。

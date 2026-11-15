@@ -3812,7 +3812,9 @@ fn extract_face(spec: &serde_json::Value) -> ContractFace {
                 .map(|m| {
                     let mut ms: Vec<String> = m
                         .keys()
-                        .filter(|k| matches!(k.as_str(), "get" | "post" | "put" | "delete" | "patch"))
+                        .filter(|k| {
+                            matches!(k.as_str(), "get" | "post" | "put" | "delete" | "patch")
+                        })
                         .cloned()
                         .collect();
                     ms.sort();
@@ -3827,8 +3829,10 @@ fn extract_face(spec: &serde_json::Value) -> ContractFace {
             let required = sch["required"]
                 .as_array()
                 .map(|a| {
-                    let mut v: Vec<String> =
-                        a.iter().filter_map(|x| x.as_str().map(String::from)).collect();
+                    let mut v: Vec<String> = a
+                        .iter()
+                        .filter_map(|x| x.as_str().map(String::from))
+                        .collect();
                     v.sort();
                     v
                 })
@@ -3840,17 +3844,17 @@ fn extract_face(spec: &serde_json::Value) -> ContractFace {
             properties.sort();
             face.schemas.insert(
                 name.clone(),
-                ContractSchema { required, properties },
+                ContractSchema {
+                    required,
+                    properties,
+                },
             );
         }
     }
     face
 }
 
-const SNAPSHOT_PATH: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/tests/openapi-snapshot.json"
-);
+const SNAPSHOT_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/openapi-snapshot.json");
 
 #[tokio::test]
 async fn openapi_snapshot_gate() {
