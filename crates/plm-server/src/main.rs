@@ -34,6 +34,9 @@ struct Config {
     /// IM id→PLM username 映射 JSON（如 {"im-ding-1":"zhangsan"}）
     #[serde(default)]
     im_user_map: String,
+    /// 全文检索扫描周期秒（增量20 RPT-03 近实时；缺省 2s）
+    #[serde(default)]
+    search_scan_secs: u64,
 }
 
 impl Config {
@@ -51,6 +54,7 @@ impl Config {
             im_secret: String::new(),
             im_doc_url_template: String::new(),
             im_user_map: String::new(),
+            search_scan_secs: 2,
         };
         let _ = &mut defaults;
         let cfg: Config = Figment::from(Serialized::defaults(defaults))
@@ -177,6 +181,17 @@ async fn main() -> Result<()> {
         } else {
             serde_json::from_str(&cfg.im_user_map).context("PLM_IM_USER_MAP 须为 JSON 对象")?
         };
+    // 全文检索（增量20 RPT-01/03）：索引目录 data_dir/search + 对账扫描器近实时
+    let search = Arc::new(
+        core_search::SearchService::open(&cfg.data_dir.join("search"))
+            .context("搜索索引目录初始化失败")?,
+    );
+    core_search::spawn_scanner(
+        search.clone(),
+        pool.clone(),
+        std::time::Duration::from_secs(cfg.search_scan_secs.max(1)),
+    );
+
     // 事件外投循环（ADR-0007；1s 轮询 + 退避/死信）
     core_events::migrator()
         .run(&pool)
@@ -196,6 +211,7 @@ async fn main() -> Result<()> {
         bom,
         parts,
         audit,
+        search,
         im_secret: cfg.im_secret.clone(),
         im_user_map,
     };
