@@ -1,0 +1,467 @@
+{
+  "paths": {
+    "/api/v1/audit": [
+      "get"
+    ],
+    "/api/v1/auth/login": [
+      "post"
+    ],
+    "/api/v1/auth/refresh": [
+      "post"
+    ],
+    "/api/v1/boms/{obj_no}/lines": [
+      "get"
+    ],
+    "/api/v1/boms/{obj_no}/summary": [
+      "get"
+    ],
+    "/api/v1/classes": [
+      "get"
+    ],
+    "/api/v1/docs": [
+      "get",
+      "post"
+    ],
+    "/api/v1/docs/batch-approve": [
+      "post"
+    ],
+    "/api/v1/docs/{obj_no}": [
+      "get"
+    ],
+    "/api/v1/docs/{obj_no}/file": [
+      "get"
+    ],
+    "/api/v1/docs/{obj_no}/preview": [
+      "get"
+    ],
+    "/api/v1/meta/impl-checklist": [
+      "get"
+    ],
+    "/api/v1/meta/impl-checklist/{step}/complete": [
+      "post"
+    ],
+    "/api/v1/meta/template/export": [
+      "get"
+    ],
+    "/api/v1/meta/template/import": [
+      "post"
+    ],
+    "/api/v1/meta/template/starter": [
+      "get"
+    ],
+    "/api/v1/meta/types/{code}": [
+      "get"
+    ],
+    "/api/v1/meta/types/{code}/cod-preview": [
+      "get"
+    ],
+    "/api/v1/meta/types/{code}/flow-tier": [
+      "put"
+    ],
+    "/api/v1/parts": [
+      "get",
+      "post"
+    ],
+    "/api/v1/parts/duplicates": [
+      "get"
+    ],
+    "/api/v1/search": [
+      "get"
+    ],
+    "/api/v1/sec/params": [
+      "get"
+    ],
+    "/api/v1/sec/params/{key}": [
+      "put"
+    ],
+    "/api/v1/todos": [
+      "get"
+    ],
+    "/healthz": [
+      "get"
+    ]
+  },
+  "schemas": {
+    "BatchApproveReq": {
+      "required": [
+        "obj_nos"
+      ],
+      "properties": [
+        "comment",
+        "obj_nos"
+      ]
+    },
+    "BatchApproveResp": {
+      "required": [
+        "items"
+      ],
+      "properties": [
+        "items"
+      ]
+    },
+    "ChecklistStep": {
+      "required": [
+        "auto",
+        "done",
+        "hint",
+        "key",
+        "title"
+      ],
+      "properties": [
+        "auto",
+        "done",
+        "hint",
+        "key",
+        "title"
+      ]
+    },
+    "CreatePartReq": {
+      "required": [
+        "attrs",
+        "class_code"
+      ],
+      "properties": [
+        "attrs",
+        "class_code"
+      ]
+    },
+    "CreateWebhookReq": {
+      "required": [
+        "secret",
+        "topics",
+        "url"
+      ],
+      "properties": [
+        "secret",
+        "topics",
+        "url"
+      ]
+    },
+    "DocResponse": {
+      "required": [
+        "object"
+      ],
+      "properties": [
+        "file",
+        "object"
+      ]
+    },
+    "FileInfoDto": {
+      "required": [
+        "hash",
+        "name",
+        "size"
+      ],
+      "properties": [
+        "hash",
+        "mime",
+        "name",
+        "size"
+      ]
+    },
+    "GroupDto": {
+      "required": [
+        "items",
+        "total",
+        "type_code"
+      ],
+      "properties": [
+        "items",
+        "total",
+        "type_code"
+      ]
+    },
+    "Healthz": {
+      "required": [
+        "meta_version",
+        "status"
+      ],
+      "properties": [
+        "meta_version",
+        "status"
+      ]
+    },
+    "ImportReq": {
+      "required": [
+        "mode",
+        "template"
+      ],
+      "properties": [
+        "mode",
+        "template"
+      ]
+    },
+    "ImportResult": {
+      "required": [
+        "applied_classes",
+        "applied_types",
+        "conflicts"
+      ],
+      "properties": [
+        "applied_classes",
+        "applied_types",
+        "conflicts"
+      ]
+    },
+    "LcBody": {
+      "required": [],
+      "properties": [
+        "comment"
+      ]
+    },
+    "LineInfoDto": {
+      "required": [
+        "child_id",
+        "child_obj_no",
+        "line_no",
+        "qty"
+      ],
+      "properties": [
+        "child_id",
+        "child_name",
+        "child_obj_no",
+        "line_no",
+        "qty"
+      ]
+    },
+    "LineInputDto": {
+      "required": [
+        "child",
+        "line_no",
+        "qty"
+      ],
+      "properties": [
+        "child",
+        "line_no",
+        "qty"
+      ]
+    },
+    "ListResponse": {
+      "required": [
+        "items",
+        "page",
+        "size",
+        "total"
+      ],
+      "properties": [
+        "items",
+        "page",
+        "size",
+        "total"
+      ]
+    },
+    "LoginReq": {
+      "required": [
+        "password",
+        "username"
+      ],
+      "properties": [
+        "password",
+        "username"
+      ]
+    },
+    "RefreshReq": {
+      "required": [
+        "refresh_token"
+      ],
+      "properties": [
+        "refresh_token"
+      ]
+    },
+    "SearchHitDto": {
+      "required": [
+        "major_ver",
+        "minor_ver",
+        "obj_id",
+        "obj_no",
+        "secret_level",
+        "state",
+        "type_code"
+      ],
+      "properties": [
+        "major_ver",
+        "minor_ver",
+        "name",
+        "obj_id",
+        "obj_no",
+        "secret_level",
+        "state",
+        "type_code"
+      ]
+    },
+    "SearchResponse": {
+      "required": [
+        "groups",
+        "page",
+        "q",
+        "size",
+        "total"
+      ],
+      "properties": [
+        "groups",
+        "page",
+        "q",
+        "size",
+        "total"
+      ]
+    },
+    "SetFlowTierReq": {
+      "required": [],
+      "properties": [
+        "require_comment",
+        "tier"
+      ]
+    },
+    "SetParamReq": {
+      "required": [
+        "value"
+      ],
+      "properties": [
+        "value"
+      ]
+    },
+    "SummaryDto": {
+      "required": [
+        "obj_no",
+        "qty_total"
+      ],
+      "properties": [
+        "class_code",
+        "class_name",
+        "name",
+        "obj_no",
+        "qty_total"
+      ]
+    },
+    "SysParamDto": {
+      "required": [
+        "key",
+        "updated_at",
+        "value"
+      ],
+      "properties": [
+        "key",
+        "updated_at",
+        "updated_by",
+        "value"
+      ]
+    },
+    "TemplatePackage": {
+      "required": [
+        "classes",
+        "format",
+        "types",
+        "version"
+      ],
+      "properties": [
+        "classes",
+        "description",
+        "exported_at",
+        "format",
+        "name",
+        "types",
+        "version"
+      ]
+    },
+    "TodoItemDto": {
+      "required": [
+        "obj_no"
+      ],
+      "properties": [
+        "action",
+        "at",
+        "detail",
+        "major_ver",
+        "minor_ver",
+        "name",
+        "obj_no",
+        "secret_level",
+        "state",
+        "submitter",
+        "updated_at"
+      ]
+    },
+    "TokenPairDto": {
+      "required": [
+        "access_token",
+        "expires_in",
+        "refresh_token",
+        "roles"
+      ],
+      "properties": [
+        "access_token",
+        "expires_in",
+        "refresh_token",
+        "roles"
+      ]
+    },
+    "TplAttr": {
+      "required": [
+        "code",
+        "data_type",
+        "name",
+        "required",
+        "sort_no"
+      ],
+      "properties": [
+        "code",
+        "data_type",
+        "name",
+        "required",
+        "sort_no"
+      ]
+    },
+    "TplClass": {
+      "required": [
+        "code",
+        "name"
+      ],
+      "properties": [
+        "cod_rule",
+        "code",
+        "name",
+        "parent_code"
+      ]
+    },
+    "TplType": {
+      "required": [
+        "attrs",
+        "base_type",
+        "code",
+        "config",
+        "name"
+      ],
+      "properties": [
+        "attrs",
+        "base_type",
+        "code",
+        "config",
+        "name"
+      ]
+    },
+    "TypeMeta": {
+      "required": [
+        "code",
+        "flow_tier",
+        "name"
+      ],
+      "properties": [
+        "code",
+        "flow_tier",
+        "name"
+      ]
+    },
+    "WebhookDto": {
+      "required": [
+        "id",
+        "topics",
+        "url"
+      ],
+      "properties": [
+        "id",
+        "topics",
+        "url"
+      ]
+    }
+  }
+}
