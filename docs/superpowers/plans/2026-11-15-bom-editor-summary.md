@@ -40,3 +40,14 @@
 ## 验收标准
 - e2e 新增 ≥6 钉全绿；后端 164+ 全绿/clippy 0/fmt 过；前端 Vitest 29+/Playwright 12+ 两轮全绿；OpenAPI 注册三端点与 schema。
 - CSV 下载头含 Content-Disposition 与 BOM；汇总 qty 与 expand leaf 一致（同数据双端点交叉断言）。
+
+
+---
+
+## 对账台账（执行后回填）
+
+- T1 完成（c23c6aa）：obj_id uuid STORED+目录 v2+uuid 依赖。
+- T2 完成（a55eb14/adcdc8b）：快照 SQL 占位符冲突（$2 既 major 又 secret——e2e 拦下）；快照存在性校验补齐（无快照 major 400）；BOM 路由父件限 drawing（part 父件后置台账）；多路径汇总语义钉（直挂3+经子装配5=8）。
+- T3 完成（e053ad7）：**两处回归被既有钉拦下**——watch(bomMajor) 重写时丢 reloadBom（bom version switch 钉）、网关 SearchHitDto 漏 obj_id（bom editor 钉）；parts 测试查重确认弹窗条件处理（历史数据累积 duplicates OR 材料匹配）。
+- T4 完成：README/部署文档/评审报告（BOM-01 🟡 增补编辑器、BOM-07 ⬜→🟡）/migrations.md 五条裁定。
+- 修复轮：见终审报告 docs/review-增量21-终审.md。

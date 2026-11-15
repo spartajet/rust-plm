@@ -64,3 +64,12 @@
 - **多实例目录锁**：tantivy 单写者——第二实例 open 失败→degraded（查询可用/写 503 fail-closed）；ADR-0005 单机承诺内。
 - **无删除墓碑**：应用无删除端点（软删恒 NULL），扫描器不处理索引墓碑；引入删除功能时补。
 - **Windows AV 秒级文件锁**：tantivy commit 对新写段文件可能瞬时 PermissionDenied——commit 退避重试（0/300/900ms）自愈。
+
+## 增量21（BOM-01 编辑 UI + BOM-07 汇总）：无新迁移
+
+**裁定**：
+- **BOM 路由父件限 drawing**（docs detail 门控——part 作父件的部件级装配需多类型门控，后置）；测试实证子装配用图纸对象承载。
+- **行级属性扩展后置**：单位/基准/备注/损失率需 bom_edge 加列（迁移 0017），与 Excel 双向/复制粘贴/拖拽同批；本增量行属性=数量（引擎现状）。
+- **成本估算后置**：物料无价格属性（PART 属性建模扩展时补）。
+- **搜索索引目录 search→search-v2**：schema 加 obj_id 不兼容旧索引——一次性废弃重建（旧目录残留无害）；后续 schema 变更同策略版本化。
+- **汇总 total 语义**：summary 行集经 ABAC SQL 内过滤精确；CSV 与 JSON 同源。
