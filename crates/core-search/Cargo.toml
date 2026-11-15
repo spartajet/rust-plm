@@ -11,6 +11,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
+uuid = { workspace = true }
 core-model = { path = "../core-model" }
 tantivy = "0.27"
 jieba-rs = "0.11"

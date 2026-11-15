@@ -22,6 +22,8 @@ pub const SEARCH_TYPES: [&str; 2] = ["drawing", "part"];
 pub struct SearchHit {
     pub type_code: String,
     pub obj_no: String,
+    /// 对象 uuid（增量21：BOM 编辑器选件直接取 id 提交 set_lines）
+    pub obj_id: String,
     pub name: Option<String>,
     pub state: String,
     pub major_ver: i32,
@@ -41,6 +43,7 @@ pub struct GroupResult {
 struct Fields {
     f_type: Field,
     f_obj_no: Field,
+    f_obj_id: Field,
     f_text: Field,
     f_name: Field,
     f_state: Field,
@@ -57,6 +60,7 @@ fn build_schema() -> (Schema, Fields) {
     let mut b = Schema::builder();
     let f_type = b.add_text_field("type_code", STRING | STORED);
     let f_obj_no = b.add_text_field("obj_no", STRING | STORED);
+    let f_obj_id = b.add_text_field("obj_id", STORED);
     let f_text = b.add_text_field(
         "text",
         tantivy::schema::TextOptions::default()
@@ -83,6 +87,7 @@ fn build_schema() -> (Schema, Fields) {
         Fields {
             f_type,
             f_obj_no,
+            f_obj_id,
             f_text,
             f_name,
             f_state,
@@ -96,6 +101,7 @@ fn build_schema() -> (Schema, Fields) {
 /// 扫描行（cm_object 最新活版本 + 类型码 + 检索文本属性）
 #[derive(Debug, sqlx::FromRow)]
 struct ScanRow {
+    id: uuid::Uuid,
     obj_no: String,
     type_code: String,
     name: Option<String>,
@@ -108,14 +114,14 @@ struct ScanRow {
 }
 
 const SCAN_HEAD: &str = "WITH latest AS ( \
-     SELECT DISTINCT ON (o.obj_no) o.obj_no, t.code AS type_code, o.attrs, o.state, \
+     SELECT DISTINCT ON (o.obj_no) o.obj_no, o.id, t.code AS type_code, o.attrs, o.state, \
             o.major_ver, o.minor_ver, o.secret_level, o.updated_at \
      FROM cm_object o JOIN cm_type t ON t.id = o.type_id \
      WHERE o.deleted_at IS NULL";
 
 const SCAN_TAIL: &str =
     " ORDER BY o.obj_no, o.major_ver DESC, o.minor_ver DESC, o.iteration DESC) \
-     SELECT obj_no, type_code, attrs->>'name' AS name, attrs->>'material' AS material, \
+     SELECT obj_no, id, type_code, attrs->>'name' AS name, attrs->>'material' AS material, \
             state, major_ver, minor_ver, secret_level, updated_at FROM latest";
 
 pub struct SearchService {
@@ -174,6 +180,7 @@ impl SearchService {
         let mut d = TantivyDocument::new();
         d.add_text(self.f.f_type, &r.type_code);
         d.add_text(self.f.f_obj_no, &r.obj_no);
+        d.add_text(self.f.f_obj_id, &r.id.to_string());
         let mut text = String::new();
         if let Some(n) = &r.name {
             text.push_str(n);
@@ -382,6 +389,11 @@ impl SearchService {
             obj_no: doc
                 .get_first(self.f.f_obj_no)
                 .and_then(|v| v.as_str())?
+                .to_string(),
+            obj_id: doc
+                .get_first(self.f.f_obj_id)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
                 .to_string(),
             name: doc
                 .get_first(self.f.f_name)

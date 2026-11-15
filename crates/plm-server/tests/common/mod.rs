@@ -134,7 +134,7 @@ impl TestCtx {
         let audit = Arc::new(core_events::AuditService::new(pool.clone()));
         // 全文检索（增量20）：临时索引目录随 files_root；扫描器不在测试内启动（e2e 显式调 rebuild/scan）
         let search = Arc::new(
-            core_search::SearchService::open(&files_root.join("search")).expect("search open"),
+            core_search::SearchService::open(&files_root.join("search-v2")).expect("search open"),
         );
         let search_handle = search.clone();
         // 发布冻结注入（增量9，与 main 同源——api_gateway::bom_release_hook）
@@ -368,7 +368,7 @@ pub fn degraded_app(
         )),
         audit: Arc::new(core_events::AuditService::new(bad_pool.clone())),
         search: Arc::new(
-            core_search::SearchService::open(&std::env::temp_dir().join("plmsrv-degraded-search"))
+            core_search::SearchService::open(&std::env::temp_dir().join("plmsrv-degraded-search-v2"))
                 .expect("search open"),
         ),
         im_secret: String::new(),

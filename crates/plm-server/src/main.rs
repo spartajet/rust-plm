@@ -183,7 +183,8 @@ async fn main() -> Result<()> {
         };
     // 全文检索（增量20 RPT-01/03）：索引目录 data_dir/search + 对账扫描器近实时
     let search = Arc::new(
-        core_search::SearchService::open(&cfg.data_dir.join("search"))
+        // search-v2：增量21 schema 加 obj_id——旧 search 目录 schema 不兼容，一次性废弃重建
+        core_search::SearchService::open(&cfg.data_dir.join("search-v2"))
             .context("搜索索引目录初始化失败")?,
     );
     core_search::spawn_scanner(
