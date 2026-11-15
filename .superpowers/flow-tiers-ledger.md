@@ -134,3 +134,10 @@ Final: Ruling: parts 端点权限复用 docs 门控（SMB 简化；独立 parts 
 Final: Ruling: 查重 MVP=ILIKE 模糊（低频交互调用，慢路径可接受；语义检索 tantivy 后置）；强制门禁后置（响应带 duplicates 不阻断）。
 Final: Ruling: Playwright 本机 flaky 兜底 retries=2（chromium 进程间歇被杀——node 环回 RST 同家族，首轮 9/9 一次过+单跑稳定实证语义正确；CI runner 干净不受影响——Playwright 未进 CI，权威门禁=后端 e2e 26/26）。
 Final: minor (deferred): PART-01 类型模板差异化（多 part 类型独立属性集）；PART-02 分类挂属性模板；PART-05 强制门禁/语义检索；分类管理 UI（增删改）；parts 独立权限包。
+[增量17 终审修复轮台账]
+Final: fixed C1 parts 三 GET 端点挂错组——meta_get 组仅 require_authn（密级硬编码 0=admin 对密级>0 物料全盲，真库探针实证）+声明 docs:read 与代码不符——移入 docs_r 组（require_perm 回填真实密级）+双钉（admin 真实上限可见钉/零角色 revoke 后 403 钉）。
+Final: Ruling（踩坑）：测试回收角色必须走 revoke **端点**（casbin reload 生效路径）——SQL 直删 sec_user_role 不触发 reload，内存策略过期导致 403 断言假失败。
+Final: fixed I2 class_tree 算法重写——旧两轮挂子依赖"父码字典序先于子码"前提（乱序子静默丢失，探针实证）；重写=SQL WITH RECURSIVE 深度计算+ORDER BY depth DESC+正序遍历 remove-latest（深节点先挂入父，父后 remove 拿到完整子树——任意树形/乱序码正确）。回归钉 class_tree_handles_out_of_order_codes。
+Final: Ruling: 环/自环成员不入树（WITH RECURSIVE 锚定根+enabled 下滤，环父不可达自然终止）；**分类管理 UI 增量必须加建类环检测守卫**（本裁定为未来增量前置要求）。
+Final: fixed M1 parts 四端点+CreatePartReq 注册 OpenAPI / M2 test-results+playwright-report 出库+gitignore（增量8 M1 同族第三次重演——构建产物入库警示）。
+Final: minor (deferred): M4 create 响应 duplicates 无行级 ABAC（与 duplicates 端点不一致——今日全 part 密级 0 不可达，PART-05 密级化时对齐）；M3 0015 双目录镜像（mod-part 副本冗余，漂移即 VersionMismatch——registry 记账+分类管理增量收敛单副本）；M5 查重 confirm 分支零自动化覆盖（Playwright flaky 环境下反復验证成本高，语义由 duplicates API 钉覆盖）。
