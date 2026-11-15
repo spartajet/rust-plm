@@ -71,10 +71,33 @@ export function createHttp(
 /// 统一错误体提取（ADR-0015）；非 API 错误降级原消息
 export function extractApiError(err: unknown): string {
   const e = err as AxiosError<ApiErrorBody>;
-  return e.response?.data?.message ?? (e as Error).message ?? "未知错误";
+  const d: unknown = e.response?.data;
+  if (d && typeof d === "object" && "message" in d) {
+    return (d as ApiErrorBody).message;
+  }
+  if (typeof Blob !== "undefined" && d instanceof Blob) {
+    return "请求失败（服务端返回错误）";
+  }
+  return (e as Error).message ?? "未知错误";
+}
+
+/// blob 错误体 → 结构化错误（异步；增量22 预览 415 语义还原）
+export async function extractBlobApiError(err: unknown): Promise<string> {
+  const e = err as AxiosError;
+  const d: unknown = e.response?.data;
+  if (typeof Blob !== "undefined" && d instanceof Blob) {
+    try {
+      const v = JSON.parse(await d.text()) as ApiErrorBody;
+      if (v.message) return v.message;
+    } catch {
+      /* 非 JSON 错误体走兜底 */
+    }
+  }
+  return extractApiError(err);
 }
 
 export function extractApiCode(err: unknown): string | undefined {
   const e = err as AxiosError<ApiErrorBody>;
+  if (e.response?.data instanceof Blob) return undefined;
   return e.response?.data?.code;
 }

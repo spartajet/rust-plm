@@ -82,6 +82,7 @@ pub fn bom_release_hook(bom: Arc<core_bom::BomStore>) -> Arc<dyn core_version::R
         crate::routes::search::search,
         crate::routes::boms::lines_boms,
         crate::routes::boms::summary_boms,
+        crate::routes::docs::preview_doc,
     ),
     components(schemas(
         crate::routes::docs::FileInfoDto,

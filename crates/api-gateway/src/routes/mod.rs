@@ -31,6 +31,8 @@ pub fn build(state: AppState) -> Router {
         .route("/api/v1/docs", get(docs::list_docs))
         .route("/api/v1/docs/{obj_no}", get(docs::get_doc))
         .route("/api/v1/docs/{obj_no}/file", get(docs::download_doc))
+        // DOC-05 在线预览（增量22）：MIME 白名单 inline；SVG 排除防 XSS
+        .route("/api/v1/docs/{obj_no}/preview", get(docs::preview_doc))
         .route("/api/v1/docs/{obj_no}/versions", get(docs::versions_doc))
         // 物料读端点（增量17 终审 C1 修正：docs:read 门控——require_perm 回填真实密级上限）
         .route("/api/v1/parts", get(parts::list_parts))

@@ -4,7 +4,7 @@
 
 > 文档体系：[需求 v1.1](docs/PLM-产品需求文档-v1.0.md) · **[部署文档](docs/部署文档.md)** · **[需求符合度评审](docs/review-需求符合度评审.md)** · [迁移注册表](docs/migrations.md) · [ADR×19](docs/adr/README.md) · [概要设计](docs/PLM-概要设计说明书-v0.1.md) · [技术选型 v1.0](docs/PLM-技术选型说明书-v1.0.md) · [Spike 验证](spikes/REPORT.md)
 
-## 当前状态：MVP+ 主线纵切完成（21 个增量，详见 Roadmap）
+## 当前状态：MVP+ 主线纵切完成（22 个增量，详见 Roadmap）
 
 已覆盖：图纸受控/认证/授权(ABAC 密级)/生命周期(三档+Revise 升版)/Webhook 外投/BOM 引擎+版本链(冻结快照+as-of)+历史反查/COD 自动编码/PART 物料主数据(分类树+查重 MVP)/IM 卡片审批(钉钉加签/企微/飞书)/前端工作台(看板/用户管理/角色显隐/中文)。
 
@@ -104,6 +104,8 @@ curl -g -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/v1/boms/<�
 curl -g -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/v1/boms/DWG-001/expand?mode=full&major=1'
 
 # 详情 / 下载 / API 文档（docs 与文件下载同样需要 Bearer）
+# 在线预览（增量22 DOC-05）：MIME 白名单 inline 直开（pdf/png/jpeg/gif/webp；SVG 排除防 XSS；其余 415 走下载）
+curl -o preview.pdf -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001/preview
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001
 curl -o 支架.dwg -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001/file
 # openapi.json: /api/docs/openapi.json   Scalar UI: /api/docs（豁免鉴权）
@@ -115,7 +117,7 @@ curl -o 支架.dwg -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v
 cd frontend && npm install
 # 浏览器直连 API（后端 CORS 已放开；本机 node 环回不稳时绕开 vite 代理）
 VITE_API_BASE=http://127.0.0.1:18095 npx vite --port 5173 --host 127.0.0.1
-# 打开 http://127.0.0.1:5173 → 登录 admin → 顶栏全局搜索(图纸+物料聚类)/看板/待办中心(待办+已办+我发起+批量审批)/图纸列表(密级列)/详情(生命周期+BOM 版本切换+升版+版本历史)/用户管理(建号+角色授予/回收)/审计日志
+# 打开 http://127.0.0.1:5173 → 登录 admin → 顶栏全局搜索(图纸+物料聚类)/详情在线预览(PDF/图片+平铺水印)/看板/待办中心(待办+已办+我发起+批量审批)/图纸列表(密级列)/详情(生命周期+BOM 版本切换+升版+版本历史)/用户管理(建号+角色授予/回收)/审计日志
 # 界面按角色显隐（admin=全量 / editor=无用户管理+审批 / viewer=只读）；会话 401 自动 refresh 换发重放；中文界面
 ```
 

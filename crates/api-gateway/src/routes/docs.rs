@@ -309,6 +309,108 @@ pub async fn download_doc(
     Ok((StatusCode::OK, headers, body).into_response())
 }
 
+// ==================== DOC-05 在线预览（增量22） ====================
+
+/// MIME 白名单（inline 直开）：pdf/png/jpeg/gif/webp。
+/// SVG 明确排除——image/svg+xml 可内嵌 <script>，inline 存在存储型 XSS 面（台账裁定）。
+/// 判定：先精确 mime（大小写不敏感、截 ; 参数），再扩展名兜底（multipart 未带 content-type 时）。
+fn preview_mime(name: &str, mime: Option<&str>) -> Option<&'static str> {
+    const ALLOWED: [(&str, &str); 6] = [
+        ("application/pdf", ".pdf"),
+        ("image/png", ".png"),
+        ("image/jpeg", ".jpg"),
+        ("image/jpeg", ".jpeg"),
+        ("image/gif", ".gif"),
+        ("image/webp", ".webp"),
+    ];
+    if let Some(m) = mime {
+        let m = m
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        for (mm, _) in &ALLOWED {
+            if m == *mm {
+                return Some(mm);
+            }
+        }
+    }
+    let lower = name.to_ascii_lowercase();
+    for (mm, ext) in &ALLOWED {
+        if lower.ends_with(ext) {
+            return Some(mm);
+        }
+    }
+    None
+}
+
+/// GET /api/v1/docs/{obj_no}/preview — 在线预览（inline 直开；MIME 白名单外 415）
+#[utoipa::path(
+    get, path = "/api/v1/docs/{obj_no}/preview",
+    params(("obj_no" = String, Path)),
+    responses((status = 200, description = "PDF/图片 inline 流"), (status = 404), (status = 415, description = "MIME 白名单外"))
+)]
+pub async fn preview_doc(
+    State(st): State<AppState>,
+    Extension(tid): Extension<crate::error::TraceId>,
+    Extension(user): Extension<AuthUser>,
+    Path(obj_no): Path<String>,
+) -> Result<Response, ApiError> {
+    // ABAC：越级 404 不泄露存在性（与 detail/file 同语义）
+    let d = st
+        .service
+        .detail(&obj_no)
+        .await
+        .map_err(|e| ApiError::new(e, &tid.0))?;
+    if d.object.secret_level > user.max_secret_level {
+        return Err(ApiError::new(
+            core_model::DomainError::ObjNotFound(format!("docs:{obj_no}")),
+            &tid.0,
+        ));
+    }
+    let Some(f) = &d.file else {
+        return Err(ApiError::new(
+            core_model::DomainError::ObjNotFound(format!("docs:{obj_no}")),
+            &tid.0,
+        ));
+    };
+    let Some(ct) = preview_mime(&f.name, f.mime.as_deref()) else {
+        return Err(ApiError::new(
+            core_model::DomainError::PreviewUnsupported,
+            &tid.0,
+        ));
+    };
+    let (name, stream, size) = st
+        .service
+        .open_original(&obj_no)
+        .await
+        .map_err(|e| ApiError::new(e, &tid.0))?;
+
+    let mut headers = HeaderMap::new();
+    // ct 来自编译期白名单常量——expect 表达不可失败意图（终审 I-3）
+    headers.insert(header::CONTENT_TYPE, ct.parse().expect("whitelisted mime"));
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        format!(
+            "inline; filename=\"{}\"; filename*=UTF-8''{}",
+            ascii_fallback(&name),
+            pct_encode(&name)
+        )
+        .parse()
+        .unwrap_or(HeaderValue::from_static("inline")),
+    );
+    headers.insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
+    if let Ok(v) = HeaderValue::from_str(&size.to_string()) {
+        headers.insert(header::CONTENT_LENGTH, v);
+    }
+    let body = axum::body::Body::from_stream(ReaderStream::new(stream));
+    Ok((StatusCode::OK, headers, body).into_response())
+}
+
 fn to_response(d: mod_doc::DocDetail) -> DocResponse {
     DocResponse {
         object: json!(d.object),
