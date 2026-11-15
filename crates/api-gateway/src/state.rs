@@ -75,11 +75,13 @@ pub fn bom_release_hook(bom: Arc<core_bom::BomStore>) -> Arc<dyn core_version::R
         crate::routes::parts::duplicates,
         crate::routes::parts::class_tree,
         crate::routes::audit::search_audit,
+        crate::routes::todos::list_todos,
     ),
     components(schemas(
         crate::routes::docs::FileInfoDto,
         crate::routes::docs::DocResponse,
         crate::routes::docs::ListResponse,
+        crate::routes::todos::TodoItemDto,
         crate::routes::infra::Healthz,
         crate::routes::auth::LoginReq,
         crate::routes::auth::RefreshReq,

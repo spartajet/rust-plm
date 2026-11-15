@@ -4,7 +4,7 @@
 mod common;
 
 use common::{multipart_body, send, TestCtx};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use std::io::Cursor;
 
 const FILE: &[u8] = b"%DWG-e2e-content-9876543210";
@@ -2146,5 +2146,183 @@ async fn audit_log_records_and_searches() {
     assert_eq!(v["code"], "MDL-SEC-FORBIDDEN");
 
     // append-only 静态守卫：全仓无 audit_log UPDATE/DELETE
+    ctx.cleanup().await;
+}
+
+// ==================== 增量19 WF-03 待办中心 ====================
+
+#[tokio::test]
+async fn todos_center_three_boxes_and_abac() {
+    let ctx = TestCtx::setup("todo", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "todoed", "todoed-pass-123", &["editor"], 0)
+        .await;
+    ctx.create_user_as_admin(&admin, "todolow", "todolow-pass-123", &["editor"], 0)
+        .await;
+    // peer：无任何自身提交的纯观察者——待办可见性只由他人提交+密级决定（ABAC 钉去混淆）
+    ctx.create_user_as_admin(&admin, "todopeer", "todopeer-pass-123", &["editor"], 0)
+        .await;
+    let ed = ctx.login_as("todoed", "todoed-pass-123").await;
+    let low = ctx.login_as("todolow", "todolow-pass-123").await;
+    let peer = ctx.login_as("todopeer", "todopeer-pass-123").await;
+
+    // todoed 上传 level-0 件并提交；todolow 上传密级 2 件并提交
+    let (s, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&ed),
+            "DWG-TODO-1",
+            r#"{"name":"轴承座"}"#,
+            Some("t1.dwg"),
+            FILE.to_vec(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201);
+    let (s, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&low),
+            "DWG-TODO-S",
+            r#"{"name":"保密件"}"#,
+            Some("ts.dwg"),
+            FILE.to_vec(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201);
+
+    let sub = |t: &str, no: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/submit"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let (s, _, _) = send(&ctx.app, sub(&ed, "DWG-TODO-1")).await;
+    assert_eq!(s, 200);
+    let (s, _, _) = send(&ctx.app, sub(&low, "DWG-TODO-S")).await;
+    assert_eq!(s, 200);
+    // 提交后再提密（fail-closed ABAC 下低权限者无法操作越密对象；密级变更受控属 SYS 域）
+    sqlx::query("UPDATE cm_object SET secret_level = 2 WHERE obj_no = 'DWG-TODO-S'")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+
+    // 待办盒（admin）：两件都在，提交人/名称/状态齐
+    let (s, body) = ctx.get_authed("/api/v1/todos?box=todo", &admin).await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 2);
+    let items = v["items"].as_array().unwrap();
+    let t1 = items.iter().find(|i| i["obj_no"] == "DWG-TODO-1").expect("待办含 TODO-1");
+    assert_eq!(t1["submitter"], "todoed");
+    assert_eq!(t1["name"], "轴承座");
+    assert_eq!(t1["state"], "review");
+    let ts = items.iter().find(|i| i["obj_no"] == "DWG-TODO-S").expect("待办含 TODO-S");
+    assert_eq!(ts["submitter"], "todolow");
+
+    // 待办盒（editor）：自己的提交不算待办；密级 2 件越权不可见 → 空
+    let (s, body) = ctx.get_authed("/api/v1/todos?box=todo", &ed).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 0, "editor 待办应为空");
+
+    // ABAC 钉（peer 无自身提交）：只见 level-0 的 TODO-1，level-2 的 TODO-S 被密级过滤
+    let (s, body) = ctx.get_authed("/api/v1/todos?box=todo", &peer).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 1, "peer 待办恰一件");
+    assert_eq!(v["items"][0]["obj_no"], "DWG-TODO-1");
+
+    // 待办盒（todolow）：TODO-1 可见（密级 0、他人提交）；自己的 TODO-S 不入待办
+    let (s, body) = ctx.get_authed("/api/v1/todos?box=todo", &low).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 1, "low 待办恰一件");
+    assert_eq!(v["items"][0]["obj_no"], "DWG-TODO-1");
+
+    // 我发起盒：editor 见自己的 DWG-TODO-1；low 无
+    let (s, body) = ctx.get_authed("/api/v1/todos?box=mine", &ed).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 1);
+    assert_eq!(v["items"][0]["obj_no"], "DWG-TODO-1");
+    let (s, body) = ctx.get_authed("/api/v1/todos?box=mine", &low).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 0);
+
+    // admin 批准 TODO-1（无 body——向后兼容）→ 显式审计行（from/to）
+    let app = |t: &str, no: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/approve"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let (s, body, _) = send(&ctx.app, app(&admin, "DWG-TODO-1")).await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+
+    // spawn 异步写审计——轮询等落库
+    let mut ok = false;
+    for _ in 0..20 {
+        let n: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log WHERE action='approve' AND object='DWG-TODO-1'",
+        )
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+        if n == 1 {
+            ok = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(ok, "approve 显式审计行须落库");
+    let row: serde_json::Value =
+        sqlx::query("SELECT detail FROM audit_log WHERE action='approve' AND object='DWG-TODO-1'")
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap()
+            .get("detail");
+    assert_eq!(row["from"], "review");
+    assert_eq!(row["to"], "released");
+
+    // 待办消失、已办出现（admin 视角 approve 行；editor 视角 submit 行）
+    let (s, body) = ctx.get_authed("/api/v1/todos?box=todo", &admin).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["total"], 1, "仅剩 TODO-S");
+    let (s, body) = ctx.get_authed("/api/v1/todos?box=done", &admin).await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(v["total"].as_i64().unwrap() >= 1, "admin 已办含 approve 行");
+    let done = v["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["obj_no"] == "DWG-TODO-1" && i["action"] == "approve")
+        .expect("已办含 approve 行");
+    assert_eq!(done["state"], "released");
+    let (s, body) = ctx.get_authed("/api/v1/todos?box=done", &ed).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let ed_done = v["items"].as_array().unwrap();
+    assert!(
+        ed_done.iter().any(|i| i["obj_no"] == "DWG-TODO-1" && i["action"] == "submit"),
+        "editor 已办含自己的提交行"
+    );
+    assert!(
+        !ed_done.iter().any(|i| i["action"] == "approve"),
+        "editor 无审批动作"
+    );
+
+    // 非法盒名 → 400
+    let (s, _) = ctx.get_authed("/api/v1/todos?box=bogus", &admin).await;
+    assert_eq!(s, 400);
+
     ctx.cleanup().await;
 }

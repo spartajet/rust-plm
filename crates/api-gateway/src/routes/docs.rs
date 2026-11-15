@@ -50,6 +50,7 @@ pub struct ListResponse {
 pub async fn upload_doc(
     State(st): State<AppState>,
     Extension(tid): Extension<crate::error::TraceId>,
+    Extension(user): Extension<AuthUser>,
     mut mp: Multipart,
 ) -> Result<(StatusCode, Json<DocResponse>), ApiError> {
     let mut obj_no: Option<String> = None;
@@ -145,12 +146,15 @@ pub async fn upload_doc(
     let detail = st
         .service
         .upload_staged(
-            obj_no,
-            attrs.unwrap_or_default(),
-            file_name.unwrap_or_default(),
-            mime,
-            hash,
-            size,
+            mod_doc::StagedUpload {
+                obj_no,
+                attrs: attrs.unwrap_or_default(),
+                file_name: file_name.unwrap_or_default(),
+                mime,
+                hash,
+                size,
+            },
+            Some(user.id),
         )
         .await
         .map_err(|e| ApiError::new(e, &tid.0))?;
@@ -350,6 +354,7 @@ async fn do_transition(
     st: &AppState,
     tid: &crate::error::TraceId,
     user: &core_sec::AuthUser,
+    ip: Option<String>,
     obj_no: &str,
     ev: core_version::LifecycleEvent,
 ) -> Result<axum::Json<serde_json::Value>, ApiError> {
@@ -365,11 +370,22 @@ async fn do_transition(
             &tid.0,
         ));
     }
+    let old_state = d.object.state.clone();
     let o = st
         .service
         .transition(&st.lifecycle, ev, obj_no, user.id)
         .await
         .map_err(|e| ApiError::new(e, &tid.0))?;
+    // 显式审计埋点（增量19 WF-03/SYS-01）：action=事件名、object=obj_no——
+    // WF-03 已办盒数据源 + 审批留痕；audit_mw 的 http 兜底行与 action 名不同不冲突
+    st.audit.record(
+        user.username.clone(),
+        ev.as_str().to_string(),
+        Some(obj_no.to_string()),
+        Some(json!({"from": old_state, "to": o.state})),
+        Some(tid.0.clone()),
+        ip,
+    );
     Ok(axum::Json(json!(o)))
 }
 
@@ -385,9 +401,10 @@ macro_rules! lc_endpoint {
             State(st): State<AppState>,
             Extension(tid): Extension<crate::error::TraceId>,
             Extension(user): Extension<core_sec::AuthUser>,
+            Extension(ip): Extension<crate::audit_mw::ClientIp>,
             Path(obj_no): Path<String>,
         ) -> Result<axum::Json<serde_json::Value>, ApiError> {
-            do_transition(&st, &tid, &user, &obj_no, $ev).await
+            do_transition(&st, &tid, &user, ip.0, &obj_no, $ev).await
         }
     };
 }
