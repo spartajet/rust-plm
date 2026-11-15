@@ -198,9 +198,10 @@ async function toggleRole(user: SecUser, role: string, has: boolean) {
         <el-table-column label="键" min-width="160" prop="key" />
         <el-table-column label="值" width="180">
           <template #default="{ row }">
+            <!-- 终审 M1：per-key 下界与后端 RANGES 对齐（password_min_length 8 / 其余 1） -->
             <el-input-number
               v-model="paramDraft[row.key]"
-              :min="1"
+              :min="row.key === 'password_min_length' ? 8 : 1"
               size="small"
               :data-test="`param-input-${row.key}`"
             />

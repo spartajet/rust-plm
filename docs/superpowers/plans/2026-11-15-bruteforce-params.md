@@ -40,3 +40,10 @@
 - T1+T2 完成（615e47f）：make_interval(mins=>$2) bigint→int 函数签名不匹配（e2e 500 拦下，$2::int 修）；网关硬编码 password.len()<8 是死参数（策略进服务层单一路径）；e2e 自身两处修正（Request clone 不满足→闭包工厂/解构简化）。
 - T3 完成（1a6aeb9）：Playwright 改 min_length+建号复验与并行 user-admin 全局参数竞争实测撞车（bd-pass-123 10 位被拒）——钉改为纯 UI 编辑回显（lock_minutes），策略生效语义由后端 e2e 钉住；同库历史残留参数值需修复（并行测试环境共享库教训）。
 - T4 完成：README/部署文档/评审报告（SYS-04/防爆破 ⬜→🟡）/migrations.md 0017 注册+五裁定。
+
+### 终审（PASS，C1=0/I1=0）修复轮
+- M1 清偿：前端 input-number per-key 下界（password_min_length=8 与 RANGES 对齐）。
+- M2 清偿：set_param 事务化（FOR UPDATE 行锁，audit from 不跳中间值）。
+- M3 清偿：migrations.md 台账补禁用+锁定边缘情形一句。
+- 观察项记账不修：GET params 内层 DefaultBodyLimit 重复（无害）/password.len() 字节语义偏严/ensure_admin bootstrap 不套策略（操作员 env）。
+- 修复轮后：后端 168/clippy 0/fmt 过/Vitest 34 全绿（Playwright 15 于终审实跑两轮，本轮无前端行为变更仅 :min 收紧）。
