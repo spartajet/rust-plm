@@ -740,7 +740,7 @@ test("security params: panel edit saves and reflects (SYS-04)", async ({ page })
   await page.goto("/admin/users");
   await expect(page.locator('[data-test="params-table"] .el-table__row')).toHaveCount(4, { timeout: 10_000 });
   // 终审 C1-3：含 checkout_hours 行（增量26 种子）防静默漂移
-  await expect(page.locator('[data-test="params-table"]:has-text("检出时长（分钟）")')).toBeVisible();
+  await expect(page.locator('[data-test="params-table"]:has-text("检出时长（小时）")')).toBeVisible();
 
   // 改 lock_minutes 15→20 → 保存 → 面板值刷新为 20 → 还原 15。
   // 策略生效语义由后端 e2e 钉住（sec_params_manage_and_audit_trail）；此处不造全局副作用
@@ -852,9 +852,17 @@ test("doc links: link a part via search dialog, unlink clears (DOC-12)", async (
       headers: { ...ah, "Content-Type": "application/json" },
       body: JSON.stringify({ class_code: "CLS-ZZ", attrs: { name: PNAME, material: "Q235" } }),
     });
-    return pr.status === 201 ? "ok" : `part ${pr.status}`;
+    if (pr.status !== 201) return `part ${pr.status}`;
+    // 终审 M3：回读服务端赋码 obj_no（link-pick-{obj_no} 精确钉）
+    const dr = await fetch(`${api}/api/v1/parts/duplicates?name=${encodeURIComponent(PNAME)}`, { headers: ah });
+    const ditems = (await dr.json()) as { obj_no: string; name?: string }[];
+    const found = ditems.find((i) => i.name === PNAME);
+    return found?.obj_no ?? "objno-miss";
   }, { NO, PNAME });
-  expect(setup).toBe("ok");
+  expect(setup).toMatch(/WL-ZZ-/);
+
+  // 精确钉：link-pick-{obj_no}
+  const POBJ = setup;
 
   // 详情页关联物料卡：搜索选件关联 → 行可见 → 解除 → 空态
   await page.goto(`/docs/${NO}`);
@@ -862,8 +870,7 @@ test("doc links: link a part via search dialog, unlink clears (DOC-12)", async (
   await page.click('[data-test="link-open"]');
   await page.fill('[data-test="link-search"]', PNAME);
   await page.click('[data-test="link-search-btn"]');
-  await page.locator(`[data-test="link-pick-${PNAME}"]`).waitFor({ timeout: 10_000 }).catch(() => {});
-  // pick 按钮定位按 obj_no（服务端赋码）——改为按行文本定位关联按钮
+  await page.locator(`[data-test="link-pick-${POBJ}"]`).waitFor({ timeout: 10_000 });
   const row = page.locator('[data-test="link-results"] .el-table__row').filter({ hasText: PNAME }).first();
   await expect(row).toBeVisible({ timeout: 10_000 });
   await row.locator("button").click();

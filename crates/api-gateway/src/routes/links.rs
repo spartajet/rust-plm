@@ -121,6 +121,7 @@ pub async fn create_link(
             &tid.0,
         ));
     }
+    // 终审 M2：并发双检出败者撞 UNIQUE（23505）→ 409 而非 500（预检+INSERT 竞态窗口）
     let id: uuid::Uuid = sqlx::query_scalar(
         "INSERT INTO obj_link(from_id, to_id, kind, created_by) VALUES ($1, $2, $3, $4) RETURNING id",
     )
@@ -130,7 +131,16 @@ pub async fn create_link(
     .bind(user.id)
     .fetch_one(pool)
     .await
-    .map_err(|e| ApiError::new(core_model::DomainError::Db(e.to_string()), &tid.0))?;
+    .map_err(|e| match &e {
+        sqlx::Error::Database(db) if db.code().as_deref() == Some("23505") => {
+            core_model::DomainError::LinkDuplicate(format!(
+                "{} → {} ({})",
+                req.from_no, req.to_no, req.kind
+            ))
+        }
+        _ => core_model::DomainError::Db(e.to_string()),
+    })
+    .map_err(|e| ApiError::new(e, &tid.0))?;
     st.audit.record(
         user.username.clone(),
         "doc.link",
@@ -212,7 +222,6 @@ async fn links_for(
     user: &AuthUser,
     anchor_no: &str,
     anchor_type: &str,
-    _other_type: &str,
     anchor_side: &str,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     // 锚端 ABAC：锚对象越级 404
@@ -286,7 +295,7 @@ pub async fn doc_links(
     Extension(user): Extension<AuthUser>,
     Path(no): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    links_for(&st, &tid, &user, &no, "drawing", "part", "from").await
+    links_for(&st, &tid, &user, &no, "drawing", "from").await
 }
 
 /// GET /api/v1/parts/{no}/links — 物料挂的文档（docs:read；对端密级过滤）
@@ -301,5 +310,5 @@ pub async fn part_links(
     Extension(user): Extension<AuthUser>,
     Path(no): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    links_for(&st, &tid, &user, &no, "part", "drawing", "to").await
+    links_for(&st, &tid, &user, &no, "part", "to").await
 }

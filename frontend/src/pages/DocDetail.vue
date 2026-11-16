@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { extractApiError, extractBlobApiError } from "../api/http";
 import { docLinks, createLink, deleteLink, type LinkItem } from "../api/links";
+import { duplicates } from "../api/part";
 import { http } from "../api/index";
 import {
   checkinDoc,
@@ -144,11 +145,9 @@ async function searchPartsForLink() {
   if (!q) return;
   linkSearching.value = true;
   try {
-    const res = await http.get("/api/v1/parts/duplicates", { params: { name: q } });
-    linkHits.value = (res.data.items ?? []).map((i: { obj_no: string; attrs?: { name?: string } }) => ({
-      obj_no: i.obj_no,
-      name: i.attrs?.name ?? null,
-    }));
+    // 终审 C1-1：复用既有 duplicates helper（GET /parts/duplicates 返回裸数组；
+    // 原手写请求读 res.data.items 恒 undefined——关联搜索确定性空结果的根因）
+    linkHits.value = await duplicates(http, q);
   } catch (e) {
     ElMessage.error(extractApiError(e));
   } finally {

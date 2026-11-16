@@ -116,6 +116,17 @@ curl -g -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/v1/boms/DWG
 # 详情 / 下载 / API 文档（docs 与文件下载同样需要 Bearer）
 # 在线预览（增量22 DOC-05）：MIME 白名单 inline 直开（pdf/png/jpeg/gif/webp；SVG 排除防 XSS；其余 415 走下载）
 curl -o preview.pdf -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001/preview
+
+# 检入/检出（增量26 DOC-03）：独占编辑锁（checkout_hours 参数缺省 24h，到期惰性回收）
+curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001/checkout     # 检出（他人 revise 409 MDL-DOC-LOCKED）
+curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001/checkin     # 检入（仅持有者）
+curl -X DELETE -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/api/v1/docs/DWG-001/lock # 强制回收（sec:manage）
+
+# 对象关联（增量27 DOC-12）：文档↔物料双向追溯（obj_link 泛化表，未来 BOM/变更/项目同表扩展）
+curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json'   http://localhost:8080/api/v1/links   -d '{"from_no":"DWG-001","to_no":"WL-ZZ-00001","kind":"doc_part"}'
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001/links      # 文档挂的物料
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/parts/WL-ZZ-00001/links # 物料挂的文档
+
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001
 curl -o 支架.dwg -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001/file
 # openapi.json: /api/docs/openapi.json   Scalar UI: /api/docs（豁免鉴权）
