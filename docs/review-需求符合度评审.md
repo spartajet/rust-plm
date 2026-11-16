@@ -59,7 +59,7 @@
 | 受控存储/下载/生命周期 | ✅ | multipart 上传→SHA-256 内容寻址→版本→三档审批→发布快照（file_hash 回填）→Revise 升版全链（多钉） |
 | DOC-01 文档类型库 | 🟡 | drawing 单类型实作；类型库多类型各配属性/编码/流程 ⬜（元数据引擎已具备，缺种子与 UI） |
 | DOC-02 格式白名单/病毒扫描 | 🟡 | 前端白名单 WARN 不阻断 ✅；**服务端校验/ClamAV 钩子 ⬜**（HookRegistry 可挂未挂） |
-| DOC-03 检入/检出 | ⬜ | 无独占锁机制 |
+| DOC-03 检入/检出 | 🟡 | doc_lock 独占锁（checkout_hours 参数/到期惰性回收）+revise 拦截面（他人 409 MDL-DOC-LOCKED）+强制回收+锁横幅 ✅（增量26）；超时主动提醒/离线包/回连合并 ⬜ |
 | DOC-04 版本管理 | 🟡 | major/minor/iteration+Revise ✅；版本树可视化/两版对比 ⬜ |
 | DOC-05 在线预览/水印 | 🟡 | PDF/图片 inline 直开（MIME 白名单+SVG 排除防 XSS+nosniff+415 兜底）+前端平铺水印（用户/密级/时间）✅（增量22）；CAD→PDF 转换（ADR-0018）/服务端内嵌水印/IP ⬜ |
 | DOC-07 审批流程模板 | 🟡 | 三档+会签 ✅；意见必填/批量审批/退回指定节点 ⬜ |

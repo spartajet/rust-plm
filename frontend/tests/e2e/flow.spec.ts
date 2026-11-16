@@ -738,7 +738,9 @@ test("security params: panel edit saves and reflects (SYS-04)", async ({ page })
   await page.waitForURL("/");
 
   await page.goto("/admin/users");
-  await expect(page.locator('[data-test="params-table"] .el-table__row')).toHaveCount(3, { timeout: 10_000 });
+  await expect(page.locator('[data-test="params-table"] .el-table__row')).toHaveCount(4, { timeout: 10_000 });
+  // 终审 C1-3：含 checkout_hours 行（增量26 种子）防静默漂移
+  await expect(page.locator('[data-test="params-table"]:has-text("检出时长（分钟）")')).toBeVisible();
 
   // 改 lock_minutes 15→20 → 保存 → 面板值刷新为 20 → 还原 15。
   // 策略生效语义由后端 e2e 钉住（sec_params_manage_and_audit_trail）；此处不造全局副作用

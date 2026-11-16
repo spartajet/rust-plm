@@ -3462,6 +3462,11 @@ async fn sec_params_manage_and_audit_trail() {
     // ⑥ 还原（避免影响同库其他断言；cleanup 后库删无谓但语义完整）
     let (s, _, _) = send(&ctx.app, put("password_min_length", 8)).await;
     assert_eq!(s, 204);
+    // 终审 I1-1 钉：checkout_hours 可 PUT（种子在但白名单漏——可见不可调）
+    let (s, _, _) = send(&ctx.app, put("checkout_hours", 48)).await;
+    assert_eq!(s, 204);
+    let (s, _, _) = send(&ctx.app, put("checkout_hours", 0)).await;
+    assert_eq!(s, 400, "越下界 1");
 
     ctx.cleanup().await;
 }
@@ -4118,6 +4123,19 @@ async fn doc_checkout_lock_lifecycle_and_force() {
     assert_eq!(s, 404);
     let (s, _, _) = send(&ctx.app, checkout(&other, "DWG-CKL-1")).await;
     assert_eq!(s, 404);
+    // 终审 C1-1 补钉：checkin/force_unlock 两端点越级同 404（原实现缺 ABAC——409 泄露持有者）
+    let (s, _, _) = send(&ctx.app, checkin(&other, "DWG-CKL-1")).await;
+    assert_eq!(s, 404, "越级 checkin 不泄露");
+    let force_del = axum::http::Request::builder()
+        .method("DELETE")
+        .uri("/api/v1/docs/DWG-CKL-1/lock")
+        .header("authorization", format!("Bearer {other}"))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let (s, _, _) = send(&ctx.app, force_del).await;
+    // editor 无 sec:manage → 路由门控 403 先拒（handler ABAC 预检为语义一致性防御，
+    // 现实仅 admin 可达；403 亦不泄露锁信息）
+    assert_eq!(s, 403, "越级 force_unlock 权限先拒");
 
     // ⑨ audit 三行（checkout/checkin/force-unlock）
     let mut ok = false;

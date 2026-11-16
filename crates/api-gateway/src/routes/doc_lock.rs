@@ -67,7 +67,7 @@ pub async fn get_lock(
 #[utoipa::path(
     post, path = "/api/v1/docs/{obj_no}/checkout",
     params(("obj_no" = String, Path)),
-    responses((status = 200, description = "检出成功"), (status = 400, description = "非 working 态"), (status = 404), (status = 409, description = "已被他人检出"))
+    responses((status = 200, description = "检出成功"), (status = 423, description = "非 working 态（ObjStateForbidden）"), (status = 404), (status = 409, description = "已被他人检出"))
 )]
 pub async fn checkout_doc(
     State(st): State<AppState>,
@@ -121,6 +121,19 @@ pub async fn checkin_doc(
     Extension(user): Extension<AuthUser>,
     Path(obj_no): Path<String>,
 ) -> Result<StatusCode, ApiError> {
+    // ABAC：越级 404 不泄露存在性（终审 C1-1——与 get_lock/checkout 同语义；缺检则越级
+    // checkin 409 泄露持有者名与到期）
+    let d = st
+        .service
+        .detail(&obj_no)
+        .await
+        .map_err(|e| ApiError::new(e, &tid.0))?;
+    if d.object.secret_level > user.max_secret_level {
+        return Err(ApiError::new(
+            core_model::DomainError::ObjNotFound(format!("docs:{obj_no}")),
+            &tid.0,
+        ));
+    }
     st.service
         .checkin(&obj_no, user.id)
         .await
@@ -148,6 +161,18 @@ pub async fn force_unlock_doc(
     Extension(user): Extension<AuthUser>,
     Path(obj_no): Path<String>,
 ) -> Result<StatusCode, ApiError> {
+    // ABAC：越级 404（终审 C1-1 同族补齐——sec:manage 现仅 admin 持有故现实难达，语义一致性兜齐）
+    let d = st
+        .service
+        .detail(&obj_no)
+        .await
+        .map_err(|e| ApiError::new(e, &tid.0))?;
+    if d.object.secret_level > user.max_secret_level {
+        return Err(ApiError::new(
+            core_model::DomainError::ObjNotFound(format!("docs:{obj_no}")),
+            &tid.0,
+        ));
+    }
     let had = st
         .service
         .force_unlock(&obj_no)
