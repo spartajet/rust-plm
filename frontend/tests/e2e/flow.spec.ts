@@ -740,7 +740,7 @@ test("security params: panel edit saves and reflects (SYS-04)", async ({ page })
   await page.goto("/admin/users");
   await expect(page.locator('[data-test="params-table"] .el-table__row')).toHaveCount(4, { timeout: 10_000 });
   // 终审 C1-3：含 checkout_hours 行（增量26 种子）防静默漂移
-  await expect(page.locator('[data-test="params-table"]:has-text("检出时长（分钟）")')).toBeVisible();
+  await expect(page.locator('[data-test="params-table"]:has-text("检出时长（小时）")')).toBeVisible();
 
   // 改 lock_minutes 15→20 → 保存 → 面板值刷新为 20 → 还原 15。
   // 策略生效语义由后端 e2e 钉住（sec_params_manage_and_audit_trail）；此处不造全局副作用
@@ -824,4 +824,58 @@ test("checkout lock: banner blocks other editor, checkin clears (DOC-03)", async
   await expect(page.locator('[data-test="lock-banner-self"]')).toBeVisible({ timeout: 10_000 });
   await page.click('[data-test="lock-force-unlock"]');
   await expect(page.locator('[data-test="lock-banner-self"]')).toHaveCount(0, { timeout: 10_000 });
+});
+
+// ==================== 增量27 DOC-12 关联物料 ====================
+
+test("doc links: link a part via search dialog, unlink clears (DOC-12)", async ({ page }) => {
+  await page.goto("/login");
+  await page.fill('[data-test="username"]', "admin");
+  await page.fill('[data-test="password"]', ADMIN_PW);
+  await page.click('[data-test="login-btn"]');
+  await page.waitForURL("/");
+
+  const NO = `DWG-FE-LNK-${Date.now()}`;
+  const PNAME = `关联垫块${Date.now()}`;
+  const setup = await page.evaluate(async ({ NO, PNAME }) => {
+    const api = (window as unknown as { E2E_API: string }).E2E_API;
+    const t = localStorage.getItem("rustplm_token") ?? "";
+    const ah = { Authorization: `Bearer ${t}` };
+    const fd = new FormData();
+    fd.append("obj_no", NO);
+    fd.append("attrs", JSON.stringify({ name: "关联主图" }));
+    fd.append("file", new File(["%LNK"], "l.dwg", { type: "application/octet-stream" }));
+    const r = await fetch(`${api}/api/v1/docs`, { method: "POST", headers: ah, body: fd });
+    if (r.status !== 201) return `doc ${r.status}`;
+    const pr = await fetch(`${api}/api/v1/parts`, {
+      method: "POST",
+      headers: { ...ah, "Content-Type": "application/json" },
+      body: JSON.stringify({ class_code: "CLS-ZZ", attrs: { name: PNAME, material: "Q235" } }),
+    });
+    if (pr.status !== 201) return `part ${pr.status}`;
+    // 终审 M3：回读服务端赋码 obj_no（link-pick-{obj_no} 精确钉）
+    const dr = await fetch(`${api}/api/v1/parts/duplicates?name=${encodeURIComponent(PNAME)}`, { headers: ah });
+    const ditems = (await dr.json()) as { obj_no: string; name?: string }[];
+    const found = ditems.find((i) => i.name === PNAME);
+    return found?.obj_no ?? "objno-miss";
+  }, { NO, PNAME });
+  expect(setup).toMatch(/WL-ZZ-/);
+
+  // 精确钉：link-pick-{obj_no}
+  const POBJ = setup;
+
+  // 详情页关联物料卡：搜索选件关联 → 行可见 → 解除 → 空态
+  await page.goto(`/docs/${NO}`);
+  await expect(page.locator('[data-test="links-card"]')).toBeVisible({ timeout: 10_000 });
+  await page.click('[data-test="link-open"]');
+  await page.fill('[data-test="link-search"]', PNAME);
+  await page.click('[data-test="link-search-btn"]');
+  await page.locator(`[data-test="link-pick-${POBJ}"]`).waitFor({ timeout: 10_000 });
+  const row = page.locator('[data-test="link-results"] .el-table__row').filter({ hasText: PNAME }).first();
+  await expect(row).toBeVisible({ timeout: 10_000 });
+  await row.locator("button").click();
+  await expect(page.locator('[data-test="links-table"] .el-table__row:has-text("WL-ZZ-")')).toBeVisible({ timeout: 10_000 });
+  // 解除
+  await page.locator('[data-test="links-table"] .el-table__row button:has-text("解除")').first().click();
+  await expect(page.locator('[data-test="links-table"] .el-table__row')).toHaveCount(0, { timeout: 10_000 });
 });

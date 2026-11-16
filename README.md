@@ -4,7 +4,7 @@
 
 > 文档体系：[需求 v1.1](docs/PLM-产品需求文档-v1.0.md) · **[部署文档](docs/部署文档.md)** · **[需求符合度评审](docs/review-需求符合度评审.md)** · [迁移注册表](docs/migrations.md) · [ADR×19](docs/adr/README.md) · [概要设计](docs/PLM-概要设计说明书-v0.1.md) · [技术选型 v1.0](docs/PLM-技术选型说明书-v1.0.md) · [Spike 验证](spikes/REPORT.md)
 
-## 当前状态：MVP+ 主线纵切完成（26 个增量，详见 Roadmap）
+## 当前状态：MVP+ 主线纵切完成（27 个增量，详见 Roadmap）
 
 已覆盖：图纸受控/认证/授权(ABAC 密级)/生命周期(三档+Revise 升版)/Webhook 外投/BOM 引擎+版本链(冻结快照+as-of)+历史反查/COD 自动编码/PART 物料主数据(分类树+查重 MVP)/IM 卡片审批(钉钉加签/企微/飞书)/前端工作台(看板/用户管理/角色显隐/中文)。
 
@@ -116,6 +116,17 @@ curl -g -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/v1/boms/DWG
 # 详情 / 下载 / API 文档（docs 与文件下载同样需要 Bearer）
 # 在线预览（增量22 DOC-05）：MIME 白名单 inline 直开（pdf/png/jpeg/gif/webp；SVG 排除防 XSS；其余 415 走下载）
 curl -o preview.pdf -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001/preview
+
+# 检入/检出（增量26 DOC-03）：独占编辑锁（checkout_hours 参数缺省 24h，到期惰性回收）
+curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001/checkout     # 检出（他人 revise 409 MDL-DOC-LOCKED）
+curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001/checkin     # 检入（仅持有者）
+curl -X DELETE -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/api/v1/docs/DWG-001/lock # 强制回收（sec:manage）
+
+# 对象关联（增量27 DOC-12）：文档↔物料双向追溯（obj_link 泛化表，未来 BOM/变更/项目同表扩展）
+curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json'   http://localhost:8080/api/v1/links   -d '{"from_no":"DWG-001","to_no":"WL-ZZ-00001","kind":"doc_part"}'
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001/links      # 文档挂的物料
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/parts/WL-ZZ-00001/links # 物料挂的文档
+
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001
 curl -o 支架.dwg -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/docs/DWG-001/file
 # openapi.json: /api/docs/openapi.json   Scalar UI: /api/docs（豁免鉴权）

@@ -67,7 +67,7 @@
 | DOC-09 存储 | 🟡 | 内容寻址去重 ✅（file_object ON CONFLICT）；断点续传/秒传 API/冷热分层 ⬜ |
 | DOC-10 全文检索 | ⬜ | 属性 GIN 检索 ✅；正文抽取+tantivy ⬜（**选型定案未接线**） |
 | DOC-11 批量导入 | ⬜ | 百万级历史导入工具缺 |
-| DOC-12 对象关联 | 🟡 | parts 挂 class；物料↔文档双向追溯 ⬜ |
+| DOC-12 对象关联 | 🟡 | parts 挂 class ✅；obj_link 泛化关联表（kind=doc_part）+物料↔文档双向追溯四端点（ABAC 双端/反查行级过滤）+DocDetail 关联卡 ✅（增量27）；BOM/变更/项目 kind ⬜（表已扩展位） |
 
 ### 6.5 BOM —— 🟡 引擎满血，UI 空白
 

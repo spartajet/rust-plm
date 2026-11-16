@@ -79,6 +79,8 @@ pub enum DomainError {
     SecPasswordPolicy,
     #[error("对象已被 {0} 检出锁定（至 {1}）——请检入后再操作或联系管理员")]
     DocLocked(String, String),
+    #[error("关联已存在: {0}")]
+    LinkDuplicate(String),
     #[error("角色不存在: {0}")]
     SecRoleNotFound(String),
     #[error("非法生命周期迁移: {0} 不允许 {1}")]
@@ -127,6 +129,7 @@ impl DomainError {
             Self::SecAccountLocked(_) => "MDL-SEC-ACCOUNT-LOCKED",
             Self::SecPasswordPolicy => "MDL-SEC-PASSWORD-POLICY",
             Self::DocLocked(_, _) => "MDL-DOC-LOCKED",
+            Self::LinkDuplicate(_) => "MDL-LINK-DUPLICATE",
             Self::SecRoleNotFound(_) => "MDL-SEC-ROLE-NOT-FOUND",
             Self::IllegalTransition(_, _) => "MDL-LCS-TRANSITION",
             Self::CommentRequired => "MDL-LCS-COMMENT-REQUIRED",
@@ -165,6 +168,7 @@ impl DomainError {
             Self::SecAccountLocked(_) => 423,
             Self::SecPasswordPolicy => 400,
             Self::DocLocked(_, _) => 409,
+            Self::LinkDuplicate(_) => 409,
             Self::FileTooLarge(_) => 413,
             _ => 500,
         }

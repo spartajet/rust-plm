@@ -25,6 +25,7 @@
 | 0017 | core-sec | 0017_lockout_params.sql | sec_user 锁定列（防爆破）+ sys_param 参数中心（SYS-04 三种子） |
 | 0018 | mod-doc | 0018_doc_lock.sql | doc_lock 独占检出锁（DOC-03；到期惰性回收） |
 | 0019 | core-sec | 0019_checkout_hours.sql | checkout_hours 参数种子（跨域顺序教训：sys_param 归 core-sec 域） |
+| 0020 | core-model | 0020_obj_link.sql | obj_link 泛化关联表（DOC-12；kind 区分域——doc_part 起步） |
 
 ## Outbox payload 契约（增量13 定版）
 
@@ -117,3 +118,11 @@
 - **跨域迁移顺序教训（0018/0019 拆分）**：sys_param 表归 core-sec 域；mod-doc 0018 若 INSERT 种子会 42P01（执行序早于 core-sec）——跨表种子一律放表属主域。
 - **到期惰性回收**：查询/拦截时 sweep 过期行（无定时器）；主动提醒（IM 催办）后置。
 - **离线包/回连合并后置**（PRD DOC-03 尾段；需断点续传栈 V1.5）。
+
+## 增量27（DOC-12 对象关联）：迁移 0020
+
+**裁定**：
+- **obj_link 泛化表**：kind 区分关联域（doc_part 起步；BOM/变更/项目 kind 随域扩展同表）；UNIQUE(from,to,kind) 幂等基线。
+- **ABAC 双端越级 404**：建/删/查关联任一端越级统一 404 不泄露；反查对端行级密级过滤（admin 可关联越密级对象，低上限用户反查不见该行——admin 权限面写入+读取侧过滤的既有模式）。
+- **无环设计**：doc_part 语义 from(文档)≠to(物料) 类型域不同+同号拒绝——环不可构造；未来同类型 kind（如 part_part 借用）需引入环检测（届时裁定）。
+- **物料侧 UI 后置**：parts 列表页无详情页；反查 API 就绪（e2e 钉），UI 随物料详情页增量。

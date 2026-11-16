@@ -3,6 +3,8 @@ import { ElMessage } from "element-plus";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { extractApiError, extractBlobApiError } from "../api/http";
+import { docLinks, createLink, deleteLink, type LinkItem } from "../api/links";
+import { duplicates } from "../api/part";
 import { http } from "../api/index";
 import {
   checkinDoc,
@@ -116,6 +118,62 @@ const previewLoading = ref(false);
 const watermarkText = computed(
   () => `${auth.username} · 密级${doc.value?.object.secret_level ?? 0} · ${new Date().toISOString().slice(0, 16)}`,
 );
+
+// ==================== DOC-12 关联物料（增量27） ====================
+const partLinks = ref<LinkItem[]>([]);
+const linkDlg = ref(false);
+const linkQ = ref("");
+const linkHits = ref<{ obj_no: string; name?: string | null }[]>([]);
+const linkSearching = ref(false);
+
+async function loadLinks() {
+  try {
+    partLinks.value = await docLinks(http, objNo);
+  } catch {
+    partLinks.value = [];
+  }
+}
+
+function openLinkDlg() {
+  linkQ.value = "";
+  linkHits.value = [];
+  linkDlg.value = true;
+}
+
+async function searchPartsForLink() {
+  const q = linkQ.value.trim();
+  if (!q) return;
+  linkSearching.value = true;
+  try {
+    // 终审 C1-1：复用既有 duplicates helper（GET /parts/duplicates 返回裸数组；
+    // 原手写请求读 res.data.items 恒 undefined——关联搜索确定性空结果的根因）
+    linkHits.value = await duplicates(http, q);
+  } catch (e) {
+    ElMessage.error(extractApiError(e));
+  } finally {
+    linkSearching.value = false;
+  }
+}
+
+async function linkPart(no: string) {
+  try {
+    await createLink(http, objNo, no);
+    ElMessage.success("已关联");
+    linkDlg.value = false;
+    await loadLinks();
+  } catch (e) {
+    ElMessage.error(extractApiError(e));
+  }
+}
+
+async function unlinkPart(linkId: string) {
+  try {
+    await deleteLink(http, linkId);
+    await loadLinks();
+  } catch (e) {
+    ElMessage.error(extractApiError(e));
+  }
+}
 
 // ==================== DOC-03 检出锁（增量26） ====================
 const lock = ref<LockInfo>({ locked: false });
@@ -318,6 +376,7 @@ watch(bomMajor, () => {
 onMounted(() => {
   load();
   loadLock();
+  loadLinks();
 });
 
 async function act(action: LifecycleAction) {
@@ -620,6 +679,74 @@ function back() {
           <template #default="{ row }">
             <el-button link type="primary" size="small" data-test="bom-add-select" @click="pickHit(row)">
               选择
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
+
+    <el-card style="margin-top: 16px" data-test="links-card">
+      <template #header>
+        <div style="display: flex; align-items: center; gap: 12px">
+          <span>关联物料</span>
+          <el-button size="small" type="primary" plain data-test="link-open" @click="openLinkDlg">
+            关联物料
+          </el-button>
+        </div>
+      </template>
+      <el-table :data="partLinks" size="small" data-test="links-table">
+        <el-table-column label="物料编号" min-width="140" prop="obj_no" />
+        <el-table-column label="名称" min-width="140">
+          <template #default="{ row }">{{ row.name ?? "-" }}</template>
+        </el-table-column>
+        <el-table-column label="分类" min-width="110">
+          <template #default="{ row }">{{ row.class_name ?? "-" }}</template>
+        </el-table-column>
+        <el-table-column label="" width="90">
+          <template #default="{ row }">
+            <el-button
+              v-if="auth.canWrite"
+              link
+              type="danger"
+              size="small"
+              :data-test="`link-remove-${row.link_id}`"
+              @click="unlinkPart(row.link_id)"
+            >
+              解除
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-if="partLinks.length === 0" style="color: #909399">未关联物料</div>
+    </el-card>
+
+    <el-dialog v-model="linkDlg" title="关联物料（按名称搜索）" width="520px">
+      <div style="display: flex; gap: 8px">
+        <el-input
+          v-model="linkQ"
+          placeholder="物料名称关键词"
+          data-test="link-search"
+          clearable
+          @keyup.enter="searchPartsForLink"
+        />
+        <el-button data-test="link-search-btn" @click="searchPartsForLink">搜索</el-button>
+      </div>
+      <el-table
+        :data="linkHits"
+        size="small"
+        style="margin-top: 8px"
+        max-height="260"
+        data-test="link-results"
+        v-loading="linkSearching"
+      >
+        <el-table-column label="物料编号" min-width="140" prop="obj_no" />
+        <el-table-column label="名称" min-width="130">
+          <template #default="{ row }">{{ row.name ?? "-" }}</template>
+        </el-table-column>
+        <el-table-column label="" width="80">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" :data-test="`link-pick-${row.obj_no}`" @click="linkPart(row.obj_no)">
+              关联
             </el-button>
           </template>
         </el-table-column>

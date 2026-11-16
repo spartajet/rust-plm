@@ -4156,3 +4156,243 @@ async fn doc_checkout_lock_lifecycle_and_force() {
 
     ctx.cleanup().await;
 }
+
+// ==================== 增量27 DOC-12 对象关联 ====================
+
+#[tokio::test]
+async fn doc_part_links_bidirectional_and_abac() {
+    let ctx = TestCtx::setup("lnk", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "lnked", "lnked-pass-123", &["editor"], 0)
+        .await;
+    ctx.create_user_as_admin(&admin, "lnklow", "lnklow-pass-123", &["editor"], 0)
+        .await;
+    let ed = ctx.login_as("lnked", "lnked-pass-123").await;
+    let low = ctx.login_as("lnklow", "lnklow-pass-123").await;
+    ctx.create_user_as_admin(&admin, "lnkview", "lnkview-pass-123", &["viewer"], 0)
+        .await;
+    let view = ctx.login_as("lnkview", "lnkview-pass-123").await;
+
+    let (s, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&ed),
+            "DWG-LNK-1",
+            r#"{"name":"关联图纸"}"#,
+            Some("l.dwg"),
+            FILE.to_vec(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201);
+    let part_create = |t: &str, cls: &str, name: &str, _no_suffix: &str| {
+        send(
+            &ctx.app,
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/v1/parts")
+                .header("authorization", format!("Bearer {t}"))
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(format!(
+                    r#"{{"class_code":"{cls}","attrs":{{"name":"{name}","material":"Q235"}}}}"#
+                )))
+                .unwrap(),
+        )
+    };
+    let (s, body, _) = part_create(&ed, "CLS-ZZ", "关联支架", "a").await;
+    assert_eq!(s, 201, "{}", String::from_utf8_lossy(&body));
+    let zz_no: String = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["obj_no"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (s, body, _) = part_create(&ed, "CLS-WG", "越级螺栓", "b").await;
+    assert_eq!(s, 201);
+    let wg_no: String = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["obj_no"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let create_link = |t: &str, body: String| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/links")
+            .header("authorization", format!("Bearer {t}"))
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body))
+            .unwrap()
+    };
+    let code_of = |b: &bytes::Bytes| -> String {
+        serde_json::from_slice::<serde_json::Value>(b)
+            .ok()
+            .and_then(|v| v["code"].as_str().map(String::from))
+            .unwrap_or_default()
+    };
+
+    // ① viewer 建关联 → 403（docs:write 门控）
+    let (s, _, _) = send(
+        &ctx.app,
+        create_link(
+            &view,
+            r#"{"from_no":"DWG-LNK-1","to_no":"X","kind":"doc_part"}"#.into(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 403);
+
+    // ② 建关联 → 201；重复 → 409；自关联 → 400；kind 非法 → 400
+    let (s, _body, _) = send(
+        &ctx.app,
+        create_link(
+            &ed,
+            r#"{"from_no":"DWG-LNK-1","to_no":"X","kind":"doc_part"}"#.into(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 404, "不存在的 to 编号 404（不泄露差异——统一 404）");
+    let (s, body, _) = send(
+        &ctx.app,
+        create_link(
+            &ed,
+            format!(r#"{{"from_no":"DWG-LNK-1","to_no":"{zz_no}","kind":"doc_part"}}"#),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201, "body={}", String::from_utf8_lossy(&body));
+    let link_id: String = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (s, body, _) = send(
+        &ctx.app,
+        create_link(
+            &ed,
+            format!(r#"{{"from_no":"DWG-LNK-1","to_no":"{zz_no}","kind":"doc_part"}}"#),
+        ),
+    )
+    .await;
+    assert_eq!(s, 409);
+    assert_eq!(code_of(&body), "MDL-LINK-DUPLICATE");
+    let (s, _, _) = send(
+        &ctx.app,
+        create_link(
+            &ed,
+            r#"{"from_no":"DWG-LNK-1","to_no":"DWG-LNK-1","kind":"doc_part"}"#.into(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 400, "自关联拒（type 不同亦拒同号）");
+    let (s, _, _) = send(
+        &ctx.app,
+        create_link(
+            &ed,
+            format!(r#"{{"from_no":"DWG-LNK-1","to_no":"{zz_no}","kind":"bom_part"}}"#),
+        ),
+    )
+    .await;
+    assert_eq!(s, 400, "kind 白名单外拒");
+
+    // ③ 双向查询：文档侧见物料（分类名）；物料侧见文档
+    let (s, body) = ctx.get_authed("/api/v1/docs/DWG-LNK-1/links", &admin).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let items = v["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["obj_no"], zz_no);
+    assert_eq!(items[0]["class_name"], "自制件");
+    let (s, body) = ctx
+        .get_authed(format!("/api/v1/parts/{}/links", zz_no).as_str(), &admin)
+        .await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["items"][0]["obj_no"], "DWG-LNK-1");
+    assert_eq!(v["items"][0]["name"], "关联图纸");
+
+    // ④ ABAC 双端越级：WG 物料提密 2 → 建关联 to 越级 → 404；文档提密 → 文档侧 links 404（对 low）
+    sqlx::query("UPDATE cm_object SET secret_level = 2 WHERE obj_no = $1")
+        .bind(&wg_no)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (s, _, _) = send(
+        &ctx.app,
+        create_link(
+            &low,
+            format!(r#"{{"from_no":"DWG-LNK-1","to_no":"{wg_no}","kind":"doc_part"}}"#),
+        ),
+    )
+    .await;
+    assert_eq!(s, 404, "to 端越级建关联 404 不泄露");
+    // 反查行级过滤：文档侧 links 对 low 不含越密级 WG（已关联的）——先由 admin 关联 WG 再验
+    let (s, _, _) = send(
+        &ctx.app,
+        create_link(
+            &admin,
+            format!(r#"{{"from_no":"DWG-LNK-1","to_no":"{wg_no}","kind":"doc_part"}}"#),
+        ),
+    )
+    .await;
+    assert_eq!(
+        s, 201,
+        "admin 上限内可关联越密级物料（关联本身是 admin 权限面）"
+    );
+    let (s, body) = ctx.get_authed("/api/v1/docs/DWG-LNK-1/links", &low).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        !v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|i| i["obj_no"] == wg_no),
+        "反查行级过滤越密级物料"
+    );
+
+    // ⑤ 解除：admin 解除 ZZ 关联 → 双向消失；无此关联 404
+    let (s, _, _) = send(
+        &ctx.app,
+        axum::http::Request::builder()
+            .method("DELETE")
+            .uri(format!("/api/v1/links/{link_id}"))
+            .header("authorization", format!("Bearer {admin}"))
+            .body(axum::body::Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(s, 204);
+    let (_, body) = ctx.get_authed("/api/v1/docs/DWG-LNK-1/links", &admin).await;
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(!v["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|i| i["obj_no"] == zz_no));
+    let (s, _, _) = send(
+        &ctx.app,
+        axum::http::Request::builder()
+            .method("DELETE")
+            .uri(format!("/api/v1/links/{link_id}"))
+            .header("authorization", format!("Bearer {admin}"))
+            .body(axum::body::Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(s, 404, "重复解除 404");
+
+    // ⑥ audit：doc.link 两行（ZZ/WG）+ doc.unlink 一行
+    for _ in 0..20 {
+        let n: i64 = sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE action='doc.link'")
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
+        let m: i64 = sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE action='doc.unlink'")
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
+        if n >= 2 && m >= 1 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+
+    ctx.cleanup().await;
+}
