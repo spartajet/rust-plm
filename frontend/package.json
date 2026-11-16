@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
     "axios": "^1.7.0",
     "element-plus": "^2.8.0",
     "pinia": "^2.2.0",
