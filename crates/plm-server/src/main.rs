@@ -40,8 +40,9 @@ struct Config {
     #[serde(default)]
     search_scan_secs: u64,
     /// Demo 数据包（增量28）：PLM_DEMO_SEED=1 启动后幂等生成 ~100 人公司+全套演示数据
+    /// （Value 承载——figment Env 把纯数字解析为 u64，"1"/1/true 三态手动归一）
     #[serde(default)]
-    demo_seed: bool,
+    demo_seed: serde_json::Value,
 }
 
 impl Config {
@@ -60,7 +61,7 @@ impl Config {
             im_doc_url_template: String::new(),
             im_user_map: String::new(),
             search_scan_secs: 2,
-            demo_seed: false,
+            demo_seed: serde_json::Value::Null,
         };
         let _ = &mut defaults;
         let cfg: Config = Figment::from(Serialized::defaults(defaults))
@@ -200,7 +201,11 @@ async fn main() -> Result<()> {
     );
 
     // Demo 数据包（增量28）：PLM_DEMO_SEED=1 → 幂等生成 ~100 人公司+演示数据（幂等跳过）
-    if cfg.demo_seed {
+    let demo_on = cfg.demo_seed.as_str() == Some("1")
+        || cfg.demo_seed.as_str().map(|s| s.eq_ignore_ascii_case("true")) == Some(true)
+        || cfg.demo_seed.as_u64() == Some(1)
+        || cfg.demo_seed.as_bool() == Some(true);
+    if demo_on {
         let sctx = seed::SeedCtx {
             pool: pool.clone(),
             service: service.clone(),

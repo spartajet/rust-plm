@@ -19,6 +19,12 @@ import {
 } from "../api/sec";
 
 const users = ref<SecUser[]>([]);
+// 部门筛选（增量28 demo 数据包组织展示）
+const DEPARTMENTS = [
+  "总经办", "机械设计部", "电气设计部", "工艺部", "生产部",
+  "质量部", "采购部", "仓储物流", "销售部", "财务行政",
+];
+const deptFilter = ref("");
 const roles = ref<SecRole[]>([]);
 const total = ref(0);
 const page = ref(1);
@@ -34,6 +40,11 @@ watch(search, () => {
     load();
   }, 300);
 });
+// 部门筛选（增量28 demo 数据包；精确筛选立即生效）
+watch(deptFilter, () => {
+  page.value = 1;
+  load();
+});
 onUnmounted(() => {
   if (searchTimer) clearTimeout(searchTimer);
 });
@@ -48,7 +59,13 @@ const submitting = ref(false);
 async function load() {
   loading.value = true;
   try {
-    const res = await listUsers(http, search.value, page.value, size.value);
+    const res = await listUsers(
+      http,
+      search.value,
+      page.value,
+      size.value,
+      deptFilter.value || undefined,
+    );
     users.value = res.items;
     total.value = res.total;
     roles.value = await listRoles(http);
@@ -153,7 +170,10 @@ async function toggleRole(user: SecUser, role: string, has: boolean) {
     </div>
 
     <el-table v-loading="loading" :data="users" data-test="user-table">
-      <el-table-column prop="username" label="用户名" min-width="140" />
+      <el-table-column prop="username" label="用户名" min-width="120" />
+      <el-table-column label="部门" min-width="110">
+        <template #default="{ row }">{{ row.department || "-" }}</template>
+      </el-table-column>
       <el-table-column label="密级上限" width="100">
         <template #default="{ row }">{{ row.max_secret_level }}</template>
       </el-table-column>
