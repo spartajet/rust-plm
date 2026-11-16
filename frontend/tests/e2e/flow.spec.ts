@@ -905,3 +905,30 @@ test("user admin: department column and filter (demo org)", async ({ page }) => 
     page.locator('[data-test="user-table"] .el-table__row').first(),
   ).toContainText("机械设计部");
 });
+
+// ==================== 增量29 UI 设计系统：明暗主题切换 ====================
+
+test("theme toggle: html.dark toggles and persists across reload", async ({ page }) => {
+  await page.goto("/login");
+  await page.fill('[data-test="username"]', "admin");
+  await page.fill('[data-test="password"]', ADMIN_PW);
+  await page.click('[data-test="login-btn"]');
+  await page.waitForURL("/");
+
+  // 初始亮色 → 切暗色
+  const initialDark = await page.evaluate(() =>
+    document.documentElement.classList.contains("dark"),
+  );
+  await page.click('[data-test="theme-dark"], [data-test="theme-light"]');
+  await expect(page.locator("html.dark")).toHaveCount(initialDark ? 0 : 1);
+  // 持久化
+  await page.reload();
+  await page.waitForURL("/");
+  const afterReload = await page.evaluate(() =>
+    document.documentElement.classList.contains("dark"),
+  );
+  expect(afterReload).toBe(!initialDark);
+  // 恢复亮色（不污染其它测试的视觉假设）
+  await page.click('[data-test="theme-dark"], [data-test="theme-light"]');
+  await expect(page.locator("html.dark")).toHaveCount(initialDark ? 1 : 0);
+});

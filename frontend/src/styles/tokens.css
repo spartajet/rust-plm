@@ -1,0 +1,111 @@
+/* ============================================================
+ * RustPLM 设计系统「Industrial Slate」— 设计 tokens（增量29）
+ * 亮色 :root / 暗色 html.dark；--el-* 桥接 Element Plus 变量体系
+ * （Element dark 基座由 theme-chalk/dark/css-vars.css 提供，本文件做品牌化覆盖）
+ * ============================================================ */
+
+:root {
+  /* 品牌色 */
+  --rp-primary: #4f46e5;
+  --rp-primary-hover: #4338ca;
+  --rp-primary-light: #eef2ff;
+  --rp-accent: #ea580c;
+
+  /* 中性色（Slate 阶，亮色） */
+  --rp-bg: #f6f7fb;
+  --rp-card: #ffffff;
+  --rp-border: #e4e9f2;
+  --rp-text: #101828;
+  --rp-text-2: #475467;
+  --rp-text-3: #98a2b3;
+
+  /* 结构 */
+  --rp-sidebar-bg: #ffffff;
+  --rp-sidebar-text: #475467;
+  --rp-sidebar-active-bg: #eef2ff;
+  --rp-sidebar-active-text: #4f46e5;
+  --rp-header-bg: #ffffff;
+
+  /* 语义（跟随 Element 但锁定品牌口径） */
+  --rp-success: #16a34a;
+  --rp-warning: #d97706;
+  --rp-danger: #dc2626;
+  --rp-info: #64748b;
+
+  /* 形状/阴影 */
+  --rp-radius: 8px;
+  --rp-radius-lg: 12px;
+  --rp-shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --rp-shadow-md: 0 4px 16px rgba(16, 24, 40, 0.08);
+  --rp-shadow-hover: 0 8px 24px rgba(79, 70, 229, 0.12);
+
+  /* 字体 */
+  --rp-font:
+    system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+
+  /* ---- Element 桥接（亮色基座） ---- */
+  --el-color-primary: var(--rp-primary);
+  --el-color-primary-dark-2: var(--rp-primary-hover);
+  --el-color-primary-light-3: #6f6ceb;
+  --el-color-primary-light-5: #97a0f2;
+  --el-color-primary-light-7: #bfc5f7;
+  --el-color-primary-light-8: #d5d9fa;
+  --el-color-primary-light-9: var(--rp-primary-light);
+  --el-border-radius-base: var(--rp-radius);
+  --el-box-shadow-light: var(--rp-shadow-md);
+  --el-text-color-primary: var(--rp-text);
+  --el-text-color-regular: var(--rp-text-2);
+  --el-text-color-secondary: var(--rp-text-3);
+  --el-border-color: var(--rp-border);
+  --el-border-color-light: var(--rp-border);
+  --el-border-color-lighter: #eef1f7;
+  --el-fill-color-light: #f2f4f9;
+  --el-bg-color: var(--rp-card);
+  --el-bg-color-page: var(--rp-bg);
+}
+
+/* ---- 暗色（Element dark 基座 + Industrial Slate 暗值覆盖） ---- */
+html.dark {
+  /* 终审 M1：#6366f1（白字对比 4.47:1>3:1；#818cf8 仅 2.98:1） */
+  --rp-primary: #6366f1;
+  --rp-primary-hover: #818cf8;
+  --rp-primary-light: #1d2444;
+  --rp-accent: #f97316;
+
+  --rp-bg: #0b1220;
+  --rp-card: #111a2e;
+  --rp-border: #1e293b;
+  --rp-text: #e2e8f0;
+  --rp-text-2: #94a3b8;
+  --rp-text-3: #64748b;
+
+  --rp-sidebar-bg: #0b1220;
+  --rp-sidebar-text: #94a3b8;
+  --rp-sidebar-active-bg: #1d2444;
+  --rp-sidebar-active-text: #a5b4fc;
+  --rp-header-bg: #0e1728;
+
+  --rp-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --rp-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5);
+  --rp-shadow-hover: 0 8px 24px rgba(0, 0, 0, 0.55);
+
+  /* Element dark 桥接覆盖（压过 dark/css-vars 默认） */
+  --el-color-primary: var(--rp-primary);
+  --el-color-primary-dark-2: var(--rp-primary-hover);
+  --el-color-primary-light-3: #3d3a86;
+  --el-color-primary-light-5: #2c2a66;
+  --el-color-primary-light-7: #201f4a;
+  --el-color-primary-light-8: #1d2444;
+  --el-color-primary-light-9: #161d38;
+  --el-text-color-primary: var(--rp-text);
+  --el-text-color-regular: var(--rp-text-2);
+  --el-text-color-secondary: var(--rp-text-3);
+  --el-border-color: var(--rp-border);
+  --el-border-color-light: var(--rp-border);
+  --el-border-color-lighter: #16223a;
+  --el-fill-color-light: #16223a;
+  --el-bg-color: var(--rp-card);
+  --el-bg-color-page: var(--rp-bg);
+  --el-bg-color-overlay: #16223a;
+}

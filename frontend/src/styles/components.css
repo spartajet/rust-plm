@@ -1,0 +1,147 @@
+/* ============================================================
+ * 组件统一化（增量29）：全局覆盖 Element Plus 视觉口径——
+ * 不动组件结构与 data-test；token 驱动、亮暗自适应。
+ * ============================================================ */
+
+/* ---- 全局基底 ---- */
+body {
+  font-family: var(--rp-font);
+  background: var(--rp-bg);
+  color: var(--rp-text);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* 数据列等宽数字 */
+.el-table,
+.el-pagination,
+.el-input-number {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- 卡片 ---- */
+.el-card {
+  border-radius: var(--rp-radius-lg);
+  border: 1px solid var(--rp-border);
+  box-shadow: var(--rp-shadow-sm);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.el-card:hover {
+  box-shadow: var(--rp-shadow-md);
+}
+.el-card__header {
+  border-bottom-color: var(--rp-border);
+  font-weight: 600;
+}
+
+/* ---- 表格 ---- */
+.el-table {
+  --el-table-border-color: var(--rp-border);
+  --el-table-header-bg-color: var(--el-fill-color-light);
+  --el-table-header-text-color: var(--rp-text-2);
+  border-radius: var(--rp-radius);
+}
+.el-table th.el-table__cell {
+  font-weight: 600;
+  font-size: 13px;
+}
+.el-table .el-table__cell {
+  padding: 8px 0;
+}
+
+/* ---- 按钮 ---- */
+.el-button {
+  border-radius: var(--rp-radius);
+  font-weight: 500;
+  transition: all 0.18s ease;
+}
+.el-button--primary {
+  --el-button-hover-bg-color: var(--rp-primary-hover);
+}
+.el-button.is-link,
+.el-button.is-text {
+  cursor: pointer;
+}
+
+/* ---- 标签 ---- */
+.el-tag {
+  border-radius: 6px;
+  font-weight: 500;
+}
+
+/* ---- 对话框 ---- */
+.el-dialog {
+  border-radius: var(--rp-radius-lg);
+}
+.el-dialog__header {
+  font-weight: 600;
+  border-bottom: 1px solid var(--rp-border);
+  padding-bottom: 12px;
+  margin-right: 0;
+}
+
+/* ---- 输入/选择 ---- */
+.el-input__wrapper,
+.el-select__wrapper,
+.el-textarea__inner {
+  border-radius: var(--rp-radius);
+}
+
+/* ---- Tabs ---- */
+.el-tabs__item {
+  font-weight: 500;
+}
+.el-tabs--card > .el-tabs__header .el-tabs__item.is-active {
+  font-weight: 600;
+}
+
+/* ---- 分页 ---- */
+.el-pagination {
+  --el-pagination-button-bg-color: transparent;
+}
+
+/* ---- 滚动条细化 ---- */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--rp-border);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--rp-text-3);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---- 键盘焦点可见（无障碍） ---- */
+.el-button:focus-visible,
+.el-input__wrapper:focus-within,
+.el-select__wrapper:focus-within {
+  outline: 2px solid var(--rp-primary);
+  outline-offset: 1px;
+}
+
+/* ---- 通用页面结构（既有 .page/.toolbar 口径保留） ---- */
+.page {
+  padding: 24px;
+  max-width: 1440px;
+}
+.toolbar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* ---- reduced-motion 尊重 ---- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

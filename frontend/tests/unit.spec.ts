@@ -7,6 +7,7 @@ import { groupLabel } from "../src/api/search";
 import { buildSetLinesPayload } from "../src/api/docs";
 import { paramLabel } from "../src/api/sec";
 import { stepRoute } from "../src/api/meta";
+import { themeFromStorage } from "../src/composables/useTheme";
 
 // Review Focus #2/#1：flowUi 全状态穷举（增量8 +revise 维度；增量11 +checked 态——strict 二级）
 describe("flowUi", () => {
@@ -288,5 +289,17 @@ describe("stepRoute", () => {
   });
   it("未知键回退首页", () => {
     expect(stepRoute("x")).toBe("/");
+  });
+});
+
+// 增量29 UI 设计系统：主题持久化纯函数
+describe("themeFromStorage", () => {
+  it("dark 存储取 dark", () => {
+    expect(themeFromStorage("dark")).toBe("dark");
+  });
+  it("light/任意非法值回退 light", () => {
+    expect(themeFromStorage("light")).toBe("light");
+    expect(themeFromStorage("bogus")).toBe("light");
+    expect(themeFromStorage(null)).toBe("light");
   });
 });
