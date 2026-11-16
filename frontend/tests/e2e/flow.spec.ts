@@ -879,3 +879,29 @@ test("doc links: link a part via search dialog, unlink clears (DOC-12)", async (
   await page.locator('[data-test="links-table"] .el-table__row button:has-text("解除")').first().click();
   await expect(page.locator('[data-test="links-table"] .el-table__row')).toHaveCount(0, { timeout: 10_000 });
 });
+
+// ==================== 增量28 部门筛选（demo 数据包组织展示） ====================
+
+test("user admin: department column and filter (demo org)", async ({ page }) => {
+  await page.goto("/login");
+  await page.fill('[data-test="username"]', "admin");
+  await page.fill('[data-test="password"]', ADMIN_PW);
+  await page.click('[data-test="login-btn"]');
+  await page.waitForURL("/");
+
+  await page.goto("/admin/users");
+  // 部门下拉存在（十部门 demo 架构）
+  await expect(page.locator('[data-test="dept-filter"]')).toBeVisible({ timeout: 10_000 });
+
+  // 造 2 人 department=测试部（browser fetch 直连；department 列表 API 无写端点——SQL 不便，走建号默认''+手动 UPDATE？不可行。
+  // demo 库（PLM_DEMO_SEED=1）本身有 100 人分部门——本钉在 demo 库跑：筛选机械设计部=22 行
+  await page.click('[data-test="dept-filter"]');
+  await page.click('.el-select-dropdown__item:has-text("机械设计部")');
+  await page.waitForTimeout(600);
+  const total = await page.locator(".el-pagination__total").innerText();
+  expect(total).toContain("22");
+  // 行内部门列全为机械设计部
+  await expect(
+    page.locator('[data-test="user-table"] .el-table__row').first(),
+  ).toContainText("机械设计部");
+});

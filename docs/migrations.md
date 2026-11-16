@@ -26,6 +26,7 @@
 | 0018 | mod-doc | 0018_doc_lock.sql | doc_lock 独占检出锁（DOC-03；到期惰性回收） |
 | 0019 | core-sec | 0019_checkout_hours.sql | checkout_hours 参数种子（跨域顺序教训：sys_param 归 core-sec 域） |
 | 0020 | core-model | 0020_obj_link.sql | obj_link 泛化关联表（DOC-12；kind 区分域——doc_part 起步） |
+| 0021 | core-sec | 0021_user_department.sql | sec_user.department（员工部门展示/筛选；ORG-01 部门实体后置） |
 
 ## Outbox payload 契约（增量13 定版）
 
@@ -126,3 +127,11 @@
 - **ABAC 双端越级 404**：建/删/查关联任一端越级统一 404 不泄露；反查对端行级密级过滤（admin 可关联越密级对象，低上限用户反查不见该行——admin 权限面写入+读取侧过滤的既有模式）。
 - **无环设计**：doc_part 语义 from(文档)≠to(物料) 类型域不同+同号拒绝——环不可构造；未来同类型 kind（如 part_part 借用）需引入环检测（届时裁定）。
 - **物料侧 UI 后置**：parts 列表页无详情页；反查 API 就绪（e2e 钉），UI 随物料详情页增量。
+
+## 增量28（非标制造业 Demo 数据包）：迁移 0021
+
+**裁定**：
+- **部门用列承载而非部门实体**：ORG-01 部门表（树/主数据管理）后置；demo 与中小用户"部门=筛选维度"诉求用 department text 满足，UserAdmin 列+筛选。
+- **统一口令 hash 复用**：100 用户 argon2 逐个散列约 10s——demo 场景复用同一 PHC 串（同口令同盐）批量插入秒级；**仅 PLM_DEMO_SEED 演示环境**，生产口令策略不受影响。
+- **seed 全业务路径**：图纸/物料/BOM/生命周期全部走进程内服务（编码规则/唯一预检/闭包表/发布快照/事件/审计真实生效），仅用户批量与 obj_link 直 SQL（无副作用链）。
+- **幂等**：sys_param demo_seeded 完成标记整包跳过；用户 upsert / 对象 ObjNoDuplicate 跳过双保险。

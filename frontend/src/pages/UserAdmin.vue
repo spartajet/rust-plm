@@ -19,6 +19,12 @@ import {
 } from "../api/sec";
 
 const users = ref<SecUser[]>([]);
+// 部门筛选（增量28 demo 数据包组织展示）
+const DEPARTMENTS = [
+  "总经办", "机械设计部", "电气设计部", "工艺部", "生产部",
+  "质量部", "采购部", "仓储物流", "销售部", "财务行政",
+];
+const deptFilter = ref("");
 const roles = ref<SecRole[]>([]);
 const total = ref(0);
 const page = ref(1);
@@ -34,6 +40,11 @@ watch(search, () => {
     load();
   }, 300);
 });
+// 部门筛选（增量28 demo 数据包；精确筛选立即生效）
+watch(deptFilter, () => {
+  page.value = 1;
+  load();
+});
 onUnmounted(() => {
   if (searchTimer) clearTimeout(searchTimer);
 });
@@ -48,7 +59,13 @@ const submitting = ref(false);
 async function load() {
   loading.value = true;
   try {
-    const res = await listUsers(http, search.value, page.value, size.value);
+    const res = await listUsers(
+      http,
+      search.value,
+      page.value,
+      size.value,
+      deptFilter.value || undefined,
+    );
     users.value = res.items;
     total.value = res.total;
     roles.value = await listRoles(http);
@@ -148,12 +165,25 @@ async function toggleRole(user: SecUser, role: string, has: boolean) {
         style="width: 200px"
         data-test="user-search"
       />
+      <!-- 部门筛选（增量28 demo 数据包组织展示；终审 C1-1 补模板——script 齐全但 replace 曾静默 no-op） -->
+      <el-select
+        v-model="deptFilter"
+        placeholder="按部门筛选"
+        clearable
+        style="width: 160px"
+        data-test="dept-filter"
+      >
+        <el-option v-for="d in DEPARTMENTS" :key="d" :label="d" :value="d" />
+      </el-select>
       <el-button type="primary" data-test="open-create" @click="dlgVisible = true">新建用户</el-button>
       <el-button data-test="reload-users" @click="load">刷新</el-button>
     </div>
 
     <el-table v-loading="loading" :data="users" data-test="user-table">
-      <el-table-column prop="username" label="用户名" min-width="140" />
+      <el-table-column prop="username" label="用户名" min-width="120" />
+      <el-table-column label="部门" min-width="110">
+        <template #default="{ row }">{{ row.department || "-" }}</template>
+      </el-table-column>
       <el-table-column label="密级上限" width="100">
         <template #default="{ row }">{{ row.max_secret_level }}</template>
       </el-table-column>

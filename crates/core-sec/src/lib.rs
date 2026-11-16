@@ -7,7 +7,8 @@ pub mod service;
 
 pub use claims::Claims;
 pub use service::{
-    resolve_secret, strip_bearer, AdminBootInfo, AuthUser, SecService, SecUserSummary, TokenPair,
+    hash_password_public, resolve_secret, strip_bearer, AdminBootInfo, AuthUser, SecService,
+    SecUserSummary, TokenPair,
 };
 
 /// 多 crate 迁移链（ignore_missing，同 core-model/mod-doc 模式）

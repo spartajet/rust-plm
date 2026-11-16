@@ -7,7 +7,9 @@ use figment::{
     providers::{Env, Serialized},
     Figment,
 };
+use plm_server::seed;
 use serde::Deserialize;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -37,6 +39,10 @@ struct Config {
     /// 全文检索扫描周期秒（增量20 RPT-03 近实时；缺省 2s）
     #[serde(default)]
     search_scan_secs: u64,
+    /// Demo 数据包（增量28）：PLM_DEMO_SEED=1 启动后幂等生成 ~100 人公司+全套演示数据
+    /// （Value 承载——figment Env 把纯数字解析为 u64，"1"/1/true 三态手动归一）
+    #[serde(default)]
+    demo_seed: serde_json::Value,
 }
 
 impl Config {
@@ -55,6 +61,7 @@ impl Config {
             im_doc_url_template: String::new(),
             im_user_map: String::new(),
             search_scan_secs: 2,
+            demo_seed: serde_json::Value::Null,
         };
         let _ = &mut defaults;
         let cfg: Config = Figment::from(Serialized::defaults(defaults))
@@ -192,6 +199,42 @@ async fn main() -> Result<()> {
         pool.clone(),
         std::time::Duration::from_secs(cfg.search_scan_secs.max(1)),
     );
+
+    // Demo 数据包（增量28）：PLM_DEMO_SEED=1 → 幂等生成 ~100 人公司+演示数据（幂等跳过）
+    let demo_on = cfg.demo_seed.as_str() == Some("1")
+        || cfg
+            .demo_seed
+            .as_str()
+            .map(|s| s.eq_ignore_ascii_case("true"))
+            == Some(true)
+        || cfg.demo_seed.as_u64() == Some(1)
+        || cfg.demo_seed.as_bool() == Some(true);
+    if demo_on {
+        tracing::warn!("PLM_DEMO_SEED 已开启：将创建 100 个统一口令账号（demo-pass-123）——仅演示环境，生产严禁");
+        let sctx = seed::SeedCtx {
+            pool: pool.clone(),
+            service: service.clone(),
+            parts: parts.clone(),
+            bom: bom.clone(),
+            lifecycle: lifecycle.clone(),
+            audit: audit.clone(),
+        };
+        match seed::run_if_needed(&pool, &sctx).await {
+            Ok(Some(r)) => tracing::info!(
+                users = r.users,
+                drawings = r.drawings,
+                parts = r.parts,
+                bom_tops = r.bom_tops,
+                review = r.review,
+                released = r.released,
+                locks = r.locks,
+                links = r.links,
+                "Demo 数据包生成完成（统一口令 demo-pass-123，账号=部门缩写+序号，如 sj01）"
+            ),
+            Ok(None) => tracing::info!("Demo 数据包已存在（demo_seeded 标记）——跳过"),
+            Err(e) => tracing::warn!(error = %e, "Demo 数据包生成失败（不影响服务启动）"),
+        }
+    }
 
     // 事件外投循环（ADR-0007；1s 轮询 + 退避/死信）
     core_events::migrator()

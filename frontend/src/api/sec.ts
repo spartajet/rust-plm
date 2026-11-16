@@ -6,6 +6,8 @@ export interface SecUser {
   max_secret_level: number;
   created_at?: string | null;
   roles: string[];
+  /// 部门（增量28 demo 数据包；系统无部门实体——列承载）
+  department?: string | null;
 }
 
 export interface SecRole {
@@ -25,9 +27,11 @@ export async function listUsers(
   search?: string,
   page = 1,
   size = 50,
+  department?: string,
 ): Promise<UsersPage> {
   const q = new URLSearchParams();
   if (search?.trim()) q.set("search", search.trim());
+  if (department?.trim()) q.set("department", department.trim());
   q.set("page", String(page));
   q.set("size", String(size));
   const res = await http.get<UsersPage>(`/api/v1/sec/users?${q.toString()}`);

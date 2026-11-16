@@ -44,6 +44,8 @@ pub struct SecUserSummary {
     pub max_secret_level: i16,
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
     pub roles: serde_json::Value,
+    /// 部门（增量28 demo 数据包/组织展示；系统无部门实体——列承载）
+    pub department: String,
 }
 
 fn now() -> i64 {
@@ -331,21 +333,24 @@ impl SecService {
     pub async fn list_users(
         &self,
         search: Option<&str>,
+        department: Option<&str>,
         page: u32,
         size: u32,
     ) -> Result<(Vec<SecUserSummary>, i64)> {
         let rows: Vec<SecUserSummary> = sqlx::query_as(
-            "SELECT u.username, u.max_secret_level, u.created_at,                     COALESCE(json_agg(r.role_code ORDER BY r.role_code) FILTER (WHERE r.role_code IS NOT NULL), '[]'::json) AS roles              FROM sec_user u              LEFT JOIN sec_user_role r ON r.username = u.username              WHERE ($1::text IS NULL OR u.username ILIKE '%' || $1 || '%')              GROUP BY u.username, u.max_secret_level, u.created_at              ORDER BY u.username              LIMIT $2 OFFSET $3",
+            "SELECT u.username, u.max_secret_level, u.created_at, u.department,                      COALESCE(json_agg(r.role_code ORDER BY r.role_code) FILTER (WHERE r.role_code IS NOT NULL), '[]'::json) AS roles              FROM sec_user u              LEFT JOIN sec_user_role r ON r.username = u.username              WHERE ($1::text IS NULL OR u.username ILIKE '%' || $1 || '%')                AND ($4::text IS NULL OR u.department = $4)              GROUP BY u.username, u.max_secret_level, u.created_at, u.department              ORDER BY u.username              LIMIT $2 OFFSET $3",
         )
         .bind(search.filter(|s| !s.trim().is_empty()))
         .bind(size as i64)
         .bind(i64::from(page.saturating_sub(1)) * i64::from(size))
+        .bind(department.filter(|s| !s.trim().is_empty()))
         .fetch_all(&self.pool)
         .await?;
         let total: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM sec_user u              WHERE ($1::text IS NULL OR u.username ILIKE '%' || $1 || '%')",
+            "SELECT count(*) FROM sec_user u              WHERE ($1::text IS NULL OR u.username ILIKE '%' || $1 || '%')                AND ($2::text IS NULL OR u.department = $2)",
         )
         .bind(search.filter(|s| !s.trim().is_empty()))
+        .bind(department.filter(|s| !s.trim().is_empty()))
         .fetch_one(&self.pool)
         .await?;
         Ok((rows, total))
@@ -636,6 +641,11 @@ impl SecService {
         };
         rows.into_iter().map(|(r,)| r).collect()
     }
+}
+
+/// 公共散列（增量28 demo seed 批量建号复用同一 PHC 串——统一口令仅演示环境，台账裁定）
+pub fn hash_password_public(plain: &str) -> Result<String> {
+    hash_password(plain)
 }
 
 fn hash_password(plain: &str) -> Result<String> {
