@@ -825,3 +825,50 @@ test("checkout lock: banner blocks other editor, checkin clears (DOC-03)", async
   await page.click('[data-test="lock-force-unlock"]');
   await expect(page.locator('[data-test="lock-banner-self"]')).toHaveCount(0, { timeout: 10_000 });
 });
+
+// ==================== 增量27 DOC-12 关联物料 ====================
+
+test("doc links: link a part via search dialog, unlink clears (DOC-12)", async ({ page }) => {
+  await page.goto("/login");
+  await page.fill('[data-test="username"]', "admin");
+  await page.fill('[data-test="password"]', ADMIN_PW);
+  await page.click('[data-test="login-btn"]');
+  await page.waitForURL("/");
+
+  const NO = `DWG-FE-LNK-${Date.now()}`;
+  const PNAME = `关联垫块${Date.now()}`;
+  const setup = await page.evaluate(async ({ NO, PNAME }) => {
+    const api = (window as unknown as { E2E_API: string }).E2E_API;
+    const t = localStorage.getItem("rustplm_token") ?? "";
+    const ah = { Authorization: `Bearer ${t}` };
+    const fd = new FormData();
+    fd.append("obj_no", NO);
+    fd.append("attrs", JSON.stringify({ name: "关联主图" }));
+    fd.append("file", new File(["%LNK"], "l.dwg", { type: "application/octet-stream" }));
+    const r = await fetch(`${api}/api/v1/docs`, { method: "POST", headers: ah, body: fd });
+    if (r.status !== 201) return `doc ${r.status}`;
+    const pr = await fetch(`${api}/api/v1/parts`, {
+      method: "POST",
+      headers: { ...ah, "Content-Type": "application/json" },
+      body: JSON.stringify({ class_code: "CLS-ZZ", attrs: { name: PNAME, material: "Q235" } }),
+    });
+    return pr.status === 201 ? "ok" : `part ${pr.status}`;
+  }, { NO, PNAME });
+  expect(setup).toBe("ok");
+
+  // 详情页关联物料卡：搜索选件关联 → 行可见 → 解除 → 空态
+  await page.goto(`/docs/${NO}`);
+  await expect(page.locator('[data-test="links-card"]')).toBeVisible({ timeout: 10_000 });
+  await page.click('[data-test="link-open"]');
+  await page.fill('[data-test="link-search"]', PNAME);
+  await page.click('[data-test="link-search-btn"]');
+  await page.locator(`[data-test="link-pick-${PNAME}"]`).waitFor({ timeout: 10_000 }).catch(() => {});
+  // pick 按钮定位按 obj_no（服务端赋码）——改为按行文本定位关联按钮
+  const row = page.locator('[data-test="link-results"] .el-table__row').filter({ hasText: PNAME }).first();
+  await expect(row).toBeVisible({ timeout: 10_000 });
+  await row.locator("button").click();
+  await expect(page.locator('[data-test="links-table"] .el-table__row:has-text("WL-ZZ-")')).toBeVisible({ timeout: 10_000 });
+  // 解除
+  await page.locator('[data-test="links-table"] .el-table__row button:has-text("解除")').first().click();
+  await expect(page.locator('[data-test="links-table"] .el-table__row')).toHaveCount(0, { timeout: 10_000 });
+});
