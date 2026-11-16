@@ -5,6 +5,10 @@ import { useRoute, useRouter } from "vue-router";
 import { extractApiError, extractBlobApiError } from "../api/http";
 import { http } from "../api/index";
 import {
+  checkinDoc,
+  checkoutDoc,
+  forceUnlock,
+  getLock,
   previewDoc,
   bomExpand,
   bomLines,
@@ -21,7 +25,7 @@ import {
   type BomEditRow,
   type BomRow,
   type BomSummaryRow,
-  type DocResponse,
+  type DocResponse, type LockInfo,
   type VersionSnapshot,
   type WhereUsedAsofRow,
   type WhereUsedLiveRow,
@@ -111,6 +115,51 @@ const previewLoading = ref(false);
 // 水印（overlay 起步：用户+密级+分钟级时间；服务端内嵌水印后置——台账裁定）
 const watermarkText = computed(
   () => `${auth.username} · 密级${doc.value?.object.secret_level ?? 0} · ${new Date().toISOString().slice(0, 16)}`,
+);
+
+// ==================== DOC-03 检出锁（增量26） ====================
+const lock = ref<LockInfo>({ locked: false });
+
+async function loadLock() {
+  try {
+    lock.value = await getLock(http, objNo);
+  } catch {
+    lock.value = { locked: false }; // 非关键信息静默
+  }
+}
+
+async function doCheckout() {
+  try {
+    await checkoutDoc(http, objNo);
+    ElMessage.success("已检出（编辑权锁定）");
+    await loadLock();
+  } catch (e) {
+    ElMessage.error(extractApiError(e));
+  }
+}
+
+async function doCheckin() {
+  try {
+    await checkinDoc(http, objNo);
+    ElMessage.success("已检入");
+    await loadLock();
+  } catch (e) {
+    ElMessage.error(extractApiError(e));
+  }
+}
+
+async function doForceUnlock() {
+  try {
+    await forceUnlock(http, objNo);
+    ElMessage.success("已强制回收锁");
+    await loadLock();
+  } catch (e) {
+    ElMessage.error(extractApiError(e));
+  }
+}
+
+const lockedByOther = computed(
+  () => lock.value.locked && lock.value.by !== auth.username,
 );
 
 // 终审 M1：previewDoc 在途时导航离开——onBeforeUnmount 先行（previewState 尚空），
@@ -266,7 +315,10 @@ watch(bomMajor, () => {
   if (summaryOpen.value.includes("summary")) loadSummary();
 });
 
-onMounted(load);
+onMounted(() => {
+  load();
+  loadLock();
+});
 
 async function act(action: LifecycleAction) {
   acting.value = true;
@@ -359,7 +411,54 @@ function back() {
         >
           在线预览
         </el-button>
+        <el-button
+          v-if="!lock.locked && doc.object.state === 'working' && auth.canWrite"
+          type="warning"
+          plain
+          data-test="lock-checkout"
+          @click="doCheckout"
+        >
+          检出
+        </el-button>
+        <el-button
+          v-if="lock.locked && lock.by === auth.username"
+          type="success"
+          plain
+          data-test="lock-checkin"
+          @click="doCheckin"
+        >
+          检入
+        </el-button>
+        <el-button
+          v-if="lock.locked && auth.canManageSec"
+          type="danger"
+          plain
+          data-test="lock-force-unlock"
+          @click="doForceUnlock"
+        >
+          强制解锁
+        </el-button>
       </div>
+
+      <!-- DOC-03 锁横幅（增量26） -->
+      <el-alert
+        v-if="lockedByOther"
+        type="warning"
+        :closable="false"
+        style="margin-top: 12px"
+        data-test="lock-banner"
+      >
+        🔒 该对象已被 {{ lock.by }} 检出（至 {{ (lock.until ?? "").slice(0, 16).replace("T", " ") }}）——编辑操作被锁定
+      </el-alert>
+      <el-alert
+        v-else-if="lock.locked"
+        type="success"
+        :closable="false"
+        style="margin-top: 12px"
+        data-test="lock-banner-self"
+      >
+        ✅ 你已检出此对象（至 {{ (lock.until ?? "").slice(0, 16).replace("T", " ") }}），可独占升版
+      </el-alert>
 
       <!-- DOC-05 预览区（blob 直开 + 平铺水印 overlay） -->
       <div v-if="previewState" class="preview-wrap" data-test="preview-area">

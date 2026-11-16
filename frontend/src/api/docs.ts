@@ -264,3 +264,27 @@ export async function previewDoc(
   const ct = (res.headers?.["content-type"] as string | undefined) ?? "";
   return { blob: res.data as Blob, mime: ct.split(";")[0].trim() };
 }
+
+/// DOC-03 检入/检出锁（增量26）
+export interface LockInfo {
+  locked: boolean;
+  by?: string | null;
+  until?: string | null;
+}
+
+export async function getLock(http: AxiosInstance, objNo: string): Promise<LockInfo> {
+  const res = await http.get(`/api/v1/docs/${objNo}/lock`);
+  return res.data;
+}
+
+export async function checkoutDoc(http: AxiosInstance, objNo: string): Promise<void> {
+  await http.post(`/api/v1/docs/${objNo}/checkout`);
+}
+
+export async function checkinDoc(http: AxiosInstance, objNo: string): Promise<void> {
+  await http.post(`/api/v1/docs/${objNo}/checkin`);
+}
+
+export async function forceUnlock(http: AxiosInstance, objNo: string): Promise<void> {
+  await http.delete(`/api/v1/docs/${objNo}/lock`);
+}

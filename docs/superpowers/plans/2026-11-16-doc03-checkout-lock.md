@@ -32,3 +32,12 @@
 
 ## 验收
 - e2e 新增 ≥6 钉；后端 171+ 全绿/clippy 0/fmt 过；Vitest 36+/Playwright 16+ 两轮全绿；OpenAPI 注册四端点（快照基线同步更新——TQ-02 门禁实证首秀：契约变更走显式基线刷新）。
+
+
+---
+
+## 对账台账（执行后回填）
+
+- T1 完成（675b946 + 断言修正）：0018/0019 拆分（跨域 42P01 教训——sys_param 种子归 core-sec）；拦截面收敛 revise（update_object 未接线/upload 同号天然 409）；e2e 自身两修（viewer 403 vs editor 404 语义分流——ABAC 用同角色低密级钉/参数四行断言）；TQ-02 门禁首秀——新增 4 端点契约变更被自动拦下，基线刷新 diff 20 行显式审阅。
+- T2 完成：DocDetail 锁横幅（他人橙/本人绿）+检出/检入/强制解锁按钮；**按钮 v-if 误用 ui.revise（released 才真）致 working 态不渲染——Playwright 拦下改 state==='working'**；Playwright 钉 17×2 全绿。
+- T3 完成：README/部署文档/评审报告 DOC-03 ⬜→🟡/migrations.md 0018+0019 注册+四裁定。

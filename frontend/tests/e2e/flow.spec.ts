@@ -784,3 +784,42 @@ test("impl wizard: eight steps + starter import report (AGL-05/09)", async ({ pa
     ).toBeVisible({ timeout: 10_000 });
   }
 });
+
+// ==================== 增量26 DOC-03 检出锁 ====================
+
+test("checkout lock: banner blocks other editor, checkin clears (DOC-03)", async ({ page }) => {
+  await page.goto("/login");
+  await page.fill('[data-test="username"]', "admin");
+  await page.fill('[data-test="password"]', ADMIN_PW);
+  await page.click('[data-test="login-btn"]');
+  await page.waitForURL("/");
+
+  const NO = `DWG-FE-CKL-${Date.now()}`;
+  const setup = await page.evaluate(async (no) => {
+    const api = (window as unknown as { E2E_API: string }).E2E_API;
+    const t = localStorage.getItem("rustplm_token") ?? "";
+    const fd = new FormData();
+    fd.append("obj_no", no);
+    fd.append("attrs", JSON.stringify({ name: "锁件" }));
+    fd.append("file", new File(["%L"], "l.dwg", { type: "application/octet-stream" }));
+    const r = await fetch(`${api}/api/v1/docs`, { method: "POST", headers: { Authorization: `Bearer ${t}` }, body: fd });
+    return r.status;
+  }, NO);
+  expect(setup).toBe(201);
+
+  // admin 检出 → 自持横幅（绿）
+  await page.goto(`/docs/${NO}`);
+  await page.click('[data-test="lock-checkout"]');
+  await expect(page.locator('[data-test="lock-banner-self"]')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('[data-test="lock-checkin"]')).toBeVisible();
+
+  // 检入 → 横幅消失
+  await page.click('[data-test="lock-checkin"]');
+  await expect(page.locator('[data-test="lock-banner-self"]')).toHaveCount(0, { timeout: 10_000 });
+
+  // 再检出 → 强制解锁可用（admin 有 sec:manage）→ 横幅消失
+  await page.click('[data-test="lock-checkout"]');
+  await expect(page.locator('[data-test="lock-banner-self"]')).toBeVisible({ timeout: 10_000 });
+  await page.click('[data-test="lock-force-unlock"]');
+  await expect(page.locator('[data-test="lock-banner-self"]')).toHaveCount(0, { timeout: 10_000 });
+});

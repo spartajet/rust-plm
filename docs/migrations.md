@@ -23,6 +23,8 @@
 | 0015 | core-model | 0015_part_class.sql | cm_class 分类树 + part 类型/示例分类种子（PART-01/02） |
 | 0016 | core-events | 0016_audit_log.sql | audit_log 审计日志（SYS-01 append-only） |
 | 0017 | core-sec | 0017_lockout_params.sql | sec_user 锁定列（防爆破）+ sys_param 参数中心（SYS-04 三种子） |
+| 0018 | mod-doc | 0018_doc_lock.sql | doc_lock 独占检出锁（DOC-03；到期惰性回收） |
+| 0019 | core-sec | 0019_checkout_hours.sql | checkout_hours 参数种子（跨域顺序教训：sys_param 归 core-sec 域） |
 
 ## Outbox payload 契约（增量13 定版）
 
@@ -107,3 +109,11 @@
 - **自写结构化对比替代 oasdiff**：PRD 提名 oasdiff（go 二进制）——引入外部工具链成本高；自写覆盖破坏面主集（删端点/删 method/删 schema/删属性/删必填字段）；类型变更/响应运行时校验不在对比面（台账记）。
 - **基线随仓库**：crates/plm-server/tests/openapi-snapshot.json 进 review diff——契约变更显式可见；更新流=UPDATE_OPENAPI_SNAPSHOT=1 单测重写。
 - **注册面缺口台账（终审 I1-1）**：OpenAPI 注册 26/42 路由——docs 生命周期 7 条（submit/approve/reject/release/revise/obsolete/versions）、boms expand/where-used、im/actions、sec/users/roles/webhooks×3 等未注册（门禁不感知其删除/变更）；后续增量补 #[utoipa::path] 注解+注册后自动被同一门禁接管。
+
+## 增量26（DOC-03 检入检出锁）：迁移 0018/0019
+
+**裁定**：
+- **拦截面=revise（编辑面）**：检出锁目标是防并行编辑；submit/approve 等流程动作不拦（评审是协作行为）——upload 同号本就 ObjNoDuplicate 天然防覆盖。update_object 未接线（无路由）不在面内。
+- **跨域迁移顺序教训（0018/0019 拆分）**：sys_param 表归 core-sec 域；mod-doc 0018 若 INSERT 种子会 42P01（执行序早于 core-sec）——跨表种子一律放表属主域。
+- **到期惰性回收**：查询/拦截时 sweep 过期行（无定时器）；主动提醒（IM 催办）后置。
+- **离线包/回连合并后置**（PRD DOC-03 尾段；需断点续传栈 V1.5）。
