@@ -8,6 +8,7 @@ pub mod doc_lock;
 pub mod docs;
 pub mod im;
 pub mod infra;
+pub mod links;
 pub mod meta;
 pub mod parts;
 pub mod search;
@@ -32,6 +33,12 @@ pub fn build(state: AppState) -> Router {
             post(doc_lock::checkout_doc),
         )
         .route("/api/v1/docs/{obj_no}/checkin", post(doc_lock::checkin_doc))
+        // DOC-12 关联维护（增量27）：docs:write 同层
+        .route("/api/v1/links", post(links::create_link))
+        .route(
+            "/api/v1/links/{id}",
+            axum::routing::delete(links::delete_link),
+        )
         .route("/api/v1/parts", post(parts::create_part))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -45,6 +52,9 @@ pub fn build(state: AppState) -> Router {
         .route("/api/v1/docs/{obj_no}/preview", get(docs::preview_doc))
         // DOC-03 锁状态（增量26）：docs:read 同层
         .route("/api/v1/docs/{obj_no}/lock", get(doc_lock::get_lock))
+        // DOC-12 关联查询（增量27）：docs:read 同层
+        .route("/api/v1/docs/{obj_no}/links", get(links::doc_links))
+        .route("/api/v1/parts/{obj_no}/links", get(links::part_links))
         .route("/api/v1/docs/{obj_no}/versions", get(docs::versions_doc))
         // 物料读端点（增量17 终审 C1 修正：docs:read 门控——require_perm 回填真实密级上限）
         .route("/api/v1/parts", get(parts::list_parts))

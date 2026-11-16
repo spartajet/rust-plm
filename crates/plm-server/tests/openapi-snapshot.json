@@ -25,6 +25,9 @@
     "/api/v1/docs/batch-approve": [
       "post"
     ],
+    "/api/v1/docs/{no}/links": [
+      "get"
+    ],
     "/api/v1/docs/{obj_no}": [
       "get"
     ],
@@ -43,6 +46,12 @@
     ],
     "/api/v1/docs/{obj_no}/preview": [
       "get"
+    ],
+    "/api/v1/links": [
+      "post"
+    ],
+    "/api/v1/links/{id}": [
+      "delete"
     ],
     "/api/v1/meta/impl-checklist": [
       "get"
@@ -73,6 +82,9 @@
       "post"
     ],
     "/api/v1/parts/duplicates": [
+      "get"
+    ],
+    "/api/v1/parts/{no}/links": [
       "get"
     ],
     "/api/v1/search": [
@@ -123,6 +135,18 @@
         "hint",
         "key",
         "title"
+      ]
+    },
+    "CreateLinkReq": {
+      "required": [
+        "from_no",
+        "kind",
+        "to_no"
+      ],
+      "properties": [
+        "from_no",
+        "kind",
+        "to_no"
       ]
     },
     "CreatePartReq": {
@@ -244,6 +268,18 @@
         "child",
         "line_no",
         "qty"
+      ]
+    },
+    "LinkItem": {
+      "required": [
+        "link_id",
+        "obj_no"
+      ],
+      "properties": [
+        "class_name",
+        "link_id",
+        "name",
+        "obj_no"
       ]
     },
     "ListResponse": {
