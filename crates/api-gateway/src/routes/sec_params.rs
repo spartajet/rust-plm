@@ -21,10 +21,11 @@ pub struct SysParamDto {
 }
 
 /// 参数键值域白名单（终审基调：服务端把关，非法值 400）
-const RANGES: [(&str, i64, i64); 3] = [
+const RANGES: [(&str, i64, i64); 4] = [
     ("password_min_length", 8, 64),
     ("lock_threshold", 3, 20),
     ("lock_minutes", 1, 1440),
+    ("checkout_hours", 1, 8760), // 终审 I1-1：种子在但 PUT 白名单漏——可见不可调
 ];
 
 #[derive(Deserialize, ToSchema)]

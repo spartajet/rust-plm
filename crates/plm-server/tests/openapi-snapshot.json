@@ -28,7 +28,17 @@
     "/api/v1/docs/{obj_no}": [
       "get"
     ],
+    "/api/v1/docs/{obj_no}/checkin": [
+      "post"
+    ],
+    "/api/v1/docs/{obj_no}/checkout": [
+      "post"
+    ],
     "/api/v1/docs/{obj_no}/file": [
+      "get"
+    ],
+    "/api/v1/docs/{obj_no}/lock": [
+      "delete",
       "get"
     ],
     "/api/v1/docs/{obj_no}/preview": [
@@ -248,6 +258,16 @@
         "page",
         "size",
         "total"
+      ]
+    },
+    "LockDto": {
+      "required": [
+        "locked"
+      ],
+      "properties": [
+        "by",
+        "locked",
+        "until"
       ]
     },
     "LoginReq": {

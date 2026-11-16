@@ -3366,7 +3366,7 @@ async fn sec_params_manage_and_audit_trail() {
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     // handler 返回 Vec<SysParamDto> 直接序列化为顶层数组
     let arr = v.as_array().expect("顶层数组");
-    assert_eq!(arr.len(), 3, "三种子参数");
+    assert_eq!(arr.len(), 4, "四参数（增量26 +checkout_hours）");
     // 系统内部键过滤（增量24 checklist 借 sys_param 持久化 impl_checklist_done——不混入面板）
     sqlx::query("INSERT INTO sys_param(key, value) VALUES ('impl_checklist_done', '[\"training\"]') ON CONFLICT (key) DO NOTHING")
         .execute(&ctx.pool)
@@ -3374,8 +3374,13 @@ async fn sec_params_manage_and_audit_trail() {
         .unwrap();
     let (_, body) = ctx.get_authed("/api/v1/sec/params", &admin).await;
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(v.as_array().unwrap().len(), 3, "内部键不混入参数面板");
-    for k in ["password_min_length", "lock_threshold", "lock_minutes"] {
+    assert_eq!(v.as_array().unwrap().len(), 4, "内部键不混入参数面板");
+    for k in [
+        "password_min_length",
+        "lock_threshold",
+        "lock_minutes",
+        "checkout_hours",
+    ] {
         assert!(arr.iter().any(|r| r["key"] == k), "含 {k}");
     }
     let min_row = arr
@@ -3457,6 +3462,11 @@ async fn sec_params_manage_and_audit_trail() {
     // ⑥ 还原（避免影响同库其他断言；cleanup 后库删无谓但语义完整）
     let (s, _, _) = send(&ctx.app, put("password_min_length", 8)).await;
     assert_eq!(s, 204);
+    // 终审 I1-1 钉：checkout_hours 可 PUT（种子在但白名单漏——可见不可调）
+    let (s, _, _) = send(&ctx.app, put("checkout_hours", 48)).await;
+    assert_eq!(s, 204);
+    let (s, _, _) = send(&ctx.app, put("checkout_hours", 0)).await;
+    assert_eq!(s, 400, "越下界 1");
 
     ctx.cleanup().await;
 }
@@ -3952,6 +3962,197 @@ async fn openapi_snapshot_gate() {
             stale.join("\n")
         );
     }
+
+    ctx.cleanup().await;
+}
+
+// ==================== 增量26 DOC-03 检入/检出锁 ====================
+
+#[tokio::test]
+async fn doc_checkout_lock_lifecycle_and_force() {
+    let ctx = TestCtx::setup("ckl", 1024 * 1024).await;
+    let admin = ctx.login().await;
+    ctx.create_user_as_admin(&admin, "ckled", "ckled-pass-123", &["editor"], 0)
+        .await;
+    ctx.create_user_as_admin(&admin, "cklow", "cklow-pass-123", &["editor"], 0)
+        .await;
+    ctx.create_user_as_admin(&admin, "ckview", "ckview-pass-123", &["viewer"], 0)
+        .await;
+    let ed = ctx.login_as("ckled", "ckled-pass-123").await;
+    let other = ctx.login_as("cklow", "cklow-pass-123").await;
+    let view = ctx.login_as("ckview", "ckview-pass-123").await;
+
+    let (s, _, _) = send(
+        &ctx.app,
+        post_docs_multipart(
+            Some(&ed),
+            "DWG-CKL-1",
+            r#"{"name":"锁定件"}"#,
+            Some("l.dwg"),
+            FILE.to_vec(),
+        ),
+    )
+    .await;
+    assert_eq!(s, 201);
+
+    let checkout = |t: &str, no: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/checkout"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let checkin = |t: &str, no: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/checkin"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let code_of = |b: &bytes::Bytes| -> String {
+        serde_json::from_slice::<serde_json::Value>(b)
+            .ok()
+            .and_then(|v| v["code"].as_str().map(String::from))
+            .unwrap_or_default()
+    };
+
+    // ① viewer 检出 → 403（docs:write 门控）
+    let (s, _, _) = send(&ctx.app, checkout(&view, "DWG-CKL-1")).await;
+    assert_eq!(s, 403);
+
+    // ② editor 检出 → 200 {by,until}；锁 GET 状态
+    let (s, body, _) = send(&ctx.app, checkout(&ed, "DWG-CKL-1")).await;
+    assert_eq!(s, 200, "body={}", String::from_utf8_lossy(&body));
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["by"], "ckled");
+    assert!(v["until"].as_str().is_some());
+    let (s, body) = ctx.get_authed("/api/v1/docs/DWG-CKL-1/lock", &admin).await;
+    assert_eq!(s, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["locked"], true);
+    assert_eq!(v["by"], "ckled");
+
+    // ③ 他人再次检出 → 409 MDL-DOC-LOCKED（含持有者）
+    let (s, body, _) = send(&ctx.app, checkout(&other, "DWG-CKL-1")).await;
+    assert_eq!(s, 409);
+    assert_eq!(code_of(&body), "MDL-DOC-LOCKED");
+
+    // ④ 拦截面：他人 revise 被检出对象 → 409；检出者本人 revise（released 后）放行
+    let (s, _, _) = send(&ctx.app, checkin(&other, "DWG-CKL-1")).await;
+    assert_eq!(s, 409, "他人检入 409（持有者非本人）");
+    // 流程：ed submit+approve → released；then 他人 revise（对象被 ed 检出）→ 409
+    let sub = |t: &str, no: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/submit"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let appr = |t: &str, no: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/approve"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let (s, _, _) = send(&ctx.app, sub(&ed, "DWG-CKL-1")).await;
+    assert_eq!(s, 200, "检出者本人 submit 放行（流程面不拦）");
+    let (s, _, _) = send(&ctx.app, appr(&admin, "DWG-CKL-1")).await;
+    assert_eq!(s, 200);
+    let rev = |t: &str, no: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/docs/{no}/revise"))
+            .header("authorization", format!("Bearer {t}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let (s, body, _) = send(&ctx.app, rev(&other, "DWG-CKL-1")).await;
+    assert_eq!(s, 409, "他人 revise 被锁拦");
+    assert_eq!(code_of(&body), "MDL-DOC-LOCKED");
+    let (s, _, _) = send(&ctx.app, rev(&ed, "DWG-CKL-1")).await;
+    assert_eq!(s, 200, "检出者本人 revise 放行");
+
+    // ⑤ 非持有者检入 → 409；持有者检入 → 204；锁清
+    let (s, _, _) = send(&ctx.app, checkin(&other, "DWG-CKL-1")).await;
+    assert_eq!(s, 409);
+    let (s, _, _) = send(&ctx.app, checkin(&ed, "DWG-CKL-1")).await;
+    assert_eq!(s, 204);
+    let (_, body) = ctx.get_authed("/api/v1/docs/DWG-CKL-1/lock", &admin).await;
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["locked"], false);
+
+    // ⑥ admin 强制回收：ed 再检出 → admin DELETE → 他人可检出
+    let (s, _, _) = send(&ctx.app, checkout(&ed, "DWG-CKL-1")).await;
+    assert_eq!(s, 200);
+    let force = axum::http::Request::builder()
+        .method("DELETE")
+        .uri("/api/v1/docs/DWG-CKL-1/lock")
+        .header("authorization", format!("Bearer {admin}"))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let (s, _, _) = send(&ctx.app, force).await;
+    assert_eq!(s, 204);
+    let (s, _, _) = send(&ctx.app, checkout(&other, "DWG-CKL-1")).await;
+    assert_eq!(s, 200, "强制回收后他人可检出");
+    let (s, _, _) = send(&ctx.app, checkout(&view, "DWG-CKL-1")).await;
+    assert_eq!(s, 403, "viewer 仍 403");
+
+    // ⑦ 过期惰性回收：SQL 置 locked_until 过去 → 他人 checkout 直接成功（sweep 清理）
+    sqlx::query(
+        "UPDATE doc_lock SET locked_until = now() - interval '1 min' \
+         WHERE object_id = (SELECT id FROM cm_object WHERE obj_no='DWG-CKL-1' AND deleted_at IS NULL)",
+    )
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    let (s, _, _) = send(&ctx.app, checkout(&ed, "DWG-CKL-1")).await;
+    assert_eq!(s, 200, "过期锁惰性回收后可检出");
+
+    // ⑧ 越级 404：提密后低上限 editor（max0）lock GET/checkout 不泄露
+    // （viewer 走路由 docs:write 门控 403——ABAC 语义用同角色低密级用户钉）
+    sqlx::query("UPDATE cm_object SET secret_level = 2 WHERE obj_no = 'DWG-CKL-1'")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (s, _) = ctx.get_authed("/api/v1/docs/DWG-CKL-1/lock", &other).await;
+    assert_eq!(s, 404);
+    let (s, _, _) = send(&ctx.app, checkout(&other, "DWG-CKL-1")).await;
+    assert_eq!(s, 404);
+    // 终审 C1-1 补钉：checkin/force_unlock 两端点越级同 404（原实现缺 ABAC——409 泄露持有者）
+    let (s, _, _) = send(&ctx.app, checkin(&other, "DWG-CKL-1")).await;
+    assert_eq!(s, 404, "越级 checkin 不泄露");
+    let force_del = axum::http::Request::builder()
+        .method("DELETE")
+        .uri("/api/v1/docs/DWG-CKL-1/lock")
+        .header("authorization", format!("Bearer {other}"))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let (s, _, _) = send(&ctx.app, force_del).await;
+    // editor 无 sec:manage → 路由门控 403 先拒（handler ABAC 预检为语义一致性防御，
+    // 现实仅 admin 可达；403 亦不泄露锁信息）
+    assert_eq!(s, 403, "越级 force_unlock 权限先拒");
+
+    // ⑨ audit 三行（checkout/checkin/force-unlock）
+    let mut ok = false;
+    for _ in 0..20 {
+        let n: i64 = sqlx::query_scalar(
+            "SELECT count(DISTINCT action) FROM audit_log WHERE action IN ('doc.checkout','doc.checkin','doc.force-unlock')",
+        )
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+        if n == 3 {
+            ok = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(ok, "三类锁审计行齐");
 
     ctx.cleanup().await;
 }

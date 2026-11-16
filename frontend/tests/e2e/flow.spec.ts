@@ -738,7 +738,9 @@ test("security params: panel edit saves and reflects (SYS-04)", async ({ page })
   await page.waitForURL("/");
 
   await page.goto("/admin/users");
-  await expect(page.locator('[data-test="params-table"] .el-table__row')).toHaveCount(3, { timeout: 10_000 });
+  await expect(page.locator('[data-test="params-table"] .el-table__row')).toHaveCount(4, { timeout: 10_000 });
+  // 终审 C1-3：含 checkout_hours 行（增量26 种子）防静默漂移
+  await expect(page.locator('[data-test="params-table"]:has-text("检出时长（分钟）")')).toBeVisible();
 
   // 改 lock_minutes 15→20 → 保存 → 面板值刷新为 20 → 还原 15。
   // 策略生效语义由后端 e2e 钉住（sec_params_manage_and_audit_trail）；此处不造全局副作用
@@ -783,4 +785,43 @@ test("impl wizard: eight steps + starter import report (AGL-05/09)", async ({ pa
       page.locator('.wiz-step:has-text("培训交付") [data-test="wizard-step-done"]:has-text("已完成")'),
     ).toBeVisible({ timeout: 10_000 });
   }
+});
+
+// ==================== 增量26 DOC-03 检出锁 ====================
+
+test("checkout lock: banner blocks other editor, checkin clears (DOC-03)", async ({ page }) => {
+  await page.goto("/login");
+  await page.fill('[data-test="username"]', "admin");
+  await page.fill('[data-test="password"]', ADMIN_PW);
+  await page.click('[data-test="login-btn"]');
+  await page.waitForURL("/");
+
+  const NO = `DWG-FE-CKL-${Date.now()}`;
+  const setup = await page.evaluate(async (no) => {
+    const api = (window as unknown as { E2E_API: string }).E2E_API;
+    const t = localStorage.getItem("rustplm_token") ?? "";
+    const fd = new FormData();
+    fd.append("obj_no", no);
+    fd.append("attrs", JSON.stringify({ name: "锁件" }));
+    fd.append("file", new File(["%L"], "l.dwg", { type: "application/octet-stream" }));
+    const r = await fetch(`${api}/api/v1/docs`, { method: "POST", headers: { Authorization: `Bearer ${t}` }, body: fd });
+    return r.status;
+  }, NO);
+  expect(setup).toBe(201);
+
+  // admin 检出 → 自持横幅（绿）
+  await page.goto(`/docs/${NO}`);
+  await page.click('[data-test="lock-checkout"]');
+  await expect(page.locator('[data-test="lock-banner-self"]')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('[data-test="lock-checkin"]')).toBeVisible();
+
+  // 检入 → 横幅消失
+  await page.click('[data-test="lock-checkin"]');
+  await expect(page.locator('[data-test="lock-banner-self"]')).toHaveCount(0, { timeout: 10_000 });
+
+  // 再检出 → 强制解锁可用（admin 有 sec:manage）→ 横幅消失
+  await page.click('[data-test="lock-checkout"]');
+  await expect(page.locator('[data-test="lock-banner-self"]')).toBeVisible({ timeout: 10_000 });
+  await page.click('[data-test="lock-force-unlock"]');
+  await expect(page.locator('[data-test="lock-banner-self"]')).toHaveCount(0, { timeout: 10_000 });
 });

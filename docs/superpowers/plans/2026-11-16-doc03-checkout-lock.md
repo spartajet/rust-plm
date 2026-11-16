@@ -1,0 +1,52 @@
+# 增量26：DOC-03 检入/检出（独占检出锁）
+
+> 需求评审 P0-B（第 9 项）。PRD §6.4 DOC-03：独占检出锁+锁标记；检出超时自动回收；离线包后置。评审现状：无任何锁机制——两人可同时改同一图纸（并行编辑冲突无防护）。
+> 分支：`feat/doc-checkout-lock`；**迁移 0018（mod-doc）**：doc_lock 表；无新 crate。
+
+## 设计裁定
+
+### D1 锁模型
+- `doc_lock(object_id uuid PK REFERENCES cm_object(id), by_user uuid NOT NULL, by_name text NOT NULL, locked_at timestamptz NOT NULL DEFAULT now(), locked_until timestamptz NOT NULL)`——独占一行；到期惰性回收（检查时过期即删行视为无锁；定时清理器后置）。
+- 时长参数：sys_param `checkout_hours` 缺省 24（复用参数中心；种子 INSERT 0018）。
+- **拦截面（核心价值）**：被检出的对象——①upload_doc 同 obj_no 就地升版 → 409 `MDL-DOC-LOCKED`（检者本人放行）②transition Revise → 同 409。拦点在 mod-doc upload_staged/网关 revise 前查锁（锁检查在 mod-doc service 层——网关/IM 回调两路共用）。
+- checkin 仅解锁+留痕（文件更新走既有 revise/upload 链——锁是编辑权协调不是版本操作）。
+- 管理员强制回收：DELETE /docs/{no}/lock（sec:manage）——audit `doc.force-unlock`。
+
+### D2 端点
+- `POST /api/v1/docs/{no}/checkout`（docs:write；ABAC 越级 404）→ 200 `{by,until}`；已锁 → 409 `MDL-DOC-LOCKED`（detail 带持有者/到期）。
+- `POST /api/v1/docs/{no}/checkin`（docs:write；仅持有者，非持有者 409）→ 204。
+- `GET /api/v1/docs/{no}/lock`（docs:read）→ `{locked, by, until}` 或 `{locked:false}`（detail 已有对象信息；锁信息独立端点供前端轮询）。
+- `DELETE /api/v1/docs/{no}/lock`（sec:manage）→ 强制回收。
+- audit：doc.checkout / doc.checkin / doc.force-unlock。
+
+### D3 前端（DocDetail）
+- 锁横幅：被检出时显示「🔒 {by_name} 检出中 · 至 {until}」（本人检出=绿色可检入；他人=橙色+上传/升版按钮禁用提示）。
+- 按钮：检出（working 态+未锁）/检入（本人持有）/强制解锁（canManageSec）。
+- Playwright 钉：admin 检出→editor 视角锁横幅+上传禁用提示→admin 检入→横幅消失。
+
+## 任务（TDD）
+1. **T1** 迁移 0018+DocService 锁四方法+拦截面+四端点+OpenAPI+e2e 钉（检出/冲突 409/本人放行 upload/checkin 非持有者 409/force unlock/过期惰性/越级 404/audit 三行/拦截面 revise）。
+2. **T2** 前端锁横幅+按钮+Playwright 钉。
+3. **T3** 文档：README/部署文档端点表/评审报告 DOC-03 ⬜→🟡/migrations.md 0018 注册+裁定/台账。
+4. **T4** 终审 → 修复轮 → fmt 预检 → 合并 → SSH 推送 → CI 绿。
+
+## 验收
+- e2e 新增 ≥6 钉；后端 171+ 全绿/clippy 0/fmt 过；Vitest 36+/Playwright 16+ 两轮全绿；OpenAPI 注册四端点（快照基线同步更新——TQ-02 门禁实证首秀：契约变更走显式基线刷新）。
+
+
+---
+
+## 对账台账（执行后回填）
+
+- T1 完成（675b946 + 断言修正）：0018/0019 拆分（跨域 42P01 教训——sys_param 种子归 core-sec）；拦截面收敛 revise（update_object 未接线/upload 同号天然 409）；e2e 自身两修（viewer 403 vs editor 404 语义分流——ABAC 用同角色低密级钉/参数四行断言）；TQ-02 门禁首秀——新增 4 端点契约变更被自动拦下，基线刷新 diff 20 行显式审阅。
+- T2 完成：DocDetail 锁横幅（他人橙/本人绿）+检出/检入/强制解锁按钮；**按钮 v-if 误用 ui.revise（released 才真）致 working 态不渲染——Playwright 拦下改 state==='working'**；Playwright 钉 17×2 全绿。
+- T3 完成：README/部署文档/评审报告 DOC-03 ⬜→🟡/migrations.md 0018+0019 注册+四裁定。
+
+### 终审（FIX-THEN-MERGE）修复轮
+- **C1-1**：checkin/force_unlock 补 ABAC 越级 404（原 checkin 409 泄露持有者名+到期——与 lock GET 404 自相矛盾，reviewer 真库实证）；e2e 补两端点钉（editor force 403=sec:manage 先拒，ABAC 预检语义一致性防御注明）。
+- **C1-2**：评审报告 DOC-03 🟡 实改+回读验证（python replace 静默 no-op 第六次——同病再犯即流程红线：**文档声明一律 Edit+回读 grep**）。
+- **C1-3**：Playwright params 3→4（checkout_hours 种子击穿既有 SYS-04 钉——「17×2 全绿」声明在本分支 fresh 库不可能成立，reviewer 复跑抓出）+ checkout_hours 行断言+PARAM_LABEL。
+- **I1-1**：RANGES 补 checkout_hours PUT 白名单（1..8760）——原「可见不可调」；e2e PUT 48/越界 0 钉。
+- **M1**：checkout OpenAPI 注解 400→423（ObjStateForbidden 实际映射）。
+- **根因抓漏（环境级）**：sqlx::migrate! 增量编译**不感知新增迁移文件**——0019 在 harness 链静默未执行（探针实证 versions 缺 19；touch 强制重编后恢复）。CI 全新 checkout 不受影响；本地新增迁移后必须 `touch crates/<域>/src/lib.rs` 或 clean。M2 TOCTOU（checkout 持锁预检与 INSERT 竞态 500 形态降级）台账后置。
+- 修复轮后：后端 173/clippy 0/fmt 过/前端 36 全绿（Playwright 17 于终审实跑，本轮无前端行为变更仅钉修正，合并前复验一轮）。
