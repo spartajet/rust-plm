@@ -462,11 +462,13 @@ impl SecService {
             chrono::DateTime<chrono::Utc>,
         )>,
     > {
-        // 过滤系统内部键（增量24 终审前置实测拦截）：impl_checklist_done 借表持久化实施进度，
-        // 非可编辑安全参数——混入面板会渲染成第 4 行可编辑行
+        // 正向白名单（增量29 终审 C1-1——本修复曾两次声称完成均未真实落地：python replace
+        // no-op 一次 + 分支操作丢失一次，第三次 Read+Edit 落地）：仅暴露可编辑安全参数，
+        // 内部键（impl_checklist_done/demo_seeded 等借表持久化状态）一律不进面板
         let rows = sqlx::query_as(
             "SELECT key, value, updated_by, updated_at FROM sys_param \
-             WHERE key <> 'impl_checklist_done' ORDER BY key",
+             WHERE key IN ('password_min_length','lock_threshold','lock_minutes','checkout_hours') \
+             ORDER BY key",
         )
         .fetch_all(&self.pool)
         .await?;

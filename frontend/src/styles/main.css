@@ -1,16 +1,6 @@
+/* 既有全局最小集（增量29 起：基底/字体/页面底色由 tokens.css+components.css 的
+ * body 规则与 token 体系统一承载——本文件曾因在 tokens 之后导入覆盖 body 亮色
+ * 导致暗色画布失效（终审 C1-2），现仅保留 margin 重置与旧类名兼容） */
 body {
   margin: 0;
-  font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
-  background: #f5f7fa;
-}
-
-.page {
-  padding: 20px;
-}
-
-.toolbar {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 12px;
-  align-items: center;
 }

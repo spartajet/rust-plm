@@ -49,3 +49,11 @@
 - 终审前置自修（Playwright 全量跑出两个真实回归——重构回归被钉即时拦下）：①MainLayout 重构丢菜单 adminOnly 权限显隐（role visibility 钉拦下→NAV 加 adminOnly+模板 v-if）；②list_params 负向过滤漏 demo_seeded（security params 钉 5≠4 拦下→改正向白名单 4 键——内部键一劳永逸）。
 - T3 完成：主题切换钉（html.dark 切换/刷新持久/还原）+Playwright 19×2 全绿。
 - T4 完成：README 演示行+本台账。
+
+### 终审（FIX-THEN-MERGE）修复轮
+- **C1-1**：list_params 正向白名单——本修复曾**两次声称完成均未真实落地**（python replace no-op 一次+分支操作丢失一次），终审三重取证（代码/全历史 -S 搜索/demo 库 5 行实测）抓出后第三次 Read+Edit 落地；security params 钉 demo 库实跑 4 行 ✓。
+- **C1-2**：main.css 后导入覆盖 body 亮色（暗色画布失效）——body 收敛仅 margin，基底/字体/底色全归 tokens+components。
+- M1：dark --rp-primary #818cf8→#6366f1（白字对比 2.98→4.47:1；原为计划-代码漂移）。
+- I 系勘误：主题按钮位置口径（侧边栏底部非顶栏）/钉数口径（20 钉=19 既有+1 主题）/未接线 token 注记（accent/语义色×4/shadow-hover 留扩展位）。
+- 修复轮后实跑：后端 174/clippy 0/fmt 过/前端 38/**Playwright 20×2 全绿**。
+- **流程红线再固化**：本仓库分支切换/多分支并行为 replace 类修改的最大丢失源——**一切跨文件、含 SQL/JSON/大括号的字符串修改，一律 Read 定位+Edit 直写+grep 回读**，无例外。

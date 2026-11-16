@@ -67,8 +67,9 @@
 
 /* ---- 暗色（Element dark 基座 + Industrial Slate 暗值覆盖） ---- */
 html.dark {
-  --rp-primary: #818cf8;
-  --rp-primary-hover: #a5b4fc;
+  /* 终审 M1：#6366f1（白字对比 4.47:1>3:1；#818cf8 仅 2.98:1） */
+  --rp-primary: #6366f1;
+  --rp-primary-hover: #818cf8;
   --rp-primary-light: #1d2444;
   --rp-accent: #f97316;
 
