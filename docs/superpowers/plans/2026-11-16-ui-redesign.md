@@ -38,3 +38,14 @@
 ## 验收
 - Playwright 18×2 全绿（17 既有钉零破坏 + 1 主题钉）；Vitest 38+；vue-tsc 过；build 过
 - 明暗两套视觉完整（侧边栏/卡片/表格/登录页全部跟随）；主题选择刷新持久
+
+
+---
+
+## 对账台账（执行后回填）
+
+- T1 完成：tokens.css（双主题变量+Element 桥接）/dark css-vars 导入/useTheme（themeFromStorage 纯函数 2 Vitest 钉+initTheme+toggleTheme）/顶栏切换按钮（Moon/Sunny）。
+- T2 完成：MainLayout 系统化重构（品牌渐变徽标/图标导航/顶栏头像圈/主题切换侧边栏底部）+Login 重设计（双 radial 渐变背景+徽标卡）。
+- 终审前置自修（Playwright 全量跑出两个真实回归——重构回归被钉即时拦下）：①MainLayout 重构丢菜单 adminOnly 权限显隐（role visibility 钉拦下→NAV 加 adminOnly+模板 v-if）；②list_params 负向过滤漏 demo_seeded（security params 钉 5≠4 拦下→改正向白名单 4 键——内部键一劳永逸）。
+- T3 完成：主题切换钉（html.dark 切换/刷新持久/还原）+Playwright 19×2 全绿。
+- T4 完成：README 演示行+本台账。
