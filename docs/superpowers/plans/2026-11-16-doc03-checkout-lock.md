@@ -41,3 +41,12 @@
 - T1 完成（675b946 + 断言修正）：0018/0019 拆分（跨域 42P01 教训——sys_param 种子归 core-sec）；拦截面收敛 revise（update_object 未接线/upload 同号天然 409）；e2e 自身两修（viewer 403 vs editor 404 语义分流——ABAC 用同角色低密级钉/参数四行断言）；TQ-02 门禁首秀——新增 4 端点契约变更被自动拦下，基线刷新 diff 20 行显式审阅。
 - T2 完成：DocDetail 锁横幅（他人橙/本人绿）+检出/检入/强制解锁按钮；**按钮 v-if 误用 ui.revise（released 才真）致 working 态不渲染——Playwright 拦下改 state==='working'**；Playwright 钉 17×2 全绿。
 - T3 完成：README/部署文档/评审报告 DOC-03 ⬜→🟡/migrations.md 0018+0019 注册+四裁定。
+
+### 终审（FIX-THEN-MERGE）修复轮
+- **C1-1**：checkin/force_unlock 补 ABAC 越级 404（原 checkin 409 泄露持有者名+到期——与 lock GET 404 自相矛盾，reviewer 真库实证）；e2e 补两端点钉（editor force 403=sec:manage 先拒，ABAC 预检语义一致性防御注明）。
+- **C1-2**：评审报告 DOC-03 🟡 实改+回读验证（python replace 静默 no-op 第六次——同病再犯即流程红线：**文档声明一律 Edit+回读 grep**）。
+- **C1-3**：Playwright params 3→4（checkout_hours 种子击穿既有 SYS-04 钉——「17×2 全绿」声明在本分支 fresh 库不可能成立，reviewer 复跑抓出）+ checkout_hours 行断言+PARAM_LABEL。
+- **I1-1**：RANGES 补 checkout_hours PUT 白名单（1..8760）——原「可见不可调」；e2e PUT 48/越界 0 钉。
+- **M1**：checkout OpenAPI 注解 400→423（ObjStateForbidden 实际映射）。
+- **根因抓漏（环境级）**：sqlx::migrate! 增量编译**不感知新增迁移文件**——0019 在 harness 链静默未执行（探针实证 versions 缺 19；touch 强制重编后恢复）。CI 全新 checkout 不受影响；本地新增迁移后必须 `touch crates/<域>/src/lib.rs` 或 clean。M2 TOCTOU（checkout 持锁预检与 INSERT 竞态 500 形态降级）台账后置。
+- 修复轮后：后端 173/clippy 0/fmt 过/前端 36 全绿（Playwright 17 于终审实跑，本轮无前端行为变更仅钉修正，合并前复验一轮）。
