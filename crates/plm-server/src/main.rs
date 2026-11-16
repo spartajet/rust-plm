@@ -202,10 +202,15 @@ async fn main() -> Result<()> {
 
     // Demo 数据包（增量28）：PLM_DEMO_SEED=1 → 幂等生成 ~100 人公司+演示数据（幂等跳过）
     let demo_on = cfg.demo_seed.as_str() == Some("1")
-        || cfg.demo_seed.as_str().map(|s| s.eq_ignore_ascii_case("true")) == Some(true)
+        || cfg
+            .demo_seed
+            .as_str()
+            .map(|s| s.eq_ignore_ascii_case("true"))
+            == Some(true)
         || cfg.demo_seed.as_u64() == Some(1)
         || cfg.demo_seed.as_bool() == Some(true);
     if demo_on {
+        tracing::warn!("PLM_DEMO_SEED 已开启：将创建 100 个统一口令账号（demo-pass-123）——仅演示环境，生产严禁");
         let sctx = seed::SeedCtx {
             pool: pool.clone(),
             service: service.clone(),

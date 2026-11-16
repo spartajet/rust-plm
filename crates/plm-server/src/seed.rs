@@ -418,6 +418,17 @@ pub async fn run(ctx: &SeedCtx) -> anyhow::Result<SeedResult> {
     let mut zz_nos: Vec<String> = Vec::new();
     let mut wg_nos: Vec<String> = Vec::new();
     for name in ZZ_PARTS {
+        // 终审 I1-2：按名称查重跳过（自动赋码永不撞号——ObjNoDuplicate 死防御；
+        // 部分失败重跑防物料翻倍）
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM cm_object o JOIN cm_type t ON t.id=o.type_id              WHERE t.code='part' AND o.deleted_at IS NULL AND o.attrs->>'name' = $1",
+        )
+        .bind(name)
+        .fetch_one(pool)
+        .await?;
+        if exists > 0 {
+            continue;
+        }
         let creator = &buyers[buyer_idx % buyers.len()];
         buyer_idx += 1;
         let mut attrs = AttrMap::new();
@@ -430,6 +441,15 @@ pub async fn run(ctx: &SeedCtx) -> anyhow::Result<SeedResult> {
         }
     }
     for name in WG_PARTS {
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM cm_object o JOIN cm_type t ON t.id=o.type_id              WHERE t.code='part' AND o.deleted_at IS NULL AND o.attrs->>'name' = $1",
+        )
+        .bind(name)
+        .fetch_one(pool)
+        .await?;
+        if exists > 0 {
+            continue;
+        }
         let creator = &buyers[buyer_idx % buyers.len()];
         buyer_idx += 1;
         let mut attrs = AttrMap::new();

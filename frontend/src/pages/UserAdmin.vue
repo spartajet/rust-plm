@@ -165,6 +165,16 @@ async function toggleRole(user: SecUser, role: string, has: boolean) {
         style="width: 200px"
         data-test="user-search"
       />
+      <!-- 部门筛选（增量28 demo 数据包组织展示；终审 C1-1 补模板——script 齐全但 replace 曾静默 no-op） -->
+      <el-select
+        v-model="deptFilter"
+        placeholder="按部门筛选"
+        clearable
+        style="width: 160px"
+        data-test="dept-filter"
+      >
+        <el-option v-for="d in DEPARTMENTS" :key="d" :label="d" :value="d" />
+      </el-select>
       <el-button type="primary" data-test="open-create" @click="dlgVisible = true">新建用户</el-button>
       <el-button data-test="reload-users" @click="load">刷新</el-button>
     </div>
