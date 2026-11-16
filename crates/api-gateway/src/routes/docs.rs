@@ -488,6 +488,11 @@ async fn transition_once(
             "docs:{obj_no}"
         )));
     }
+    // DOC-03 检出锁拦截面（增量26）：Revise=编辑面动作，被他人检出 → 409
+    //（检者本人放行——assert_not_locked 内含；流程动作 submit/approve 不拦，台账裁定）
+    if matches!(ev, core_version::LifecycleEvent::Revise) {
+        st.service.assert_not_locked(obj_no, user.id).await?;
+    }
     // WF-02 审批意见必填开关（增量19）：仅约束 approve/reject（需要意见的动作）；
     // IM 回调路径在 im.rs 内不经过此函数（豁免，台账记裁定）
     let comment = comment

@@ -4,6 +4,7 @@ pub mod audit;
 pub mod auth;
 pub mod boms;
 pub mod checklist;
+pub mod doc_lock;
 pub mod docs;
 pub mod im;
 pub mod infra;
@@ -25,6 +26,12 @@ pub fn build(state: AppState) -> Router {
     // 鉴权（谁）→ 授权（能做什么）两层
     let docs_rw = Router::new()
         .route("/api/v1/docs", post(docs::upload_doc))
+        // DOC-03 检出/检入（增量26）：docs:write 同层
+        .route(
+            "/api/v1/docs/{obj_no}/checkout",
+            post(doc_lock::checkout_doc),
+        )
+        .route("/api/v1/docs/{obj_no}/checkin", post(doc_lock::checkin_doc))
         .route("/api/v1/parts", post(parts::create_part))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -36,6 +43,8 @@ pub fn build(state: AppState) -> Router {
         .route("/api/v1/docs/{obj_no}/file", get(docs::download_doc))
         // DOC-05 在线预览（增量22）：MIME 白名单 inline；SVG 排除防 XSS
         .route("/api/v1/docs/{obj_no}/preview", get(docs::preview_doc))
+        // DOC-03 锁状态（增量26）：docs:read 同层
+        .route("/api/v1/docs/{obj_no}/lock", get(doc_lock::get_lock))
         .route("/api/v1/docs/{obj_no}/versions", get(docs::versions_doc))
         // 物料读端点（增量17 终审 C1 修正：docs:read 门控——require_perm 回填真实密级上限）
         .route("/api/v1/parts", get(parts::list_parts))
@@ -126,6 +135,11 @@ pub fn build(state: AppState) -> Router {
             post(template::import_template).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
         .route("/api/v1/audit", get(audit::search_audit))
+        // DOC-03 强制回收（增量26）：sec:manage 同层
+        .route(
+            "/api/v1/docs/{obj_no}/lock",
+            delete(doc_lock::force_unlock_doc),
+        )
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             require_perm("sec", "manage"),

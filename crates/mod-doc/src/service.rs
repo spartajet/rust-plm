@@ -415,3 +415,136 @@ impl DocService {
         }
     }
 }
+
+// ==================== DOC-03 检入/检出（增量26） ====================
+
+/// 锁信息（GET /lock 端点与横幅）
+#[derive(Debug, serde::Serialize, sqlx::FromRow)]
+pub struct LockInfo {
+    pub by_name: String,
+    pub locked_until: chrono::DateTime<chrono::Utc>,
+}
+
+impl DocService {
+    /// 过期惰性回收：删 locked_until < now() 的行（检查点顺带清理；定时器后置）
+    async fn sweep_expired(&self) {
+        let _ = sqlx::query("DELETE FROM doc_lock WHERE locked_until < now()")
+            .execute(&self.pool)
+            .await;
+    }
+
+    /// 锁信息（None=无锁；过期行先清）
+    pub async fn lock_info(&self, obj_no: &str) -> Result<Option<LockInfo>> {
+        self.sweep_expired().await;
+        let row: Option<LockInfo> = sqlx::query_as(
+            "SELECT l.by_name, l.locked_until FROM doc_lock l \
+             JOIN cm_object o ON o.id = l.object_id \
+             WHERE o.obj_no = $1 AND o.deleted_at IS NULL \
+             ORDER BY o.major_ver DESC LIMIT 1",
+        )
+        .bind(obj_no)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
+    /// 检出（独占；仅 working 态；已锁 409 DocLocked——含持有者/到期）
+    pub async fn checkout(
+        &self,
+        obj_no: &str,
+        user_id: uuid::Uuid,
+        username: &str,
+        hours: i64,
+    ) -> Result<LockInfo> {
+        self.sweep_expired().await;
+        let obj = self.objects.get_latest(Self::TYPE, obj_no).await?;
+        if obj.state != "working" {
+            return Err(DomainError::ObjStateForbidden(format!(
+                "仅 working 态可检出: {obj_no} 当前 {state}",
+                state = obj.state
+            )));
+        }
+        let held: Option<LockInfo> =
+            sqlx::query_as("SELECT by_name, locked_until FROM doc_lock WHERE object_id = $1")
+                .bind(obj.id)
+                .fetch_optional(&self.pool)
+                .await?;
+        if let Some(l) = held {
+            return Err(DomainError::DocLocked(
+                l.by_name,
+                l.locked_until.to_rfc3339(),
+            ));
+        }
+        let row: LockInfo = sqlx::query_as(
+            "INSERT INTO doc_lock(object_id, by_user, by_name, locked_until) \
+             VALUES ($1, $2, $3, now() + make_interval(mins => $4::int)) \
+             RETURNING by_name, locked_until",
+        )
+        .bind(obj.id)
+        .bind(user_id)
+        .bind(username)
+        .bind(i32::try_from(hours * 60).unwrap_or(i32::MAX))
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
+    /// 检入（仅持有者；无锁 409 DocLocked 语义收敛为 BadRequest 提示）
+    pub async fn checkin(&self, obj_no: &str, user_id: uuid::Uuid) -> Result<()> {
+        self.sweep_expired().await;
+        let obj = self.objects.get_latest(Self::TYPE, obj_no).await?;
+        let n = sqlx::query("DELETE FROM doc_lock WHERE object_id = $1 AND by_user = $2")
+            .bind(obj.id)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
+        if n == 0 {
+            // 区分：无锁/他人持有——查一次给准确信息
+            let held: Option<LockInfo> =
+                sqlx::query_as("SELECT by_name, locked_until FROM doc_lock WHERE object_id = $1")
+                    .bind(obj.id)
+                    .fetch_optional(&self.pool)
+                    .await?;
+            return match held {
+                Some(l) => Err(DomainError::DocLocked(
+                    l.by_name,
+                    l.locked_until.to_rfc3339(),
+                )),
+                None => Err(DomainError::BadRequest(format!("对象未被检出: {obj_no}"))),
+            };
+        }
+        Ok(())
+    }
+
+    /// 强制回收（sec:manage；过期/任意持有者）
+    pub async fn force_unlock(&self, obj_no: &str) -> Result<bool> {
+        self.sweep_expired().await;
+        let obj = self.objects.get_latest(Self::TYPE, obj_no).await?;
+        let n = sqlx::query("DELETE FROM doc_lock WHERE object_id = $1")
+            .bind(obj.id)
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
+        Ok(n > 0)
+    }
+
+    /// 拦截面（终审焦点）：被检出对象禁止 revise（编辑面；检者本人放行）。
+    /// 过期行惰性清理后视为无锁。
+    pub async fn assert_not_locked(&self, obj_no: &str, user_id: uuid::Uuid) -> Result<()> {
+        self.sweep_expired().await;
+        let obj = self.objects.get_latest(Self::TYPE, obj_no).await?;
+        let held: Option<(uuid::Uuid, String, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
+            "SELECT by_user, by_name, locked_until FROM doc_lock WHERE object_id = $1",
+        )
+        .bind(obj.id)
+        .fetch_optional(&self.pool)
+        .await?;
+        if let Some((by, name, until)) = held {
+            if by != user_id {
+                return Err(DomainError::DocLocked(name, until.to_rfc3339()));
+            }
+        }
+        Ok(())
+    }
+}

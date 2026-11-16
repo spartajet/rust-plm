@@ -90,6 +90,10 @@ pub fn bom_release_hook(bom: Arc<core_bom::BomStore>) -> Arc<dyn core_version::R
         crate::routes::template::import_template,
         crate::routes::checklist::get_checklist,
         crate::routes::checklist::complete_step,
+        crate::routes::doc_lock::get_lock,
+        crate::routes::doc_lock::checkout_doc,
+        crate::routes::doc_lock::checkin_doc,
+        crate::routes::doc_lock::force_unlock_doc,
     ),
     components(schemas(
         crate::routes::docs::FileInfoDto,
@@ -110,6 +114,7 @@ pub fn bom_release_hook(bom: Arc<core_bom::BomStore>) -> Arc<dyn core_version::R
         crate::routes::template::ImportReq,
         crate::routes::template::ImportResult,
         crate::routes::checklist::ChecklistStep,
+        crate::routes::doc_lock::LockDto,
         crate::routes::infra::Healthz,
         crate::routes::auth::LoginReq,
         crate::routes::auth::RefreshReq,
