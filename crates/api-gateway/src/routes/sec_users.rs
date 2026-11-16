@@ -146,6 +146,8 @@ pub async fn list_roles(
 pub struct UsersQuery {
     /// username 模糊过滤（增量13）
     search: Option<String>,
+    /// 部门精确筛选（增量28 demo 数据包）
+    department: Option<String>,
     page: Option<u32>,
     size: Option<u32>,
 }
@@ -165,7 +167,7 @@ pub async fn list_users(
     let size = q.size.unwrap_or(50).clamp(1, 200);
     let (items, total) = st
         .sec
-        .list_users(q.search.as_deref(), page, size)
+        .list_users(q.search.as_deref(), q.department.as_deref(), page, size)
         .await
         .map_err(|e| ApiError::new(e, &tid.0))?;
     Ok(Json(serde_json::json!({
