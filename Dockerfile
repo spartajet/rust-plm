@@ -26,6 +26,7 @@ RUN mkdir -p crates/core-model/src crates/core-files/src crates/mod-doc/src \
  && for d in core-model core-files mod-doc core-sec core-version core-events core-bom core-im mod-part core-search api-gateway; \
       do echo "" > crates/$d/src/lib.rs; done \
  && echo "fn main(){}" > crates/plm-server/src/main.rs \
+ && echo "" > crates/plm-server/src/lib.rs \
  && echo "" > spikes/metadata-spike/src/main.rs && echo "" > spikes/bom-spike/src/main.rs \
  && cargo build --release -p plm-server
 
