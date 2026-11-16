@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "RustPLM 服务端装配：配置/迁移链/优雅停机"
 
+[lib]
+name = "plm_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "plm-server"
 path = "src/main.rs"

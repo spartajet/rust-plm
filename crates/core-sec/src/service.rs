@@ -643,6 +643,11 @@ impl SecService {
     }
 }
 
+/// 公共散列（增量28 demo seed 批量建号复用同一 PHC 串——统一口令仅演示环境，台账裁定）
+pub fn hash_password_public(plain: &str) -> Result<String> {
+    hash_password(plain)
+}
+
 fn hash_password(plain: &str) -> Result<String> {
     let salt = SaltString::generate(&mut OsRng);
     Ok(Argon2::default()

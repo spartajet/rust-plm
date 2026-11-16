@@ -23,6 +23,20 @@ pub struct TestCtx {
     pub pool: PgPool,
     /// 全文检索句柄（增量20）：e2e 显式 rebuild/scan 驱动近实时路径（扫描器线程不进测试）
     pub search: Arc<core_search::SearchService>,
+    /// Demo seed 句柄（增量28）：SeedCtx 直连进程内服务
+    // 双向 dead_code 豁免：demo_seed binary 只用 demo_*/login_post，e2e binary 只用其余
+    #[allow(dead_code)]
+    pub demo_service: Arc<DocService>,
+    #[allow(dead_code)]
+    pub demo_parts: Arc<mod_part::PartService>,
+    #[allow(dead_code)]
+    pub demo_bom: Arc<core_bom::BomStore>,
+    #[allow(dead_code)]
+    pub demo_lifecycle: Arc<LifecycleStore>,
+    #[allow(dead_code)]
+    pub demo_audit: Arc<core_events::AuditService>,
+    #[allow(dead_code)]
+    pub admin_password: &'static str,
     db: String,
     admin_url: String,
 }
@@ -146,6 +160,12 @@ impl TestCtx {
             pool.clone(),
             Some(api_gateway::bom_release_hook(bom.clone())),
         ));
+        // Demo seed 句柄（增量28）：AppState move 前留副本
+        let demo_service = service.clone();
+        let demo_parts = parts.clone();
+        let demo_bom = bom.clone();
+        let demo_lifecycle = lifecycle.clone();
+        let demo_audit = audit.clone();
         let app = api_gateway::router(AppState {
             registry: registry.clone(),
             service,
@@ -175,6 +195,12 @@ impl TestCtx {
             admin_url,
             pool,
             search: search_handle,
+            demo_service,
+            demo_parts,
+            demo_bom,
+            demo_lifecycle,
+            demo_audit,
+            admin_password: TEST_ADMIN_PASSWORD,
         }
     }
 
@@ -200,6 +226,27 @@ impl TestCtx {
             .unwrap();
         let (status, b, _) = send(&self.app, req).await;
         assert_eq!(status, 201, "建号必须成功: {}", String::from_utf8_lossy(&b));
+    }
+
+    /// 原始登录（状态码+body——demo seed 登录语义钉）
+    #[allow(dead_code)]
+    pub async fn login_post(&self, username: &str, password: &str) -> (u16, bytes::Bytes) {
+        let req = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/login")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(format!(
+                r#"{{"username":"{username}","password":"{password}"}}"#
+            )))
+            .unwrap();
+        let (status, body, _) = send(&self.app, req).await;
+        (status, body)
+    }
+
+    /// admin token 快捷
+    #[allow(dead_code)]
+    pub async fn admin_login(&self) -> String {
+        self.login_as("admin", TEST_ADMIN_PASSWORD).await
     }
 
     /// 以任意账号登录
